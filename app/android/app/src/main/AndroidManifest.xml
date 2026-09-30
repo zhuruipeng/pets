@@ -20,10 +20,21 @@
          单独授权本应用，代码里会检测并引导（见 MainActivity）。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
+    <!-- 备份规则：把 flutter_secure_storage 的密文排除在外。
+         密文能备份走、解开它的 Keystore 密钥不能（不可导出），
+         不排除的话用户换新手机还原备份后必然解不开 —— 表现是「掉登录」，
+         严重时是启动即抛异常。
+         这里**没有**用 android:allowBackup="false" 一刀切：那会把
+         sqflite 数据库和照片一起挡在备份外，用户换机是真丢数据。
+         详细取舍与文件名来源见 res/xml/backup_rules.xml 的注释。
+         ⚠️ 两个属性都要写：Android 12+ 只读 dataExtractionRules，
+         12 以下只读 fullBackupContent。 -->
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

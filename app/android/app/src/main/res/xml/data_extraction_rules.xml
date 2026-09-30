@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12 起的备份/迁移规则。与 backup_rules.xml 成对存在 ——
+  这一份管 Android 12+，那一份管 11 及以下，原因见那边的注释。
+
+  cloud-backup   = Google Drive 自动备份（换机、重装后还原）
+  device-transfer = 手机对手机的搬家（系统直连传输）
+
+  两个都要排：device-transfer 是「把密文原样搬过去」，
+  密钥同样不跟着走，到了新机上一样解不开。留着它只会让用户在新手机上
+  先看到一次「掉登录」，不如一开始就干净地要求重新登录一次。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+    </device-transfer>
+</data-extraction-rules>

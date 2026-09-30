@@ -25,6 +25,11 @@ dependencies:
   # 本地数据库（本地优先，sqflite + 手写 DDL）
   sqflite: ^2.3.3
   sqlite3_flutter_libs: ^0.5.24
+  # sqflite 的纯接口包，**显式声明**是因为 lib 里有代码直接引它：
+  # SyncEngine 只要 Database / ConflictAlgorithm 这两个类型，不要 Flutter 实现。
+  # 少了这一条它会通过 sqflite 传递依赖被解析到，但那样属于「用了没声明的依赖」，
+  # 上游哪天改依赖树就会突然编译不过。
+  sqflite_common: ^2.5.13
 
   # 定位与地图（海外渲染底图，国内不渲染，见 region.dart）
   geolocator: ^12.0.0
@@ -48,6 +53,25 @@ dependencies:
   # 版本号不能在 Dart 侧硬编码 —— 那份数字和 pubspec 里的 version 是两处，
   # 迟早对不上。
   package_info_plus: ^8.0.0
+
+  # 登录令牌的落盘（M6 收口）：Android Keystore / iOS Keychain。
+  # 令牌不再躺在 SQLite 的 sync_meta 里明文放着，见 lib/data/sync/token_store.dart。
+  #
+  # ⚠️ 装了这个包就要同时做两件事，漏掉任何一件都会在真机上出问题：
+  #   1. 把插件的密文从**云备份里排除** —— 备份会把密文搬到新手机，
+  #      但解开它的 Keystore 密钥不可导出、不会跟着走，新机上解密必失败。
+  #      见 android/app/src/main/res/xml/{backup_rules,data_extraction_rules}.xml，
+  #      两份都要有：Android 12+ 只读后者，12 以下只读前者。
+  #   2. **minSdk ≥ 23**（插件 v10 起换成自己实现的密码学，要求 API 23）。
+  #      本项目用的是 flutter.minSdkVersion，本机实测为 24，满足。
+  #      将来若有人把它调低，构建会直接失败，不会静默降级成弱加密。
+  #
+  # ⚠️ **不要升到 11.x**：11 起依赖 win32 ^6，而本项目的 share_plus 10 依赖
+  # win32 ^5，pub 会直接解不出来（已实测报 version solving failed）。
+  # 10.x 已经是我们需要的那个版本 —— 它正是把旧的 Jetpack Security
+  # （encryptedSharedPreferences）换成自实现 RSA-OAEP + AES-GCM 的那一版，
+  # 11.x 新增的是生物识别增强，本 App 用不到。
+  flutter_secure_storage: ^10.3.4
 
 dev_dependencies:
   flutter_test:

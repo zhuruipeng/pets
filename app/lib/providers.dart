@@ -17,6 +17,7 @@ import 'data/repositories/record_repository.dart';
 import 'data/repositories/reminder_repository.dart';
 import 'data/repositories/user_repository.dart';
 import 'data/repositories/walk_repository.dart';
+import 'data/sync/secure_token_store.dart';
 import 'data/sync/sync_api.dart';
 import 'data/sync/sync_engine.dart';
 import 'data/sync/unified_api.dart';
@@ -57,7 +58,15 @@ final notificationServiceProvider =
 final userRepositoryProvider =
     Provider<UserRepository>((ref) => UserRepository());
 
-final syncEngineProvider = Provider<SyncEngine>((ref) => SyncEngine());
+// 数据库连接与密钥库都由这里注入，而不是让 SyncEngine 自己去够 ——
+// 那会让引擎文件拖进 Flutter 插件依赖，从此只能用 flutter test 验（本机跑不动）。
+// 详见 SyncEngine 构造函数的注释。
+final syncEngineProvider = Provider<SyncEngine>(
+  (ref) => SyncEngine(
+    dbProvider: () => AppDatabase.instance.db,
+    tokenStore: SecureTokenStore(),
+  ),
+);
 
 final syncApiProvider = Provider<SyncApi>((ref) => SyncApi());
 

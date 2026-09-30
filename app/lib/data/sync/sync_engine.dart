@@ -12,11 +12,17 @@ library;
 
 import 'dart:convert';
 
-import 'package:sqflite/sqflite.dart';
+// 注意这里引的是**接口包**（sqflite_common），不是 package:sqflite。
+// 后者会把 Flutter 的 dart:ui 拖进 import 图，本文件就再也不能用
+// `dart tool/verify_token_migration.dart` 单独跑起来了 ——
+// 而本机 `flutter test` 跑不动（非提权必撞命名管道 231），
+// 那样这段策略代码就只能靠肉眼审。类型是同一个（sqflite 直接 re-export 它），
+// 所以 providers 里传 sqflite 的 Database 进来完全兼容。
+import 'package:sqflite_common/sqlite_api.dart';
 import 'package:uuid/uuid.dart';
 
-import '../db/app_database.dart';
 import 'sync_api.dart';
+import 'token_store.dart';
 
 /// 哪些表参与同步。与 schema.dart 的 kSyncedTables 一致 ——
 /// 那边决定「谁产生变更」，这边决定「谁能被应用」。
@@ -58,12 +64,39 @@ class SyncReport {
 enum SyncPhase { idle, syncing, offline, notLoggedIn, error }
 
 class SyncEngine {
-  SyncEngine({SyncApi? api, Database Function()? dbProvider})
-      : _api = api ?? SyncApi(),
-        _dbProvider = dbProvider ?? (() => AppDatabase.instance.db);
+  /// [dbProvider] 与 [tokenStore] 都**必填、不给默认值**，这是有意的。
+  ///
+  /// 它们的默认值只能写成 `() => AppDatabase.instance.db` 与
+  /// `SecureTokenStore()`，那是两个 Flutter 插件（path_provider、
+  /// flutter_secure_storage），一旦写进本文件，引擎就再也没法用
+  /// `dart tool/xxx.dart` 单独跑起来了 —— 而本机 `flutter test` 跑不动
+  /// （非提权必撞命名管道 231），等于把这段策略代码变成只能靠肉眼审。
+  ///
+  /// 现在由调用方（providers.dart）注入，本文件保持纯 Dart，
+  /// 见 tool/verify_token_migration.dart。
+  SyncEngine({
+    required Database Function() dbProvider,
+    required TokenStore tokenStore,
+    SyncApi? api,
+  })  : _api = api ?? SyncApi(),
+        _dbProvider = dbProvider,
+        _tokens = tokenStore;
 
   final SyncApi _api;
   final Database Function() _dbProvider;
+
+  /// 令牌不去 SQLite，走系统密钥库。理由见 token_store.dart 的文件头。
+  ///
+  /// 可注入是为了测试 —— 平台通道在 `flutter test` 里不存在。
+  final TokenStore _tokens;
+
+  /// 老版本把令牌明文存在这个 key 下。**已废弃**，只在迁移时读一次。
+  static const String _legacyTokenKey = 'token';
+
+  /// 令牌的内存缓存。读一次要过一次平台通道（跨进程），
+  /// 而设置页刷新一次就可能连问好几遍。
+  bool _tokenLoaded = false;
+  String? _cachedToken;
 
   static const _uuid = Uuid();
 
@@ -110,11 +143,58 @@ class SyncEngine {
   }
 
   Future<bool> isLoggedIn() async {
-    final token = await _meta('token');
-    return token != null && token.isNotEmpty;
+    final t = await _readToken();
+    return t != null && t.isNotEmpty;
   }
 
-  Future<String?> token() => _meta('token');
+  /// 当前令牌。没有就是没登录。
+  Future<String?> token() => _readToken();
+
+  // ---- 令牌的读写 ----
+  //
+  // 令牌放在系统密钥库（Android Keystore / iOS Keychain），**不在 sync_meta 里**。
+  // 老版本存在库里，所以第一次读要做一次搬迁，见 [_migrateLegacyToken]。
+
+  Future<String?> _readToken() async {
+    if (_tokenLoaded) return _cachedToken;
+    var value = await _tokens.read();
+    if (value == null) value = await _migrateLegacyToken();
+    _cachedToken = value;
+    _tokenLoaded = true;
+    return value;
+  }
+
+  /// 把老版本留在 `sync_meta.token` 里的明文令牌搬进密钥库。
+  ///
+  /// 只在密钥库为空时才会走到这儿，所以「密钥库已有令牌」的正常路径上
+  /// 它根本不执行 —— 也就没有每次启动都查一次库的开销。
+  ///
+  /// 搬完**必须删掉库里那一行**：不删等于明文一直留着，白搬一趟。
+  Future<String?> _migrateLegacyToken() async {
+    final legacy = await _meta(_legacyTokenKey);
+    if (legacy == null || legacy.isEmpty) return null;
+    try {
+      await _tokens.write(legacy);
+    } catch (_) {
+      // 搬不动就先用着，**不删库里的行**（下次启动再试）。
+      // 这里把「迁不过去」和「把用户踢下线」放在一起比：明文本来就在哪儿躺着，
+      // 早一刻删掉它不会让情况变好，但用户会莫名其妙掉一次登录。
+      return legacy;
+    }
+    await _setMeta(_legacyTokenKey, null);
+    return legacy;
+  }
+
+  /// 清掉令牌（登出、或服务端说令牌失效）。
+  ///
+  /// 顺手也清一次废弃的 `sync_meta.token` —— 迁移失败过的机器上，
+  /// 那行明文会留在库里，只清密钥库的话，下次启动又会把它迁回来。
+  Future<void> _clearToken() async {
+    await _tokens.clear();
+    await _setMeta(_legacyTokenKey, null);
+    _cachedToken = null;
+    _tokenLoaded = true;
+  }
 
   Future<DateTime?> lastSyncAt() async {
     final raw = await _meta('last_sync_at');
@@ -131,24 +211,38 @@ class SyncEngine {
 
   // ---------------------------------------------------------------- 登录态
 
+  /// 保存登录态。
+  ///
+  /// **先落令牌再写账号元数据**，顺序不能反：令牌写进密钥库可能失败
+  /// （会抛 [TokenStoreException]），那时元数据要是已经写下去了，
+  /// 库里就留下「有 account_id、没有可用令牌」的半截状态，
+  /// 下次启动会以「未登录但有账号」的样子出现。
   Future<void> saveSession(AuthSession session, {required String accountRegion}) async {
-    await _setMeta('token', session.token);
+    await _tokens.write(session.token);
+    _cachedToken = session.token;
+    _tokenLoaded = true;
+    // 顺手再清一次废弃的明文行。**不能省**：如果这台机器当初迁移失败过，
+    // 密钥库里没值、库里留着一条明文；用户现在重新登录，密钥库有了值，
+    // 那条明文就再也不会被读、也就永远删不掉了 —— 等于明文一直躺在库里。
+    await _setMeta(_legacyTokenKey, null);
     await _setMeta('account_id', session.user.id);
     await _setMeta('account_region', accountRegion);
   }
 
   Future<void> signOut() async {
-    final t = await token();
+    final t = await _readToken();
     if (t != null) {
       try {
         await _api.logout(t);
       } catch (_) {
         // 服务端不可达也要允许本地退出 —— 否则用户被卡在登录态里出不来。
+        // 本地清干净后，万一服务端那份令牌还活着，它也只是个用不到的孤儿：
+        // 客户端手里没有它了。
       }
     }
     // 只清登录态，**不动 outbox 与 last_seq**：
     // 下次登录同一个账号能接着推，不用从头再来。
-    await _setMeta('token', null);
+    await _clearToken();
   }
 
   // ---------------------------------------------------------------- 同步
@@ -171,7 +265,7 @@ class SyncEngine {
       } on SyncApiException catch (e) {
         // token 失效：清掉，让 UI 回到「未登录」。这不是错误，是正常状态。
         if (e.isUnauthorized) {
-          await _setMeta('token', null);
+          await _clearToken();
           return SyncReport(pushed: pushed, pulled: 0, rejected: rejected, error: e);
         }
         rethrow;

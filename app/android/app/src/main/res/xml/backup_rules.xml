@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 及以下的自动备份规则。Android 12 起系统改读
+  res/xml/data_extraction_rules.xml —— **两份必须同时存在且语义一致**：
+  少一份，那半个系统版本上就是「全都备份」，而问题的表现（装完新机
+  一打开就掉登录）跟这份文件看起来毫无关系，极难往回查。
+
+  为什么单排这两个 SharedPreferences：
+  登录令牌由 flutter_secure_storage 存成 AES-GCM 密文，外加一个被
+  Android Keystore 包裹的密钥。密文文件可以备份走，**Keystore 里的密钥不能**
+  （它被设计成不可导出）。于是新手机上解出来的只有一堆解不开的字节。
+  实测插件默认的 prefs 文件名（flutter_secure_storage v11 的
+  FlutterSecureStorageConfig.java）：
+
+    DEFAULT_PREF_NAME          = "FlutterSecureStorage"       ← 密文
+    "FlutterSecureKeyStorage"                                 ← 被包裹的密钥
+
+  ⚠️ 只排这两个文件，**不是整个 sharedpref 域**：通知排期也存在
+  SharedPreferences 里（flutter_local_notifications），全排掉等于用户换手机后
+  所有已排期的提醒都不再响，而 DB 里的 reminders 还在 —— 这种「数据在、
+  提醒不来」的错最难被当成 bug 报上来。
+
+  插件将来若改了 prefs 名，这份名单会失效；失效的后果被
+  SecureTokenStore.read() 兜住了：读不出来就当未登录，引导重登，
+  不会崩。所以这里写错不是灾难，但值得在升级插件后复核一次。
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+</full-backup-content>
