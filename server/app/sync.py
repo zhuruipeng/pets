@@ -26,7 +26,7 @@ from .changes import (
     resolve_role,
 )
 from .db import get_session
-from .models import Member, SyncChange, User
+from .models import Member, Pet, SyncChange, User
 from .sync_logic import is_newer, now_ms, role_can, visible_to
 
 router = APIRouter(tags=["sync"])
@@ -94,6 +94,76 @@ def _rejected(change: PushChangeIn, result: str) -> dict:
     return {"table": change.table, "row_id": change.row_id, "result": result}
 
 
+# pets 实体表需要哪些列。落实体表时按这份白名单从 payload 里取，
+# 而不是 `Pet(**payload)` 全量透传：客户端 schema 会演进（现在已有
+# 服务端没有的 `tier` 列），透传会让一个新增字段直接把同步炸成 500。
+_PET_ENTITY_COLUMNS = frozenset(
+    {
+        "name",
+        "species",
+        "breed",
+        "gender",
+        "birthday",
+        "birthday_estimated",
+        "adopt_date",
+        "avatar_url",
+        "weight_baseline",
+        "neutered",
+        "chip_no",
+        "color",
+        "allergy",
+        "note",
+        "personality",
+        "archived_at",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    }
+)
+
+
+def _ensure_pet_row(session: Session, payload: dict[str, Any]) -> None:
+    """幂等地把一只宠物落进 pets 实体表。
+
+    为什么要有这一步：members 等实体表带 `pet_id → pets.id` 的外键，
+    但同步只往 sync_changes 写快照、不落实体表（客户端走本地 SQLite，
+    宠物创建后不调 /pets REST）。于是引导 owner 成员行时，外键指向的
+    pets 行还不存在，直接炸 ForeignKeyViolation。这里在需要时先把
+    pets 实体行补上，重复推不重复插。
+
+    为什么「只在有更完整/更新的快照时才更新」：宠物名、生日这些字段
+    可能被后来的同步改掉，实体表不能一直停留在首次落的那一版，否则
+    list_pets / get_pet 这些 REST 接口返回的是陈旧档案。
+    """
+    pet_id = payload.get("id")
+    if not pet_id:
+        return
+    # id 单独用 pet_id 传，不放进 values —— payload 里也带 id，白名单含 id
+    # 会让 Pet(id=..., **values) 出现重复关键字参数。
+    values = {k: v for k, v in payload.items() if k in _PET_ENTITY_COLUMNS}
+    # created_by / created_at / updated_at 是实体表必填列，快照若缺就用
+    # 安全的兜底：created_by 取 payload 里已存在的、时间取 updated_at 或 0。
+    existing = session.get(Pet, pet_id)
+    if existing is None:
+        row = Pet(id=pet_id, **values)
+        # 快照里可能没有这些时间列（异常/旧客户端），兜成不抛错的最小值。
+        if row.created_at is None:
+            row.created_at = int(values.get("updated_at") or 0)
+        if row.updated_at is None:
+            row.updated_at = int(values.get("updated_at") or 0)
+        if row.created_by is None:
+            row.created_by = ""
+        session.add(row)
+    else:
+        # 已有实体行：仅当本次快照确实更新才覆盖，避免旧数据回写。
+        incoming_ts = values.get("updated_at")
+        if incoming_ts is not None and incoming_ts >= (existing.updated_at or 0):
+            for k, v in values.items():
+                setattr(existing, k, v)
+    session.flush()
+
+
 def _bootstrap_owner_if_needed(
     session: Session, change: PushChangeIn, user: User
 ) -> None:
@@ -121,6 +191,9 @@ def _bootstrap_owner_if_needed(
         return
 
     now = now_ms()
+    # 先落实体表 pets：owner 的 members 行带 pet_id 外键，pets 实体行不存在
+    # 就直接 ForeignKeyViolation（首台设备建宠物时必然触发）。
+    _ensure_pet_row(session, change.payload)
     owner = Member(
         pet_id=pet_id,
         user_id=user.id,

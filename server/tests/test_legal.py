@@ -196,6 +196,9 @@ def test_mounting_app_does_not_crash():
     """
     from app.main import app
 
-    paths = {getattr(r, "path", None) for r in app.routes}
+    # 用 openapi() 拿路由表，而不是遍历 app.routes 取 path：
+    # FastAPI 0.142+ 用 _IncludedRouter 懒加载嵌套路由，app.routes 里这些
+    # include_router 出来的项 path 是 None，直接 getattr 会漏掉 /api/v1/*。
+    paths = set(app.openapi()["paths"].keys())
     assert "/legal/{slug}" in paths
     assert "/api/v1/auth/unified" in paths
