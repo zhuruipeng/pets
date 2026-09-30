@@ -1,0 +1,34 @@
+# 换行符与二进制策略 —— 显式钉死，不依赖各人机器上的 core.autocrlf。
+#
+# 为什么需要这个文件：本机 core.autocrlf=true，新写的 .sh 一旦在 Windows 上
+# 被 checkout/克隆出来就会变成 CRLF。带 CRLF 的 shell 脚本传到 Linux 上必然报
+#
+#     bash: ./01-postgres-bootstrap.sh: /usr/bin/env bash^M: bad interpreter
+#
+# 或者更隐蔽：每行命令末尾多一个 \r，变量里混进不可见字符。这类故障只在部署
+# 那一刻暴露，而报错信息指向解释器、完全不提换行符，排查方向会被带偏很久。
+# deploy/ 下的脚本是**只在 Linux 上执行**的，所以必须锁 LF。
+
+*.sh   text eol=lf
+
+# 本项目的 .ps1 一直在 LF 下工作（release.ps1 带 UTF-8 BOM + LF，已实测通过），
+# 别让 autocrlf 把它们转成 CRLF —— 那会产生整篇无意义的 diff。
+*.ps1  text eol=lf
+
+# 源码与配置统一 LF
+*.dart text eol=lf
+*.py   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+
+# 二进制资源不做任何转换
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.ico      binary
+*.jks      binary
+*.keystore binary
+*.apk      binary
+*.aab      binary
