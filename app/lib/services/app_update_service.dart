@@ -29,8 +29,12 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/region.dart';
 
-/// 服务端版本清单。放一个静态 JSON 就够，不需要后端改代码 ——
-/// 发版时只改这个文件，不用重新部署服务。
+/// 服务端版本清单。
+///
+/// 由**服务端接口**生成（`/app/version.json`，值来自服务端环境变量），
+/// 不是客户端里的静态文件 —— 中国区与海外区是两个独立部署，静态文件
+/// 极容易只改了一边；改成接口之后，发新版只需改环境变量并重启服务，
+/// 不必为了改一句更新说明重新出包。详见 `docs/自动更新-发布流程.md`。
 class UpdateManifest {
   const UpdateManifest({
     required this.version,
@@ -205,8 +209,34 @@ class AppUpdateService {
       await sink.close();
     }
 
-    if (received == 0) throw const HttpException('下载到的文件是空的');
+    if (!isDownloadComplete(received, total)) {
+      throw HttpException(
+        received <= 0
+            ? '下载到的文件是空的'
+            : '下载不完整：$received / ${total ?? "?"} 字节',
+      );
+    }
     return dest.path;
+  }
+
+  /// 下载到的字节数与服务端声明的长度是否一致。
+  ///
+  /// 为什么必须查这个：APK 有 60 MB，在移动网络下被截断是常事
+  /// （切 Wi-Fi/蜂窝、信号掉、中间代理提前收尾）。而这类中断**不一定**让
+  /// `await for` 抛异常 —— 连接被"正常"关闭时，HTTP 层会认为响应读完了，
+  /// 于是我们拿到一个残缺文件、把它交给系统安装器，用户看到的是
+  /// 「解析包时出现问题」或「应用未安装」，**完全猜不到是下载没下完**。
+  /// 有 Content-Length 却不拿它比对，等于把唯一能识别这件事的线索扔了。
+  ///
+  /// total 拿不到（服务端没给 Content-Length，或值非法）时**不判失败**：
+  /// 宁可放过一次可疑的下载，也不要因为拿不到长度就把正常下载全判成失败。
+  ///
+  /// 公开而不是私有：这是「要不要把 60 MB 交给安装器」的最后一道闸，
+  /// 必须能单测，而 download() 本身要碰网络与平台目录、在单测里跑不动。
+  static bool isDownloadComplete(int received, int? total) {
+    if (received <= 0) return false;
+    if (total == null || total <= 0) return true;
+    return received == total;
   }
 
   /// 交给原生侧拉起安装器。返回 false 表示系统不允许安装未知来源应用，
