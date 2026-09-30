@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  发一次新版：抬 build 号 → 出包 → 回读产物核对 → 打印服务端要改的环境变量。
+  发一次新版：抬版本号（build + patch）→ 出包 → 回读产物核对 → 打印服务端要改的环境变量。
 
 .DESCRIPTION
   为什么把这四件事绑成一条命令：
@@ -18,21 +18,26 @@
        立刻失败（说明有别的东西改了版本，或构建没跑成）。
     3. 把服务端那 5 个环境变量按可直接粘贴的格式打出来。
 
-  为什么默认只抬 build、不动版本名：
-  客户端比对**只用 build**（Android versionCode），版本名只是给人看的。
-  每次发版把 0.1.0 也一起 +1，版本名会膨胀得很快（0.1.37 这种毫无信息量）。
-  到了阶段节点想改版本名时，用 -VersionName 显式指定。
+  版本号怎么走：
+  客户端更新比对**只用 build**（Android versionCode），版本名（x.y.z）是给人看的。
+  默认每次出包 **build +1 且 patch +1**（0.1.0 → 0.1.1），让版本名也自然往前涨，
+  不会再「一直是 0.1.0」。要只抬 build 不动名，加 -NoBumpName；要精确指定
+  版本名（如 0.2.0 这种节点），用 -VersionName。
 
 .EXAMPLE
-  # 出 cn 包并把 build 抬到 +2
+  # 出 cn 包：build +1、版本名 patch +1（0.1.0 → 0.1.1）
   .\tool\release.ps1 -Region cn -Notes "修复体重曲线在某些机型不显示"
+
+.EXAMPLE
+  # 只抬 build、版本名保持 0.1.0 不动
+  .\tool\release.ps1 -Region cn -NoBumpName
 
 .EXAMPLE
   # 上一轮构建失败了，复用已经抬好的号重跑（不再抬一次）
   .\tool\release.ps1 -Region cn -NoBump
 
 .EXAMPLE
-  # 到 0.2.0 这个节点，版本名和 build 一起抬
+  # 到 0.2.0 这个节点，版本名显式指定、build 一起抬
   .\tool\release.ps1 -Region intl -AppBundle -VersionName 0.2.0
 
 .NOTES
@@ -51,12 +56,16 @@ param(
     # APK 的 HTTPS 直链。给了就一并写进要打印的 APP_APK_URL。
     [string]$ApkUrl = '',
 
-    # 显式指定版本名（如 0.2.0）。不给就保持原样，只抬 build。
+    # 显式指定版本名（如 0.2.0）。不给就自动抬 patch 号（0.1.0 → 0.1.1）。
     [string]$VersionName = '',
 
     # 不再抬 build，用当前 pubspec 里的号出包。
     # 上一轮构建失败后用这个，免得号一直被抬走。
     [switch]$NoBump,
+
+    # 只抬 build、不自动抬版本名（patch 号）。给想严格保持 x.y.0 的人用；
+    # 默认会自动 patch +1，所以「一直是 0.1.0」不会再发生。
+    [switch]$NoBumpName,
 
     # 只算一遍「会变成什么版本」，不写 pubspec、不构建。
     # 想确认抬号逻辑对不对、或只想拿那几行环境变量时用。
@@ -191,8 +200,12 @@ if ($VersionName -ne '') {
         exit 1
     }
     $newName = $VersionName
-} else {
+} elseif ($NoBump -or $NoBumpName) {
+    # 复用当前版本名（-NoBump 复用号、-NoBumpName 只抬 build 不抬名）。
     $newName = $name
+} else {
+    # 默认自动抬 patch：0.1.0 → 0.1.1。解决「每次出包版本名一直 0.1.0」。
+    $newName = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
 }
 
 $newRaw = "$newName+$newBuild"

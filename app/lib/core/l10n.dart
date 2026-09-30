@@ -520,6 +520,24 @@ class L {
     'members.invites.accept': '接受',
     'members.invites.accepted': '已接受，正在同步',
     'members.me': '我',
+
+    // ---- 密码登录 ----
+    'auth.password': '密码',
+    'auth.passwordHint': '至少 6 位',
+    'auth.passwordRequired': '请输入密码',
+    'auth.passwordTooShort': '密码至少 6 位',
+    'auth.switchToCode': '用验证码登录',
+    'auth.switchToPassword': '用密码登录',
+    'auth.forgotPassword': '忘记密码？用验证码登录，登录后可重设',
+    'auth.passwordFailed': '手机号或密码不对',
+    'auth.setPassword.title': '设个密码，下次免短信',
+    'auth.setPassword.hint': '以后就能用「手机号 + 密码」直接登录，不用再等验证码。',
+    'auth.setPassword.placeholder': '输入密码',
+    'auth.setPassword.confirm': '确认密码',
+    'auth.setPassword.mismatch': '两次输入的密码不一致',
+    'auth.setPassword.skip': '先跳过',
+    'auth.setPassword.save': '保存',
+    'auth.setPassword.done': '密码已设置',
   };
 
   static const Map<String, String> _en = {
@@ -999,5 +1017,23 @@ class L {
     'members.invites.accept': 'Accept',
     'members.invites.accepted': 'Accepted, syncing',
     'members.me': 'Me',
+
+    // ---- password login ----
+    'auth.password': 'Password',
+    'auth.passwordHint': 'At least 6 characters',
+    'auth.passwordRequired': 'Enter your password',
+    'auth.passwordTooShort': 'Password must be at least 6 characters',
+    'auth.switchToCode': 'Use a code instead',
+    'auth.switchToPassword': 'Use password',
+    'auth.forgotPassword': 'Forgot password? Sign in with a code, then reset it.',
+    'auth.passwordFailed': 'Incorrect phone/email or password',
+    'auth.setPassword.title': 'Set a password',
+    'auth.setPassword.hint': 'Next time sign in with your phone and password, no code needed.',
+    'auth.setPassword.placeholder': 'Enter password',
+    'auth.setPassword.confirm': 'Confirm password',
+    'auth.setPassword.mismatch': 'Passwords do not match',
+    'auth.setPassword.skip': 'Skip for now',
+    'auth.setPassword.save': 'Save',
+    'auth.setPassword.done': 'Password set',
   };
 }

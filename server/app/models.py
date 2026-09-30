@@ -48,6 +48,9 @@ class User(Base):
     # 好友之间互相填同一个微信号是正常情况，不该拦。
     wechat = Column(String(64), nullable=True)
     contact_note = Column(Text, nullable=True)
+    # 密码哈希（bcrypt）。可空：老用户 / 只走短信验证码登录的用户没有密码。
+    # 永远只存哈希、不存明文；明文只在设密码请求体里短暂出现一次。
+    password_hash = Column(Text, nullable=True)
     # 数据分区标记。注册时按 region 写入，之后不迁移。
     region = Column(String(8), nullable=False, default="intl")
     created_at = Column(BigInteger, nullable=False)

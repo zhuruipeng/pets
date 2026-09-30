@@ -1,11 +1,12 @@
-/// 登录（M6）：手机号或邮箱 + 验证码。
+/// 登录：默认「手机号/邮箱 + 密码」，验证码作为兜底。
 ///
-/// 为什么不设密码：**验证码登录是更低成本的一条路**。宠物 App 的使用频率是
-/// 「想起来才开」，密码一定会被忘。短信/邮件通道本来就要接（投递提醒也用得上），
-/// 再加一套密码体系等于多一份要维护、要找回、要防撞库的东西。
+/// 为什么密码为主：老板实测「每次登录都要等短信」太烦，改为密码登录为主，
+/// 验证码保留给「忘记密码 / 没设过密码」的兜底路径。密码是宠物域本地凭据，
+/// 与官网统一账号无关（官网本身没有密码）。
 ///
-/// 顺序上有讲究：登录成功后在 [AppActions.login] 里**先过户本地数据、
-/// 再存会话、最后同步**。顺序错了会把本地已有的宠物挂到占位用户名下推上去。
+/// 顺序上有讲究：登录成功后在 [AppActions.login] / [AppActions.loginWithPassword]
+/// 里**先过户本地数据、再存会话、最后同步**。顺序错了会把本地已有的宠物
+/// 挂到占位用户名下推上去。
 library;
 
 import 'dart:async';
@@ -38,12 +39,18 @@ class _AuthSheet extends ConsumerStatefulWidget {
 class _AuthSheetState extends ConsumerState<_AuthSheet> {
   final TextEditingController _target = TextEditingController();
   final TextEditingController _code = TextEditingController();
+  final TextEditingController _password = TextEditingController();
 
   String _channel = 'sms';
+
+  /// 'password'（默认）或 'code'。
+  String _mode = 'password';
+
   bool _sending = false;
   bool _submitting = false;
   String? _targetError;
   String? _codeError;
+  String? _passwordError;
   String? _devCode;
 
   /// 重发倒计时。服务端也有限流（60 秒），这里只是别让用户白点。
@@ -55,6 +62,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
     _timer?.cancel();
     _target.dispose();
     _code.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -117,12 +125,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                   ),
                   const SizedBox(height: AppSpace.gapL),
 
-                  // 通道切换：手机号 / 邮箱。
-                  //
-                  // 中国区走统一账号，只有手机号 —— 官网没有邮箱登录，
-                  // 留着邮箱选项等于给用户一条注定失败的路。整行都不显示
-                  // （只摆一个「手机号」chip 是纯噪音），换成一句说明，
-                  // 否则用户会以为界面少了点什么。
+                  // 通道切换：手机号 / 邮箱（仅 intl 区显示，cn 只有手机号）。
                   if (_channels.length > 1) ...[
                     Row(
                       children: [
@@ -155,6 +158,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                     const SizedBox(height: AppSpace.gapM),
                   ],
 
+                  // 账号输入：手机号 / 邮箱。
                   TextField(
                     controller: _target,
                     keyboardType: _channel == 'sms'
@@ -171,15 +175,20 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                             : Icons.mail_outline,
                         size: 18,
                       ),
-                      suffixIcon: TextButton(
-                        onPressed: (_sending || _cooldown > 0) ? null : _sendCode,
-                        child: Text(
-                          _cooldown > 0
-                              ? L.tp('auth.resendIn', {'n': _cooldown})
-                              : L.t('auth.sendCode'),
-                          style: const TextStyle(fontSize: 12.5),
-                        ),
-                      ),
+                      // 验证码模式下，账号框右侧挂「获取验证码」。
+                      suffixIcon: _mode == 'code'
+                          ? TextButton(
+                              onPressed: (_sending || _cooldown > 0)
+                                  ? null
+                                  : _sendCode,
+                              child: Text(
+                                _cooldown > 0
+                                    ? L.tp('auth.resendIn', {'n': _cooldown})
+                                    : L.t('auth.sendCode'),
+                                style: const TextStyle(fontSize: 12.5),
+                              ),
+                            )
+                          : null,
                     ),
                   ),
 
@@ -203,19 +212,56 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                   ],
 
                   const SizedBox(height: AppSpace.gapM),
-                  TextField(
-                    controller: _code,
-                    keyboardType: TextInputType.number,
-                    maxLength: 6,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: InputDecoration(
-                      labelText: L.t('auth.code'),
-                      hintText: L.t('auth.codeHint'),
-                      errorText: _codeError,
-                      counterText: '',
-                      prefixIcon: const Icon(Icons.password_rounded, size: 18),
+
+                  if (_mode == 'code')
+                    // 验证码输入框。
+                    TextField(
+                      controller: _code,
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: InputDecoration(
+                        labelText: L.t('auth.code'),
+                        hintText: L.t('auth.codeHint'),
+                        errorText: _codeError,
+                        counterText: '',
+                        prefixIcon:
+                            const Icon(Icons.password_rounded, size: 18),
+                      ),
+                    )
+                  else ...[
+                    // 密码输入框。
+                    TextField(
+                      controller: _password,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: L.t('auth.password'),
+                        hintText: L.t('auth.passwordHint'),
+                        errorText: _passwordError,
+                        prefixIcon: const Icon(Icons.lock_outline, size: 18),
+                      ),
+                      onSubmitted: (_) => _submit(),
                     ),
-                  ),
+                    const SizedBox(height: AppSpace.gapS),
+                    // 忘记密码 → 切验证码兜底。
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () => setState(() => _mode = 'code'),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size(0, 28),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text(
+                          L.t('auth.forgotPassword'),
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: AppSpace.gapL),
                   SizedBox(
@@ -235,6 +281,27 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                               ),
                             )
                           : Text(L.t('auth.submit')),
+                    ),
+                  ),
+
+                  const SizedBox(height: AppSpace.gapS),
+                  // 主登录方式切换：密码 ⇄ 验证码。
+                  Center(
+                    child: TextButton(
+                      onPressed: _submitting
+                          ? null
+                          : () => setState(() {
+                                _mode =
+                                    _mode == 'password' ? 'code' : 'password';
+                                _passwordError = null;
+                                _codeError = null;
+                              }),
+                      child: Text(
+                        _mode == 'password'
+                            ? L.t('auth.switchToCode')
+                            : L.t('auth.switchToPassword'),
+                        style: const TextStyle(fontSize: 13),
+                      ),
                     ),
                   ),
                 ],
@@ -307,6 +374,38 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
     final target = _validatedTarget();
     if (target == null) return;
 
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    if (_mode == 'password') {
+      // 密码登录。
+      final password = _password.text;
+      if (password.length < 6) {
+        setState(() => _passwordError = L.t('auth.passwordTooShort'));
+        return;
+      }
+      setState(() {
+        _passwordError = null;
+        _submitting = true;
+      });
+      try {
+        await ref.read(appActionsProvider).loginWithPassword(
+              channel: _channel,
+              target: target,
+              password: password,
+            );
+        if (!mounted) return;
+        navigator.pop();
+        messenger.showSnackBar(SnackBar(content: Text(L.t('sync.done'))));
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _submitting = false);
+        messenger.showSnackBar(SnackBar(content: Text(_friendly(e))));
+      }
+      return;
+    }
+
+    // 验证码登录。
     final code = _code.text.trim();
     if (code.length != 6) {
       setState(() => _codeError = L.t('auth.codeRequired'));
@@ -317,8 +416,6 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
       _submitting = true;
     });
 
-    final messenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
     try {
       await ref.read(appActionsProvider).login(
             channel: _channel,
@@ -326,13 +423,160 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
             code: code,
           );
       if (!mounted) return;
+      // 先引导设密码（盖在登录 sheet 上，context 始终有效），引导关闭后
+      // 再一起关掉登录 sheet，避免 pop 之后 context 失效。
+      final shouldSet = await _promptSetPassword();
+      if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(SnackBar(content: Text(L.t('sync.done'))));
+      if (shouldSet) {
+        messenger.showSnackBar(SnackBar(content: Text(L.t('auth.setPassword.done'))));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _submitting = false);
       messenger.showSnackBar(SnackBar(content: Text(_friendly(e))));
     }
+  }
+
+  /// 验证码登录成功后，引导设一个密码（下次就能密码登录）。可跳过。
+  /// 返回是否成功设置了密码。
+  Future<bool> _promptSetPassword() async {
+    final actions = ref.read(appActionsProvider);
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetCtx) {
+        var saving = false;
+        String? error;
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) => Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.page,
+                  AppSpace.gapL,
+                  AppSpace.page,
+                  AppSpace.gapXl,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      L.t('auth.setPassword.title'),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpace.gapS),
+                    Text(
+                      L.t('auth.setPassword.hint'),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.6,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpace.gapL),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: L.t('auth.setPassword.placeholder'),
+                        errorText: error,
+                        prefixIcon:
+                            const Icon(Icons.lock_outline, size: 18),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpace.gapM),
+                    TextField(
+                      controller: confirmController,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: L.t('auth.setPassword.confirm'),
+                        prefixIcon:
+                            const Icon(Icons.lock_outline, size: 18),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpace.gapL),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                final p = passwordController.text;
+                                final c = confirmController.text;
+                                if (p.length < 6) {
+                                  setSheetState(() =>
+                                      error = L.t('auth.passwordTooShort'));
+                                  return;
+                                }
+                                if (p != c) {
+                                  setSheetState(() =>
+                                      error = L.t('auth.setPassword.mismatch'));
+                                  return;
+                                }
+                                setSheetState(() {
+                                  saving = true;
+                                  error = null;
+                                });
+                                try {
+                                  await actions.setPassword(p);
+                                  if (!ctx.mounted) return;
+                                  Navigator.of(ctx).pop(true);
+                                } catch (_) {
+                                  if (!ctx.mounted) return;
+                                  setSheetState(() {
+                                    saving = false;
+                                    error = L.t('auth.failed');
+                                  });
+                                }
+                              },
+                        child: saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(L.t('auth.setPassword.save')),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpace.gapS),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: saving
+                            ? null
+                            : () => Navigator.of(ctx).pop(false),
+                        child: Text(L.t('auth.setPassword.skip')),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    passwordController.dispose();
+    confirmController.dispose();
+    return saved ?? false;
   }
 
   /// 把服务端的错误翻成人话。约定见 docs/同步协议.md 5.1。
@@ -342,6 +586,10 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
     if (raw.contains('code mismatch')) return L.isZh ? '验证码不对' : 'Wrong code';
     if (raw.contains('too many')) return L.isZh ? '尝试太多次，重新获取' : 'Too many attempts';
     if (raw.contains('429')) return L.isZh ? '请求太频繁，等一会儿再试' : 'Too many requests';
+    if (raw.contains('invalid phone/email or password') ||
+        raw.contains('401')) {
+      return L.t('auth.passwordFailed');
+    }
     return L.t('auth.failed');
   }
 }

@@ -690,6 +690,32 @@ class AppActions {
           );
     }
 
+    return _finishLogin(session);
+  }
+
+  /// 密码登录。直接走宠物服务端 `/auth/password/login`，与官网统一账号无关
+  /// （官网没有密码）。cn/intl 两区都可用。
+  Future<LocalUser> loginWithPassword({
+    required String channel,
+    required String target,
+    required String password,
+  }) async {
+    final engine = ref.read(syncEngineProvider);
+    final session = await ref.read(syncApiProvider).passwordLogin(
+          channel: channel,
+          target: target,
+          password: password,
+          deviceId: await engine.deviceId(),
+        );
+    return _finishLogin(session);
+  }
+
+  /// 拿到会话之后的统一收尾：过户本地数据 → 存会话 → 刷新依赖 → 同步。
+  ///
+  /// 验证码登录与密码登录共用这一段，保证两条路径的落地行为完全一致。
+  Future<LocalUser> _finishLogin(AuthSession session) async {
+    final engine = ref.read(syncEngineProvider);
+
     await _users.adoptAccount(
       accountId: session.user.id,
       region: session.user.region ?? AppRegion.current.name,
@@ -708,6 +734,16 @@ class AppActions {
     await ref.read(syncControllerProvider.notifier).runSync();
 
     return (await _users.current())!;
+  }
+
+  /// 设置登录密码（需已登录）。首次验证码登录后引导调用。
+  Future<void> setPassword(String password) async {
+    final token = await ref.read(syncEngineProvider).token();
+    if (token == null) throw StateError('未登录');
+    await ref.read(syncApiProvider).setPassword(
+          token: token,
+          password: password,
+        );
   }
 
   Future<void> logout() async {

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -55,6 +56,20 @@ class CodeVerifyIn(BaseModel):
     device_id: str | None = Field(default=None, max_length=64)
 
 
+class PasswordSetIn(BaseModel):
+    # 6~72：6 是最低可接受强度；72 是 bcrypt 的单次输入上限（超过的部分被
+    # 截断，等于允许两个不同密码「看起来都登录成功」，所以显式拦住）。
+    password: str = Field(min_length=6, max_length=72)
+
+
+class PasswordLoginIn(BaseModel):
+    # 手机号走统一账号（cn 区）或本地账号；邮箱是 intl 区兜底。
+    channel: str = Field(pattern="^(sms|email)$")
+    target: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=72)
+    device_id: str | None = Field(default=None, max_length=64)
+
+
 class ProfilePatchIn(BaseModel):
     # 全部可选：PATCH 的语义是「只改传上来的字段」，
     # 用 exclude_unset 区分「没传」和「传了 null」。
@@ -83,6 +98,44 @@ def user_out(user: User) -> dict:
         "created_at": user.created_at,
         "updated_at": user.updated_at,
     }
+
+
+def hash_password(plain: str) -> str:
+    """把明文密码哈希成可入库的串。只存哈希，明文不入库。"""
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+
+
+def verify_password(plain: str, hashed: str | None) -> bool:
+    """校验明文密码是否匹配。hashed 为空（没设过密码）时直接 False。"""
+    if not hashed:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("ascii"))
+    except ValueError:
+        # 库里存的不是合法 bcrypt 串（脏数据），当不匹配处理，别让接口崩。
+        return False
+
+
+def _issue_token(
+    session: Session, user: User, device_id: str | None, settings: Settings
+) -> dict:
+    """给 user 签发一个新令牌，返回与 verify_code 一致的响应体。"""
+    now = now_ms()
+    raw_token = new_token()
+    expires_at = now + settings.token_ttl_days * 24 * 60 * 60 * 1000
+    session.add(
+        AuthToken(
+            token=hash_token(raw_token),
+            user_id=user.id,
+            device_id=device_id,
+            created_at=now,
+            expires_at=expires_at,
+        )
+    )
+    session.commit()
+    session.refresh(user)
+    # 明文令牌只在这里出现一次；库里存的是哈希，之后谁（包括我们）都取不回来。
+    return {"token": raw_token, "user": user_out(user), "expires_at": expires_at}
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -291,6 +344,51 @@ def verify_code(
 
     # 明文令牌只在这里出现一次；库里存的是哈希，之后谁（包括我们）都取不回来。
     return {"token": raw_token, "user": user_out(user), "expires_at": expires_at}
+
+
+@router.post("/auth/password/set")
+def set_password(
+    payload: PasswordSetIn,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    """设置或更换登录密码（需已登录）。
+
+    登录后才允许设密码：首次验证码登录后客户端弹「设个密码下次免短信」。
+    已设过的再调就是改密码。明文只在请求体里出现一次，入库前就哈希。
+    """
+    user.password_hash = hash_password(payload.password)
+    user.updated_at = now_ms()
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/auth/password/login")
+def password_login(
+    payload: PasswordLoginIn,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """手机号/邮箱 + 密码登录，通过则签发令牌。
+
+    安全口径：查无此号、该号没设过密码、密码不对，三种情况**返回同一个错误**
+    （401 + 同一句 detail）。不区分这三种，等于不告诉试探者「这个号到底
+    注册过没有」「它有没有设密码」——每多泄露一点都方便撞库。
+    """
+    target = normalize_target(payload.channel, payload.target)
+    if not target:
+        raise HTTPException(status_code=400, detail="invalid target")
+
+    if payload.channel == "sms":
+        user = session.execute(select(User).where(User.phone == target)).scalars().first()
+    else:
+        user = session.execute(select(User).where(User.email == target)).scalars().first()
+
+    # 统一错误：不区分「号不存在」与「密码错」，也不透露是否设过密码。
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="invalid phone/email or password")
+
+    return _issue_token(session, user, payload.device_id, settings)
 
 
 @router.post("/auth/logout")

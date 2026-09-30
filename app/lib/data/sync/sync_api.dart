@@ -271,6 +271,32 @@ class SyncApi {
     return _sessionFrom(j);
   }
 
+  /// 手机号/邮箱 + 密码登录。密码是宠物域本地凭据，与官网统一账号无关：
+  /// 官网本身没有密码（也是短信/微信登录），所以密码登录直接走宠物服务端
+  /// 自己的 `/auth/password/login`，不经过官网换票。
+  Future<AuthSession> passwordLogin({
+    required String channel,
+    required String target,
+    required String password,
+    required String deviceId,
+  }) async {
+    final j = await _post('/auth/password/login', {
+      'channel': channel,
+      'target': target,
+      'password': password,
+      'device_id': deviceId,
+    });
+    return _sessionFrom(j);
+  }
+
+  /// 设置或更换登录密码（需已登录）。首次验证码登录后引导调用。
+  Future<void> setPassword({
+    required String token,
+    required String password,
+  }) async {
+    await _post('/auth/password/set', {'password': password}, token: token);
+  }
+
   /// `/auth/code/verify` 与 `/auth/unified` 返回同一个会话形态，
   /// 共用一份解析，避免两边字段处理走偏（比如一边解析了 expires_at、
   /// 另一边忘了，于是「什么时候过期」在两个入口表现不一致）。
