@@ -19,6 +19,7 @@ import 'data/repositories/user_repository.dart';
 import 'data/repositories/walk_repository.dart';
 import 'data/sync/sync_api.dart';
 import 'data/sync/sync_engine.dart';
+import 'data/sync/unified_api.dart';
 import 'domain/immunization.dart';
 import 'services/app_update_service.dart';
 import 'services/avatar_store.dart';
@@ -59,6 +60,13 @@ final userRepositoryProvider =
 final syncEngineProvider = Provider<SyncEngine>((ref) => SyncEngine());
 
 final syncApiProvider = Provider<SyncApi>((ref) => SyncApi());
+
+/// 官网统一账号客户端（**仅中国区**）。
+///
+/// 海外区构造出来也是个空地址对象，但没有任何代码路径会去用它 ——
+/// 两个调用点（发码 / 登录）都先看 [UnifiedAccountApi.isAvailable]。
+final unifiedAccountApiProvider =
+    Provider<UnifiedAccountApi>((ref) => UnifiedAccountApi());
 
 /// 我收到的待接受邀请。未登录时是空列表。
 ///
@@ -604,15 +612,36 @@ class AppActions {
   ///
   /// 开发环境服务端会回显 `dev_code`，界面直接显示出来省掉真短信通道 ——
   /// 上生产前记得把服务端的 `DEV_ECHO_CODE` 关掉。
+  ///
+  /// 中国区走官网统一账号（A 方案）：验证码由**官网**的短信通道发出去，
+  /// 本服务端不参与。所以 cn 区拿不到 dev 回显，联调时要在官网侧开
+  /// `APP_SMS_DEBUG=1`（见 docs/账号体系复用.md）。
   Future<({bool sent, String? devCode, int? expiresIn})> requestLoginCode({
     required String channel,
     required String target,
   }) async {
+    if (UnifiedAccountApi.isAvailable) {
+      _requirePhoneChannel(channel);
+      final r = await ref
+          .read(unifiedAccountApiProvider)
+          .requestCode(phone: target);
+      // 官网的调试回显字段叫 debug_code，这里翻成界面在用的 devCode。
+      return (sent: r.sent, devCode: r.debugCode, expiresIn: r.expiresIn);
+    }
+
     final r = await ref.read(syncApiProvider).requestCode(
           channel: channel,
           target: target,
         );
     return (sent: r.sent, devCode: r.devCode, expiresIn: r.expiresIn);
+  }
+
+  /// 统一账号只支持手机号（官网没有邮箱登录）。界面在 cn 区不显示邮箱选项，
+  /// 走到这里说明有别的入口漏了判断 —— 抛出来比发一个注定失败的请求好。
+  void _requirePhoneChannel(String channel) {
+    if (channel != 'sms') {
+      throw StateError('unified account supports phone login only');
+    }
   }
 
   /// 验证码登录。
@@ -621,18 +650,36 @@ class AppActions {
   /// - 过户放在最前面：`created_by` 要在第一次 push 之前就指向账号 id，
   ///   否则第一次同步会把本地数据挂到占位用户名下推上去。
   /// - 同步放在最后：它要把过户后的全量本地数据推上去。
+  ///
+  /// 两条登录路径，区别只在「怎么拿到宠物域令牌」：
+  /// - 中国区：官网验证码登录 → 拿账号域令牌 → 宠物服务端换票。
+  ///   官网令牌**用完即弃、不落盘**，宠物域有自己的令牌。
+  /// - 海外区：宠物服务端自己的验证码通道，一步到位。
   Future<LocalUser> login({
     required String channel,
     required String target,
     required String code,
   }) async {
     final engine = ref.read(syncEngineProvider);
-    final session = await ref.read(syncApiProvider).verifyCode(
-          channel: channel,
-          target: target,
-          code: code,
-          deviceId: await engine.deviceId(),
-        );
+
+    final AuthSession session;
+    if (UnifiedAccountApi.isAvailable) {
+      _requirePhoneChannel(channel);
+      final unified = await ref
+          .read(unifiedAccountApiProvider)
+          .login(phone: target, code: code);
+      session = await ref.read(syncApiProvider).exchangeUnified(
+            unifiedToken: unified.token,
+            deviceId: await engine.deviceId(),
+          );
+    } else {
+      session = await ref.read(syncApiProvider).verifyCode(
+            channel: channel,
+            target: target,
+            code: code,
+            deviceId: await engine.deviceId(),
+          );
+    }
 
     await _users.adoptAccount(
       accountId: session.user.id,

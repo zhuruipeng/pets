@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   按区域出包（cn / intl），自动带上正确的 REGION 编译期常量。
 

@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/l10n.dart';
 import '../core/theme.dart';
+import '../data/sync/unified_api.dart';
 import '../providers.dart';
 
 Future<void> showAuthSheet(BuildContext context) {
@@ -116,26 +117,43 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                   ),
                   const SizedBox(height: AppSpace.gapL),
 
-                  // 通道切换：手机号 / 邮箱
-                  Row(
-                    children: [
-                      for (final c in const ['sms', 'email'])
-                        Padding(
-                          padding: const EdgeInsets.only(right: AppSpace.gapS),
-                          child: ChoiceChip(
-                            label: Text(L.t('auth.channel.$c')),
-                            selected: _channel == c,
-                            onSelected: (_) => setState(() {
-                              _channel = c;
-                              _devCode = null;
-                              _targetError = null;
-                            }),
-                            showCheckmark: false,
+                  // 通道切换：手机号 / 邮箱。
+                  //
+                  // 中国区走统一账号，只有手机号 —— 官网没有邮箱登录，
+                  // 留着邮箱选项等于给用户一条注定失败的路。整行都不显示
+                  // （只摆一个「手机号」chip 是纯噪音），换成一句说明，
+                  // 否则用户会以为界面少了点什么。
+                  if (_channels.length > 1) ...[
+                    Row(
+                      children: [
+                        for (final c in _channels)
+                          Padding(
+                            padding: const EdgeInsets.only(right: AppSpace.gapS),
+                            child: ChoiceChip(
+                              label: Text(L.t('auth.channel.$c')),
+                              selected: _channel == c,
+                              onSelected: (_) => setState(() {
+                                _channel = c;
+                                _devCode = null;
+                                _targetError = null;
+                              }),
+                              showCheckmark: false,
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpace.gapM),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpace.gapM),
+                  ] else ...[
+                    Text(
+                      L.t('auth.unifiedHint'),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.6,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpace.gapM),
+                  ],
 
                   TextField(
                     controller: _target,
@@ -227,6 +245,14 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
       ),
     );
   }
+
+  /// 本区域可用的登录通道。
+  ///
+  /// 中国区只有手机号：登录走官网统一账号（与官网 ERP / 商城同一个手机号），
+  /// 官网那边只有手机号这一种凭据。海外区仍保留邮箱兜底 —— 那边没有出岫账号，
+  /// 而且国际短信成本高、到达率不稳。
+  List<String> get _channels =>
+      UnifiedAccountApi.isAvailable ? const ['sms'] : const ['sms', 'email'];
 
   String? _validatedTarget() {
     final v = _target.text.trim();

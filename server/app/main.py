@@ -14,13 +14,15 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import auth, members, sync
+from . import auth, members, sync, unified
 from .config import Settings, get_settings
 from .db import get_session, init_db
 from .models import Pet
@@ -44,8 +46,70 @@ app = FastAPI(
 # 已经上线的客户端调的就是这些无前缀路径，改了等于强制所有人升级。
 API_V1 = "/api/v1"
 app.include_router(auth.router, prefix=API_V1)
+app.include_router(unified.router, prefix=API_V1)
 app.include_router(sync.router, prefix=API_V1)
 app.include_router(members.router, prefix=API_V1)
+
+# ------------------------------------------------------- 法律页面（静态托管）
+
+# 应用商店（国内各家 + Google Play）上架时要求在后台填**一个可公开访问的
+# 隐私政策网址**。App 内虽然也内嵌了同一份文本（assets/legal/），但商店
+# 要的是 URL，审核方会自己去打开，所以必须有一个能公网访问的页面。
+#
+# 为什么放在本服务端而不是官网：这是宠物 App 自己的合规材料，跟着服务端
+# 一起发布最直接（改文案与改接口在同一次发布里），也不必为了改一句话去动
+# 另一个项目（官网 weiyuantool.com 是独立仓库与发布流程）。
+LEGAL_DIR = Path(__file__).resolve().parent.parent / "legal"
+
+# URL 段 → 文件名。**必须是白名单**：这段路径来自用户输入，
+# 直接拼进 file path 就是目录穿越（`/legal/../app/config.py` 一类）。
+# 用字典查表顺带把「URL 里出现 .html 后缀」换成干净的短链接。
+LEGAL_PAGES = {
+    "privacy": "privacy-policy.html",
+    "terms": "terms-of-use.html",
+    "account-deletion": "account-deletion.html",
+}
+
+# 常见写法都收进来，省得商店后台填错一个后缀就 404。
+LEGAL_ALIASES = {
+    "privacy-policy": "privacy",
+    "privacy_policy": "privacy",
+    "terms-of-use": "terms",
+    "terms_of_use": "terms",
+    "terms": "terms",
+    "delete-account": "account-deletion",
+    "account_deletion": "account-deletion",
+}
+
+
+def resolve_legal_slug(slug: str) -> str | None:
+    """把 URL 段规整成白名单里的键；不认就返回 None（调用方回 404）。
+
+    容忍大小写、`.html` 后缀与连字符/下划线两种写法，因为这几个变体
+    在不同的商店后台输入框里都出现过。规整完仍然必须在白名单里。
+    """
+    s = (slug or "").strip().lower()
+    if s.endswith(".html"):
+        s = s[: -len(".html")]
+    s = LEGAL_ALIASES.get(s, s)
+    return s if s in LEGAL_PAGES else None
+
+
+@app.get("/legal/{slug}", response_class=HTMLResponse, tags=["meta"])
+def legal_page(slug: str) -> HTMLResponse:
+    """隐私政策 / 用户协议 / 注销说明。纯静态，不读数据库、不涉用户数据。"""
+    key = resolve_legal_slug(slug)
+    if key is None:
+        raise HTTPException(status_code=404, detail="page not found")
+
+    path = LEGAL_DIR / LEGAL_PAGES[key]
+    if not path.is_file():
+        # 文件没被打进镜像（比如 Dockerfile 只 COPY 了 app/）时，
+        # 503 比 404 准确：不是「这个页面不存在」，是「这个部署缺文件」。
+        # 商店审核遇到 404 会认为你没提供，遇到 503 至少知道是临时故障。
+        raise HTTPException(status_code=503, detail="legal page unavailable")
+
+    return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
 def _now_ms() -> int:
@@ -201,8 +265,23 @@ def update_pet(
     return _to_out(pet)
 
 
+# 注意这里**故意不写 `-> None` 返回注解**。
+#
+# 本文件开头有 `from __future__ import annotations`，所有注解都变成字符串，
+# FastAPI 会在注册路由时把 `"None"` 求值成 `NoneType` —— 它不等于 Python 的
+# `None`，于是 FastAPI 认为这个 204 路由带了一个 response_model，直接断言失败：
+#
+#     AssertionError: Status code 204 must not have a response body
+#
+# 报错发生在**导入模块时**，也就是服务根本起不来。而报错信息指向 204 与响应体，
+# 完全不提注解的事，很容易被误诊成「204 不能这么写」。
+# （`response_class=Response` 也救不了，实测同样断言失败。）
+#
+# 换个返回注解也不行：写 `-> None` 会让 200 路由在校验响应时要求「必须返回
+# None」，返回 dict 就 500。所以这类「什么都不返回」的路由，唯一稳妥的写法
+# 就是**不写返回注解**。
 @app.delete("/pets/{pet_id}", status_code=204, tags=["pets"])
-def delete_pet(pet_id: str, session: Session = Depends(get_session)) -> None:
+def delete_pet(pet_id: str, session: Session = Depends(get_session)):
     """软删除。同步场景下硬删会丢数据，务必保持这个行为。"""
     pet = session.get(Pet, pet_id)
     if pet is None:

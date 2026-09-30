@@ -47,6 +47,24 @@ extension RegionBehavior on Region {
   /// 详见产品结构文档 7.3。
   bool get mapRenderingEnabled => this == Region.intl;
 
+  /// 统一账号（出岫）的地址。**null 表示本区域用自有账号体系**。
+  ///
+  /// 中国区登录走官网账号（A 方案，见 docs/账号体系复用.md）：与官网的
+  /// ERP / 商城 / AI 修图共用同一个手机号，用户不必再记一个账号，我们也
+  /// 不必自己接短信通道与模板报备。
+  ///
+  /// 用 nullable 而不是「布尔 + 另一处地址」是为了让调用方写成
+  /// `if (base != null)`，而不是在业务代码里判断区域 —— 那正是本文件
+  /// 开头禁止的事情。海外区没有出岫账号，也不能把用户数据送到中国节点，
+  /// 所以这里是 null。
+  String? get unifiedAccountBaseUrl => switch (this) {
+        Region.cn => const String.fromEnvironment(
+            'UNIFIED_ACCOUNT_BASE',
+            defaultValue: 'https://weiyuantool.com',
+          ),
+        Region.intl => null,
+      };
+
   /// 默认重量单位（用户仍可在设置里手动切换）。
   /// 美国习惯磅，其余海外地区多用公斤。
   bool get defaultUseImperial => this == Region.intl;

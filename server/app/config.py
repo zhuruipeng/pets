@@ -78,8 +78,22 @@ class Settings(BaseSettings):
 
     # 短信/邮件服务商标识。留空表示「没有配置真实通道」，此时只写库不发码，
     # 依赖 dev_echo_code 回显。中国区短信需模板报备，海外区可用邮件兜底。
+    #
+    # 注意（A 方案之后）：**中国区已不再需要这两个通道** —— cn 区登录走官网
+    # 统一账号，验证码由官网的阿里云短信发出去，本服务端只负责换票
+    # （见 unified.py）。这里保留是为海外区（邮件兜底）和本地联调。
     sms_provider: str = ""
     email_provider: str = ""
+
+    # ---- 统一账号（仅中国区，A 方案）----
+    # 官网账号域地址，例如 https://weiyuantool.com。
+    # 留空 = 这个部署不提供统一账号登录，/api/v1/auth/unified 直接 404。
+    # 海外区即使误配了也不会启用：unified_enabled() 同时要求 region == "cn"。
+    unified_account_base_url: str = ""
+
+    # 换票时请求官网的超时（秒）。换票发生在登录界面上，属于用户等待中的
+    # 同步操作，宁可早点报「稍后再试」也不要让界面一直转。
+    unified_account_timeout_seconds: float = 5.0
 
     # 是否强制要求备案号展示（中国区合规）
     @property

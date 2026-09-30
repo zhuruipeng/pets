@@ -465,6 +465,8 @@ class L {
     'auth.why': '登录后可以在多台设备之间同步，也能和家人一起记录同一只宠物',
     'auth.channel.sms': '手机号',
     'auth.channel.email': '邮箱',
+    'auth.unifiedHint': '用手机号登录。这个手机号同时是你的出岫账号'
+        '（官网的 ERP 记账、商城、AI 修图共用同一个），只记一个就行。',
     'auth.target.phone': '手机号',
     'auth.target.email': '邮箱地址',
     'auth.target.required': '请填写手机号或邮箱',
@@ -942,6 +944,8 @@ class L {
     'auth.why': 'Sign in to sync across your devices and care for the same pet with family',
     'auth.channel.sms': 'Phone',
     'auth.channel.email': 'Email',
+    'auth.unifiedHint': 'Sign in with your phone number. It doubles as your '
+        'Chuxiu account, shared with our website — one number is all you need.',
     'auth.target.phone': 'Phone number',
     'auth.target.email': 'Email address',
     'auth.target.required': 'Enter a phone number or email',

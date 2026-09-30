@@ -251,14 +251,38 @@ class SyncApi {
       'code': code,
       'device_id': deviceId,
     });
-    return AuthSession(
-      token: '${j['token']}',
-      user: RemoteUser.fromJson((j['user'] as Map).cast<String, dynamic>()),
-      expiresAt: (j['expires_at'] as num?) == null
-          ? null
-          : DateTime.fromMillisecondsSinceEpoch((j['expires_at'] as num).toInt()),
-    );
+    return _sessionFrom(j);
   }
+
+  /// 用官网账号令牌换一个宠物域令牌（**仅中国区**，A 方案）。
+  ///
+  /// 官网令牌是不透明随机串，宠物服务端自己验不了，只能拿它去问官网
+  /// 「这是谁」，所以这一步由服务端做（`POST /auth/unified`）。客户端
+  /// 只是把令牌递过去，**不解析、不保存**官网令牌 —— 它只在这一次
+  /// 请求里存在。详见 server/app/unified.py 的模块注释。
+  Future<AuthSession> exchangeUnified({
+    required String unifiedToken,
+    required String deviceId,
+  }) async {
+    final j = await _post('/auth/unified', {
+      'unified_token': unifiedToken,
+      'device_id': deviceId,
+    });
+    return _sessionFrom(j);
+  }
+
+  /// `/auth/code/verify` 与 `/auth/unified` 返回同一个会话形态，
+  /// 共用一份解析，避免两边字段处理走偏（比如一边解析了 expires_at、
+  /// 另一边忘了，于是「什么时候过期」在两个入口表现不一致）。
+  static AuthSession _sessionFrom(Map<String, dynamic> j) => AuthSession(
+        token: '${j['token']}',
+        user: RemoteUser.fromJson((j['user'] as Map).cast<String, dynamic>()),
+        expiresAt: (j['expires_at'] as num?) == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                (j['expires_at'] as num).toInt(),
+              ),
+      );
 
   Future<void> logout(String token) async {
     await _post('/auth/logout', const {}, token: token);
