@@ -1,3 +1,13 @@
+// ignore_for_file: avoid_print
+//
+// ↑ 这是命令行验证脚本：print 就是它把结果说给人听的方式，不是「生产代码里
+//   忘删的调试输出」。avoid_print 针对的是 App 里的调试输出（那会把用户数据
+//   写进 logcat，Release 包里也该用日志框架），这里的输出是脚本的对外接口本身。
+//   同类的还有 verify_health_ledger.dart 与 probe_unified_account.dart。
+//
+//   之所以不干脆把 tool/ 从 analysis_options.yaml 里 exclude 掉：这些脚本里
+//   也是有真逻辑的（内存 kv、搬迁分支、断言），排除掉就等于让它们彻底失去
+//   静态检查 —— 为躲一条规则而关掉全部检查，不划算。
 /// 令牌搬迁/登出/落盘的离线验证 —— **纯 Dart，不碰平台通道，也不用 Flutter**。
 ///
 /// 跑法（本机 flutter test 跑不动：非提权必撞命名管道 231）：
@@ -94,8 +104,6 @@ class _FakeApi extends SyncApi {
 
 /// 写不进去的密钥库，用来验证「写失败」这条分支。
 class _FailingWriteStore extends MemoryTokenStore {
-  _FailingWriteStore([String? initial]) : super(initial);
-
   @override
   Future<void> write(String token) async =>
       throw TokenStoreException('验证：密钥库不可用');

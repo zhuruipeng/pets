@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+// ↑ 命令行验证脚本，print 是它的输出方式（同 verify_token_migration.dart）。
 /// 无 Flutter 环境下真跑一遍健康台账逻辑。
 ///
 /// 为什么需要它：本机非提权进程跑 `flutter test` 必踩命名管道 231，

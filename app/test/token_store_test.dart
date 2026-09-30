@@ -65,8 +65,6 @@ class _FakeApi extends SyncApi {
 
 /// 写不进去的密钥库，用来验证「写失败」这条分支。
 class _FailingWriteStore extends MemoryTokenStore {
-  _FailingWriteStore([String? initial]) : super(initial);
-
   @override
   Future<void> write(String token) async =>
       throw TokenStoreException('测试：密钥库不可用');

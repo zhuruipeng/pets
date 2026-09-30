@@ -1,3 +1,6 @@
+// ignore_for_file: avoid_print
+// ↑ 命令行自检脚本，print 是它的输出方式（同 verify_*.dart）。
+
 // 官网统一账号（cn 区登录链路）的生产自检。
 //
 // 为什么能用 `dart.exe` 直接跑：这整条链路的依赖只有 `dart:*` 与
@@ -53,7 +56,7 @@ Future<void> main(List<String> argv) async {
 
   if (base.isEmpty) {
     fail('地址配置', 'cn 的 unifiedAccountBaseUrl 是空的');
-    print('\n结论：${_failed} 项失败');
+    print('\n结论：$_failed 项失败');
     exit(1);
   }
 

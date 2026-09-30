@@ -158,7 +158,7 @@ class SyncEngine {
   Future<String?> _readToken() async {
     if (_tokenLoaded) return _cachedToken;
     var value = await _tokens.read();
-    if (value == null) value = await _migrateLegacyToken();
+    value ??= await _migrateLegacyToken();
     _cachedToken = value;
     _tokenLoaded = true;
     return value;
