@@ -8,5 +8,14 @@ psycopg[binary]>=3.2
 pydantic-settings>=2.6
 python-multipart>=0.0.12
 
+# 生产进程管理器。本机 ERP 与 Ledgerly 都用它跑
+# `gunicorn ... --worker-class uvicorn.workers.UvicornWorker`，
+# 这里保持一致 —— 两个 worker 意味着某个请求卡在慢 IO 上时，
+# 另一个还能接客；单进程 uvicorn 在同步数据库调用上会被拖住。
+#
+# 本地 Windows 开发不要用它（gunicorn 不支持 Windows），直接
+# `uvicorn app.main:app --reload` 即可；装是能装上的，纯 Python 包。
+gunicorn>=23.0
+
 # ---- dev：开发/测试用，生产镜像里可以不装（sync_logic 的测试不碰数据库）----
 pytest>=8.0

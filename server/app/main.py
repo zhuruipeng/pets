@@ -30,6 +30,12 @@ from .models import Pet
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # 本地开发（单进程 `uvicorn app.main:app --reload`）靠这一行自动建表。
+    #
+    # 生产是多 worker 的 gunicorn，**不能**依赖这里建表：两个 worker 会并发
+    # 执行 create_all，表还不存在时必有一个撞上 pg_type_typname_nsp_index
+    # 唯一键冲突而 boot 失败（详见 deploy/02-app-setup.sh 里 ExecStartPre 的注释）。
+    # 生产由 systemd 的 ExecStartPre 先建好表，这里再跑就是 checkfirst 空转。
     init_db()
     yield
 
