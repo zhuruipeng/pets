@@ -165,6 +165,21 @@ class L {
     'profile.section.walks': '遛狗记录',
     'profile.walk.empty': '还没有遛狗记录',
     'profile.reminders': '提醒计划',
+
+    'profile.section.quick': '快捷记录',
+    'profile.care.vaccine': '疫苗',
+    'profile.care.dewormInternal': '体内驱虫',
+    'profile.care.dewormExternal': '体外驱虫',
+    'profile.care.checkup': '体检与就诊',
+    'profile.care.last': '上次 {v}',
+    'profile.care.lastNone': '还没有记录',
+    'profile.care.next': '下次 {v}',
+    'profile.care.unscheduled': '未排期',
+    'profile.care.off': '提醒已关',
+    'profile.care.log': '记一笔',
+    'profile.ledger.hint':
+        '排期按生日和兽医常规自动推算。点右侧「记一笔」把实际做过的补上 —— 台账的「上次」就是这么来的。',
+
     'profile.section.preventive': '预防保健',
     'profile.preventive.empty': '还没有排期。填了生日就会自动生成疫苗和驱虫计划',
     'profile.section.medical': '病史',
@@ -623,6 +638,21 @@ class L {
     'profile.section.walks': 'Walks',
     'profile.walk.empty': 'No walks yet',
     'profile.reminders': 'Reminders',
+
+    'profile.section.quick': 'Quick log',
+    'profile.care.vaccine': 'Vaccine',
+    'profile.care.dewormInternal': 'Deworming (internal)',
+    'profile.care.dewormExternal': 'Deworming (external)',
+    'profile.care.checkup': 'Checkups & visits',
+    'profile.care.last': 'Last {v}',
+    'profile.care.lastNone': 'No record yet',
+    'profile.care.next': 'Next {v}',
+    'profile.care.unscheduled': 'Not scheduled',
+    'profile.care.off': 'Reminder off',
+    'profile.care.log': 'Log',
+    'profile.ledger.hint':
+        'Schedules come from the birthday and standard vet practice. Tap Log to add what has actually been done — that is where Last comes from.',
+
     'profile.section.preventive': 'Preventive care',
     'profile.preventive.empty': 'No schedule yet — add a birthday to generate one',
     'profile.section.medical': 'Medical history',

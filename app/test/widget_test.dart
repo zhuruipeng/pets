@@ -142,9 +142,28 @@ void main() {
         'profile.section.medical',
         'profile.medical.empty',
         'profile.allergy.empty',
+        // 预防台账（M3.4）：分类名 + 上次/下次 + 快捷记录
+        'profile.section.quick',
+        'profile.care.vaccine',
+        'profile.care.dewormInternal',
+        'profile.care.dewormExternal',
+        'profile.care.checkup',
+        'profile.care.last',
+        'profile.care.lastNone',
+        'profile.care.next',
+        'profile.care.unscheduled',
+        'profile.care.off',
+        'profile.care.log',
+        'profile.ledger.hint',
       ]) {
         expect(L.t(k), isNot(k), reason: '$k 没有翻译');
       }
+    });
+
+    test('台账的「上次 / 下次」占位符能被替换', () {
+      // 这两条是多占位符的：漏一个就是一个字面量 {v} 摆在界面上。
+      expect(L.tp('profile.care.last', {'v': '3 天前'}), contains('3 天前'));
+      expect(L.tp('profile.care.next', {'v': '还有 5 天'}), contains('还有 5 天'));
     });
 
     test('四个 Tab 文案都已翻译', () {

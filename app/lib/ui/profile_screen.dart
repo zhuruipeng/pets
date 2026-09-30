@@ -25,6 +25,7 @@ import '../core/traits.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../data/repositories/member_repository.dart';
+import '../domain/health_ledger.dart';
 import '../domain/immunization.dart' show Species;
 import '../providers.dart';
 import 'avatar_sheet.dart';
@@ -648,9 +649,26 @@ class _HealthTab extends ConsumerWidget {
         96,
       ),
       children: [
+        _SectionTitle(L.t('profile.section.quick')),
+        const SizedBox(height: AppSpace.gapM),
+        _QuickRecordBar(petId: pet.id),
+
+        const SizedBox(height: AppSpace.gapXl),
         _SectionTitle(L.t('profile.section.preventive')),
         const SizedBox(height: AppSpace.gapM),
-        _PreventiveCard(pet: pet),
+        _CareLedgerCard(pet: pet),
+        const SizedBox(height: AppSpace.gapS),
+        // 把「排期从哪来」讲清楚：它跟着出生日期算，不是我们拍脑袋定的。
+        // 顺带把「记一笔」的作用说明白 —— 否则用户只会用提醒，不用记录，
+        // 台账的「上次」永远是空的。
+        Text(
+          L.t('profile.ledger.hint'),
+          style: const TextStyle(
+            fontSize: 11.5,
+            height: 1.5,
+            color: AppColors.textTertiary,
+          ),
+        ),
 
         const SizedBox(height: AppSpace.gapXl),
         _SectionTitle(L.t('records.weight.title')),
@@ -680,28 +698,108 @@ class _HealthTab extends ConsumerWidget {
   }
 }
 
-/// 预防保健：每条提醒一行，右侧给到期状态（逾期标红）。
+/// 快捷记录条 —— 从健康页直接开对应的录入表单。
+///
+/// 为什么不走通用「记一笔」再让用户挑类型：这一页要记的就这四样，
+/// 摆成一行比「点 + → 在九个类型里找驱虫」少两步。`showAddRecordSheet`
+/// 本来就收 `initialType`，只是之前没人从这一页调。
+class _QuickRecordBar extends ConsumerWidget {
+  const _QuickRecordBar({required this.petId});
+
+  final String petId;
+
+  /// (落到的记录类型, 按钮文案 key)。
+  ///
+  /// 疫苗和驱虫用台账那套名字：`recordTypeLabel(vaccine)` 返回的是
+  /// 「核心疫苗」，那是规则集里的细分名，摆在按钮上太窄。
+  static const _items = <(RecordType, String)>[
+    (RecordType.weight, 'addRecord.type.weight'),
+    (RecordType.vaccine, 'profile.care.vaccine'),
+    (RecordType.dewormInternal, 'profile.care.dewormInternal'),
+    (RecordType.medical, 'addRecord.type.medical'),
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Wrap(
+      spacing: AppSpace.gapS,
+      runSpacing: AppSpace.gapS,
+      children: [
+        for (final (type, labelKey) in _items)
+          ActionChip(
+            avatar: Icon(
+              recordTypeIcon(type),
+              size: 16,
+              color: AppColors.primary,
+            ),
+            label: Text(L.t(labelKey)),
+            onPressed: () => showAddRecordSheet(
+              context,
+              ref,
+              petId: petId,
+              initialType: type,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 预防保健台账 —— 「上次」与「下次」并排。
 ///
 /// 与资料页签的「提醒计划」不重复：那边是**开关**（管要不要提醒），
-/// 这里是**状态**（管还差多久）。同一份数据的两种读法。
-class _PreventiveCard extends ConsumerWidget {
-  const _PreventiveCard({required this.pet});
+/// 这里是**对账**（已发生 vs 已排期）。
+///
+/// 旧版这一块只读 reminders，于是「打过疫苗但没排计划」和
+/// 「有计划但压根没打」在界面上长得一模一样，都只是「有一行」。
+/// 台账把 records 也拉进来，两种情况的差别才看得见。
+class _CareLedgerCard extends ConsumerWidget {
+  const _CareLedgerCard({required this.pet});
 
   final Pet pet;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final records =
+        ref.watch(petRecordsProvider(pet.id)).valueOrNull ?? const <PetRecord>[];
     final reminders = ref.watch(petRemindersProvider(pet.id)).valueOrNull ??
         const <Reminder>[];
 
-    if (reminders.isEmpty) {
-      return _PlainHint(
-        icon: Icons.health_and_safety_outlined,
-        text: L.t('profile.preventive.empty'),
-      );
+    final facts = <CareFact>[];
+    for (final r in records) {
+      final kind = careKindFromRecordWire(r.type.wireName);
+      if (kind == null) continue;
+      facts.add(CareFact(
+        kind: kind,
+        at: r.recordedAt,
+        summary: _factSummary(r),
+      ));
     }
 
-    final sorted = [...reminders]..sort((a, b) => a.nextAt.compareTo(b.nextAt));
+    final schedules = <CareSchedule>[];
+    for (final r in reminders) {
+      final kind = careKindFromReminderType(r.type);
+      if (kind == null) continue;
+      schedules.add(CareSchedule(
+        kind: kind,
+        nextAt: r.nextAt,
+        enabled: r.enabled,
+        title: r.title,
+      ));
+    }
+
+    final rows = buildCareLedger(facts: facts, schedules: schedules);
+
+    // 疫苗和体检对所有物种都成立，永远给一行；驱虫两行只在有内容时出现 ——
+    // 一只从没驱过虫、也没排期的宠物，摆两行「还没有记录」纯属噪音。
+    // 入口没丢：上面那排快捷记录里就有驱虫。
+    final visible = rows
+        .where((r) =>
+            r.kind == PlanItemType.vaccine ||
+            r.kind == PlanItemType.checkup ||
+            !r.isEmpty)
+        .toList();
+
     final now = DateTime.now();
 
     return Container(
@@ -716,32 +814,78 @@ class _PreventiveCard extends ConsumerWidget {
       ),
       child: Column(
         children: [
-          for (var i = 0; i < sorted.length; i++) ...[
+          for (var i = 0; i < visible.length; i++) ...[
             if (i > 0) const RowDivider(),
-            _PreventiveRow(
-              reminder: sorted[i],
-              overdue: sorted[i].nextAt.isBefore(now),
-            ),
+            _row(context, ref, visible[i], now),
           ],
         ],
       ),
     );
   }
+
+  /// 单行。抽成方法是为了让回调捕获**参数**而不是循环变量 ——
+  /// 「记一笔」在点击时才求值，若它捕获的是 `i`，越界只是时间问题。
+  Widget _row(
+    BuildContext context,
+    WidgetRef ref,
+    CareLedgerRow row,
+    DateTime now,
+  ) {
+    return _CareLedgerRowView(
+      row: row,
+      now: now,
+      onLog: () => showAddRecordSheet(
+        context,
+        ref,
+        petId: pet.id,
+        initialType: _recordTypeForCare(row.kind),
+      ),
+    );
+  }
+
+  /// 行内副文本：优先用户写的（疫苗名 / 就诊原因），其次 payload 摘要
+  /// （剂量、给药方式这类结构化字段）。
+  static String? _factSummary(PetRecord r) {
+    final text = (r.valueText ?? '').trim();
+    if (text.isNotEmpty) return text;
+    final payload = recordPayloadSummary(r).trim();
+    return payload.isEmpty ? null : payload;
+  }
 }
 
-class _PreventiveRow extends StatelessWidget {
-  const _PreventiveRow({required this.reminder, required this.overdue});
+/// 台账分类 → 打开录入表单时预选的记录类型。
+///
+/// 体检排期的实际发生落在「就诊」上 —— 没有独立的体检记录类型，
+/// 也不该为它单开一个：用户心里「带去医院」就是一件事。
+RecordType _recordTypeForCare(PlanItemType kind) => switch (kind) {
+      PlanItemType.vaccine => RecordType.vaccine,
+      PlanItemType.dewormInternal => RecordType.dewormInternal,
+      PlanItemType.dewormExternal => RecordType.dewormExternal,
+      PlanItemType.checkup => RecordType.medical,
+    };
 
-  final Reminder reminder;
-  final bool overdue;
+/// 台账一行：图标 + 分类名 + 「上次」+ 「下次」+ 记一笔。
+class _CareLedgerRowView extends StatelessWidget {
+  const _CareLedgerRowView({
+    required this.row,
+    required this.now,
+    required this.onLog,
+  });
+
+  final CareLedgerRow row;
+  final DateTime now;
+  final VoidCallback onLog;
 
   @override
   Widget build(BuildContext context) {
-    final disabled = !reminder.enabled;
+    final overdue = row.isOverdue(now);
+    final last = row.lastDoneAt;
+    final lastSummary = row.lastSummary;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 11),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 32,
@@ -750,44 +894,95 @@ class _PreventiveRow extends StatelessWidget {
               color: overdue
                   ? AppColors.dangerBg
                   : AppColors.tileTints[
-                      reminder.type.hashCode.abs() % AppColors.tileTints.length],
+                      row.kind.hashCode.abs() % AppColors.tileTints.length],
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
-              reminderTypeIcon(reminder.type),
+              careKindIcon(row.kind),
               size: 16,
               color: overdue ? AppColors.danger : AppColors.primary,
             ),
           ),
           const SizedBox(width: AppSpace.gapM),
           Expanded(
-            child: Text(
-              reminderTitle(reminder),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w500,
-                color: disabled ? AppColors.textTertiary : AppColors.textPrimary,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        careKindLabel(row.kind),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    // 「关了提醒」不等于「不用做」，所以行还在，只是标出来。
+                    if (row.hasSchedule && !row.scheduleEnabled) ...[
+                      const SizedBox(width: AppSpace.gapS),
+                      SoftTag(
+                        L.t('profile.care.off'),
+                        color: AppColors.textTertiary,
+                        bg: AppColors.divider,
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  last == null
+                      ? L.t('profile.care.lastNone')
+                      : L.tp('profile.care.last', {
+                          'v': lastSummary == null
+                              ? relativeDay(last)
+                              : '${relativeDay(last)} · $lastSummary',
+                        }),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  row.nextDueAt == null
+                      ? L.t('profile.care.unscheduled')
+                      : L.tp('profile.care.next', {
+                          'v': dueLabel(row.nextDueAt!),
+                        }),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: overdue ? FontWeight.w600 : FontWeight.w400,
+                    color:
+                        overdue ? AppColors.danger : AppColors.textTertiary,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: AppSpace.gapS),
-          if (disabled)
-            SoftTag(
-              L.t('profile.healthGood'),
-              color: AppColors.textTertiary,
-              bg: AppColors.divider,
-            )
-          else
-            Text(
-              dueLabel(reminder.nextAt),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: overdue ? FontWeight.w600 : FontWeight.w400,
-                color: overdue ? AppColors.danger : AppColors.textSecondary,
-              ),
+          // 「记一笔」是这一行的重点：台账的「上次」全靠用户补上来，
+          // 没有这个按钮，它永远停在「还没有记录」。
+          TextButton(
+            onPressed: onLog,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpace.gapS),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
+            child: Text(
+              L.t('profile.care.log'),
+              style: const TextStyle(fontSize: 12.5),
+            ),
+          ),
         ],
       ),
     );

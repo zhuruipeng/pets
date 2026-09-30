@@ -576,6 +576,21 @@ String planTypeLabel(PlanItemType type) => switch (type) {
       PlanItemType.checkup => L.t('plan.checkup.annual'),
     };
 
+/// 台账分类 → 展示名。
+///
+/// 与 [planTypeLabel] 刻意分开：那一套是规则集里的**细分名**
+/// （「核心疫苗」「年度体检」），而台账把同类合并成一行 ——
+/// 疫苗那行同时含联苗和狂犬，还叫「核心疫苗」会让人以为狂犬不在里面。
+String careKindLabel(PlanItemType kind) => switch (kind) {
+      PlanItemType.vaccine => L.t('profile.care.vaccine'),
+      PlanItemType.dewormInternal => L.t('profile.care.dewormInternal'),
+      PlanItemType.dewormExternal => L.t('profile.care.dewormExternal'),
+      PlanItemType.checkup => L.t('profile.care.checkup'),
+    };
+
+/// 台账分类 → 图标。转发给 [reminderTypeIcon]，同一件事在两处不能长两个样。
+IconData careKindIcon(PlanItemType kind) => reminderTypeIcon(kind.wireName);
+
 /// 提醒类型 → 小图标。类型是 wire 字符串，不是 RecordType 枚举。
 ///
 /// 提升为顶层函数是为了让 Upcoming 行也能复用同一套图标映射，
