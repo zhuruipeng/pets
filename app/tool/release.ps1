@@ -74,6 +74,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# 让 .NET 的进程当前目录跟上 PowerShell 的 $PWD —— 这两者**不是一回事**：
+# `Set-Location`（cd）只改 $PWD，而 `[System.IO.*]` 用的是 .NET 的进程目录。
+# 从开始菜单起的 PowerShell，.NET 目录是 C:\WINDOWS\system32，所以本脚本里
+# 任何走 [System.IO.*] 的相对路径都会落到那里（已实测踩到，见下方 $ResultFile）。
+try { [System.IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch { }
+
 $script:EmitSink = $null
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -86,12 +92,24 @@ function Emit([string]$text) {
 }
 
 if ($ResultFile -ne '') {
+    # 相对路径先按 PowerShell 的当前位置补成绝对路径。
+    # [System.IO.File] 用的是 .NET 的进程当前目录，而 Set-Location 只改 $PWD，
+    # 两者可以是完全不同的地方 —— 于是 `-ResultFile .\build\x.txt` 会被解析成
+    # C:\WINDOWS\system32\build\x.txt，报「未能找到路径…的一部分」。
+    #
+    # 顺序不能省：必须先 Join-Path 到 $PWD（这一步用的是 PowerShell 的目录），
+    # 之后才轮到 GetFullPath 归一化；反过来只调 GetFullPath 会走 .NET 目录，重现同一个错。
+    if (-not [System.IO.Path]::IsPathRooted($ResultFile)) {
+        $ResultFile = Join-Path (Get-Location).Path $ResultFile
+    }
+    $ResultFile = [System.IO.Path]::GetFullPath($ResultFile)
     $script:EmitSink = $ResultFile
     $dir = Split-Path -Parent $ResultFile
     if ($dir -ne '' -and -not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
     [System.IO.File]::WriteAllText($ResultFile, '', $script:Utf8NoBom)
+    Write-Host "    [i] 结果同时写入: $ResultFile" -ForegroundColor DarkGray
 }
 
 $appDir = Split-Path -Parent $PSScriptRoot      # tool/ 的上一级 = app/

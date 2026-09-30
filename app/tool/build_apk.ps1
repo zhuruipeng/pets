@@ -68,6 +68,9 @@ if (-not (Test-Path $defineFile)) {
 }
 
 Set-Location $appDir
+# 同步 .NET 的进程当前目录（Set-Location 只管 $PWD，两者可以不同）——
+# flutter 子进程就是靠这个目录去找 pubspec.yaml 的。理由同 release.ps1 里的注释。
+[System.IO.Directory]::SetCurrentDirectory($appDir)
 $env:PUB_HOSTED_URL = 'https://pub.flutter-io.cn'
 
 # ---- 3. 出包 ----
