@@ -1,0 +1,60 @@
+name: pet_app
+description: 我的宠物 — 宠物健康管理与提醒（中国 + 海外双市场）
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # 基础
+  intl: ^0.20.3
+  http: ^1.2.2
+  uuid: ^4.5.1
+  path: ^1.9.0
+  path_provider: ^2.1.4
+
+  # 状态管理
+  flutter_riverpod: ^2.5.1
+
+  # 本地数据库（本地优先，sqflite + 手写 DDL）
+  sqflite: ^2.3.3
+  sqlite3_flutter_libs: ^0.5.24
+
+  # 定位与地图（海外渲染底图，国内不渲染，见 region.dart）
+  geolocator: ^12.0.0
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
+  # 本地通知（MVP 不做服务端推送，故无需 FCM / 厂商通道）
+  flutter_local_notifications: ^17.2.2
+  # flutter_local_notifications 的 zonedSchedule 依赖它，必须显式声明
+  timezone: ^0.9.4
+  permission_handler: ^11.3.1
+
+  # UI
+  fl_chart: ^0.69.0
+  share_plus: ^10.0.0
+
+  # 记录附件（M3.3）：给用药/就诊等记录挂照片。系统相册/相机，无需自管权限页
+  image_picker: ^1.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  # 仓储测试跑在内存 SQLite 上，需要 FFI 实现
+  sqflite_common_ffi: ^2.3.3
+
+# 注意：以上版本号为 2026-09 的参考值。
+# 首次拉取后请执行 `flutter pub upgrade --major-versions` 对齐最新稳定版。
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/i18n/

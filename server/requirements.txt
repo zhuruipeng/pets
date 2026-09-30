@@ -1,0 +1,9 @@
+# 用 >= 而不是 ==，避免锁死到过时版本。
+# 首次安装后用 pip freeze > requirements.lock.txt 固化生产版本。
+
+fastapi>=0.115
+uvicorn[standard]>=0.32
+sqlalchemy>=2.0.36
+psycopg[binary]>=3.2
+pydantic-settings>=2.6
+python-multipart>=0.0.12

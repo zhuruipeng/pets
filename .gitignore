@@ -1,0 +1,38 @@
+# ---- Flutter / Dart 构建产物 ----
+**/build/
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+**/.kotlin/
+**/android/.gradle/
+**/android/captures/
+**/ios/Pods/
+**/ios/.symlinks/
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+
+# ---- 日志 ----
+*.log
+
+# ---- 密钥与机器相关配置（切勿提交）----
+key.properties
+*.jks
+*.keystore
+local.properties
+.env
+*.env
+google-services.json
+
+# ---- Python（server 端）----
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+.pytest_cache/
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
