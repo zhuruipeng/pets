@@ -44,6 +44,11 @@ dependencies:
   # 记录附件（M3.3）：给用药/就诊等记录挂照片。系统相册/相机，无需自管权限页
   image_picker: ^1.1.2
 
+  # 自动更新：读本机的 versionName / versionCode 去和服务端清单比对。
+  # 版本号不能在 Dart 侧硬编码 —— 那份数字和 pubspec 里的 version 是两处，
+  # 迟早对不上。
+  package_info_plus: ^8.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -58,3 +63,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/i18n/
+    # 隐私政策与用户协议（上架要求 App 内可打开）。
+    # 源文件在 docs/store/ 下，改完记得复制过来 —— 两处内容必须一致，
+    # 商店审核会同时看网页版和 App 内版本。
+    - assets/legal/

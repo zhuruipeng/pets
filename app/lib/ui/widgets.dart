@@ -1,13 +1,20 @@
 /// 通用小组件。四个页面共用，避免各写一套导致视觉漂移。
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../core/l10n.dart';
+import '../core/reminder_text.dart';
 import '../core/theme.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../domain/immunization.dart';
+
+// 提醒文案的解析与类型表在 core 里（通知服务也要用），
+// 这里再导出一次，免得所有界面文件都要多 import 一个。
+export '../core/reminder_text.dart' show kManualReminderTypes, reminderTypeLabel;
 
 /// 统计格之间那道竖线。今日页的主卡、本周概览、遛狗结果都在用它。
 class StatDivider extends StatelessWidget {
@@ -360,7 +367,7 @@ class PetAvatar extends StatelessWidget {
       Species.other => '🐾',
     };
 
-    final inner = Container(
+    final fallback = Container(
       width: size,
       height: size,
       alignment: Alignment.center,
@@ -371,6 +378,8 @@ class PetAvatar extends StatelessWidget {
       child: Text(emoji, style: TextStyle(fontSize: size * 0.48)),
     );
 
+    final inner = _localAvatar(size) ?? fallback;
+
     if (borderWidth <= 0) return inner;
 
     return Container(
@@ -380,6 +389,34 @@ class PetAvatar extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: inner,
+    );
+  }
+
+  /// 本地头像文件。三种情况都回落到 emoji：
+  /// - 没设置
+  /// - 值是远端 URL（同步功能写入的，本机还没下载）
+  /// - 文件被系统/用户清了
+  ///
+  /// 用 `errorBuilder` 兜住「文件存在但解不开」（半个文件、格式坏了），
+  /// 否则头像会变成一个红叉，比没头像更难看。
+  Widget? _localAvatar(double size) {
+    final path = (pet.avatarUrl ?? '').trim();
+    if (path.isEmpty || path.startsWith('http')) return null;
+    final file = File(path);
+    if (!file.existsSync()) return null;
+
+    return ClipOval(
+      child: Image.file(
+        file,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          width: size,
+          height: size,
+          color: AppColors.primaryLight,
+        ),
+      ),
     );
   }
 }
@@ -495,15 +532,9 @@ String recordPayloadSummary(PetRecord r) {
 }
 
 /// 提醒标题：库里存的是 i18n key，展示时才翻。
-String reminderTitle(Reminder r) {
-  final key = r.title;
-  if (key.contains('.')) {
-    final translated = L.t(key);
-    // 找不到时 t() 会回落到 key 本身，这时退回类型名。
-    if (translated != key) return translated;
-  }
-  return r.type;
-}
+/// 提醒标题。解析规则见 core/reminder_text.dart —— 通知服务也要用同一套，
+/// 所以那边才是实现，这里是给界面用的薄封装。
+String reminderTitle(Reminder r) => reminderTitleFrom(r.title, r.type);
 
 /// 相对时间：今天 / 昨天 / N 天前 / 具体日期。
 String relativeDay(DateTime dt) {
@@ -549,10 +580,16 @@ String planTypeLabel(PlanItemType type) => switch (type) {
 ///
 /// 提升为顶层函数是为了让 Upcoming 行也能复用同一套图标映射，
 /// 免得今日卡和未来列表对同一个类型画出两个不同的图标。
+/// 提醒类型 → 图标。
+///
+/// 同时认两种写法：**库里存的是下划线式**（`deworm_internal`，来自
+/// PlanItemType.wireName），而早年这里只匹配驼峰式，导致驱虫和体检
+/// 一直显示成默认的小铃铛。别把下划线那组删掉。
 IconData reminderTypeIcon(String type) => switch (type) {
       'vaccine' => Icons.vaccines_outlined,
-      'dewormInternal' => Icons.medication_outlined,
-      'dewormExternal' => Icons.bug_report_outlined,
+      'dewormInternal' || 'deworm_internal' => Icons.medication_outlined,
+      'dewormExternal' || 'deworm_external' => Icons.bug_report_outlined,
+      'checkup' => Icons.health_and_safety_outlined,
       'medication' => Icons.medication_liquid_outlined,
       'medical' => Icons.local_hospital_outlined,
       'feeding' => Icons.restaurant_outlined,

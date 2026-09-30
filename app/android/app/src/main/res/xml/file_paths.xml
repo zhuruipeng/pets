@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 的暴露范围。
+
+  只开一个 update/ 子目录，正好是自动更新下载 APK 的位置。
+  **不要**写成 <cache-path name="cache" path="." /> —— 那等于把整个缓存目录
+  通过 content:// 暴露给任何拿到 URI 的应用，攻击面白送出去。
+
+  新增用途（比如导出数据）时，在这里加一条明确的子路径，别扩大已有的。
+-->
+<paths>
+    <cache-path name="update" path="update/" />
+</paths>

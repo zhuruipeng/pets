@@ -8,8 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pet_app/core/l10n.dart';
 import 'package:pet_app/core/region.dart';
+import 'package:pet_app/core/reminder_text.dart';
+import 'package:pet_app/core/traits.dart';
 import 'package:pet_app/data/models.dart';
 import 'package:pet_app/providers.dart';
+import 'package:pet_app/services/app_update_service.dart';
 import 'package:pet_app/ui/me_screen.dart';
 import 'package:pet_app/ui/today_screen.dart';
 import 'package:pet_app/ui/widgets.dart';
@@ -262,6 +265,223 @@ void main() {
       }
     });
 
+    test('档案编辑与个性特点文案都已翻译', () {
+      for (final k in [
+        'editPet.title',
+        'editPet.name',
+        'editPet.nameEmpty',
+        'editPet.breed',
+        'editPet.breedHint',
+        'editPet.birthdayPick',
+        'editPet.birthdayEstimated',
+        'editPet.weightBaseline',
+        'editPet.weightBaselineHint',
+        'editPet.save',
+        'editPet.saved',
+        'avatar.title',
+        'avatar.camera',
+        'avatar.gallery',
+        'avatar.remove',
+        'avatar.failed',
+        'profile.traits.empty',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+      // 每个预设标签都要有中文/英文文案，否则会退化成显示 code。
+      for (final code in kPersonalityCodes) {
+        expect(
+          personalityLabel(code),
+          isNot(code),
+          reason: '标签 $code 没有翻译',
+        );
+      }
+    });
+
+    test('自动更新文案都已翻译', () {
+      for (final k in [
+        'update.title',
+        'update.current',
+        'update.latest',
+        'update.notes',
+        'update.now',
+        'update.later',
+        'update.mustTitle',
+        'update.mustBody',
+        'update.downloading',
+        'update.installing',
+        'update.failed',
+        'update.upToDate',
+        'update.check',
+        'update.checkFailed',
+        'update.permissionHint',
+        'update.noApk',
+        'me.version',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+      expect(
+        L.tp('update.downloading', {'percent': 42}),
+        contains('42'),
+      );
+    });
+
+    test('档案页两个新页签的文案都已翻译', () {
+      for (final k in [
+        'profile.records.empty',
+        'profile.records.emptyHint',
+        'profile.memory.empty',
+        'profile.memory.emptyHint',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+      expect(L.tp('profile.memory.count', {'n': 3}), contains('3'));
+    });
+
+    test('联系方式与走失卡片文案都已翻译', () {
+      for (final k in [
+        'contact.title',
+        'contact.hint',
+        'contact.phone',
+        'contact.email',
+        'contact.wechat',
+        'contact.note',
+        'contact.noteHint',
+        'contact.empty',
+        'contact.save',
+        'contact.saved',
+        'contact.missing',
+        'lost.title',
+        'lost.action',
+        'lost.preview',
+        'lost.share',
+        'lost.lastSeen',
+        'lost.unknownWhere',
+        'lost.since',
+        'lost.contactMe',
+        'lost.noContact',
+        'lost.shareSubject',
+        'lost.failed',
+        'walk.detail',
+        'walk.track',
+        'walk.noTrack',
+        'walk.shareText',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+      // 带占位符的两条要真的替换掉
+      expect(L.tp('lost.since', {'n': 3}), contains('3'));
+      expect(L.tp('lost.since', {'n': 3}), isNot(contains('{n}')));
+    });
+
+    test('手动提醒相关文案都已翻译', () {      for (final k in [
+        'reminder.add',
+        'reminder.new',
+        'reminder.edit',
+        'reminder.type',
+        'reminder.name',
+        'reminder.nameHint',
+        'reminder.repeat',
+        'reminder.repeat.once',
+        'reminder.repeat.custom',
+        'reminder.repeat.monthly',
+        'reminder.repeat.quarterly',
+        'reminder.repeat.halfYearly',
+        'reminder.repeat.yearly',
+        'reminder.repeat.everyNDays',
+        'reminder.days',
+        'reminder.firstAt',
+        'reminder.firstAtHint',
+        'reminder.save',
+        'reminder.saved',
+        'reminder.deleted',
+        'reminder.delete',
+        'reminder.deleteConfirm',
+        'reminder.deleteConfirm.hint',
+        'reminder.source.auto',
+        'reminder.source.manual',
+        'reminder.due.unknown',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+      // 每种可手动新建的类型都要有显示名，否则界面会露出内部串。
+      for (final type in kManualReminderTypes) {
+        expect(
+          reminderTypeLabel(type),
+          isNot(type),
+          reason: '提醒类型 $type 没有翻译',
+        );
+      }
+    });
+
+    test('登录、同步与共养文案都已翻译', () {
+      for (final k in [
+        'auth.title',
+        'auth.why',
+        'auth.channel.sms',
+        'auth.channel.email',
+        'auth.target.phone',
+        'auth.target.email',
+        'auth.target.required',
+        'auth.sendCode',
+        'auth.resendIn',
+        'auth.code',
+        'auth.codeHint',
+        'auth.codeRequired',
+        'auth.devCode',
+        'auth.submit',
+        'auth.sent',
+        'auth.failed',
+        'auth.notLoggedIn',
+        'auth.notLoggedInHint',
+        'auth.account',
+        'auth.logout',
+        'auth.logoutConfirm',
+        'auth.logoutHint',
+        'auth.loggedOut',
+        'sync.title',
+        'sync.now',
+        'sync.never',
+        'sync.lastAt',
+        'sync.pending',
+        'sync.upToDate',
+        'sync.syncing',
+        'sync.failed',
+        'sync.done',
+        'members.invite',
+        'members.inviteHint',
+        'members.target',
+        'members.role',
+        'members.role.owner',
+        'members.role.editor',
+        'members.role.viewer',
+        'members.status.pending',
+        'members.invite.sent',
+        'members.invite.failed',
+        'members.notRegistered',
+        'members.remove',
+        'members.removeConfirm',
+        'members.removeHint',
+        'members.removed',
+        'members.needLogin',
+        'members.invites.title',
+        'members.invites.accept',
+        'members.invites.accepted',
+        'members.me',
+        'me.privacy',
+        'me.terms',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+      // 三档角色都得有文案，否则权限说明会露出 role.editor 这种串。
+      for (final r in const ['owner', 'editor', 'viewer']) {
+        expect(L.t('members.role.$r'), isNot('members.role.$r'));
+      }
+      // 带占位符的三条
+      expect(L.tp('auth.resendIn', {'n': 30}), contains('30'));
+      expect(L.tp('sync.lastAt', {'time': '10-01 09:00'}), contains('10-01'));
+      expect(L.tp('sync.pending', {'n': 5}), contains('5'));
+    });
+
     test('占位符替换生效', () {
       final s = L.tp('timeline.daysAgo', {'n': 5});
       expect(s.contains('5'), isTrue);
@@ -298,6 +518,65 @@ void main() {
         expect(label.isNotEmpty, isTrue);
         expect(label.startsWith('addRecord.'), isFalse, reason: '$t 缺文案');
       }
+    });
+
+    test('knownPersonalities 过滤掉已废弃的 code', () {
+      // 老数据里可能有历史标签：展示层只认预设内的，
+      // 否则档案页会冒出一个看不懂的灰标签。
+      expect(
+        knownPersonalities(['friendly', 'legacy_tag', 'calm']),
+        ['friendly', 'calm'],
+      );
+      expect(knownPersonalities(const []), isEmpty);
+    });
+
+    test('reminderTitleFrom：系统 key 翻译、自建名字原样、空值用类型名', () {
+      // 系统按免疫规程生成的提醒存的是 i18n key。
+      expect(
+        reminderTitleFrom('plan.vaccine.core', 'vaccine'),
+        L.t('plan.vaccine.core'),
+      );
+      // 用户自己起的名字必须原样显示 —— 早先这里会被回落到 type，
+      // 界面上出现 'medication' 这种内部串。
+      expect(reminderTitleFrom('剪指甲', 'medication'), '剪指甲');
+      // 没起名就显示类型名。
+      expect(reminderTitleFrom('', 'checkup'), L.t('reminder.type.checkup'));
+      expect(reminderTitleFrom('   ', 'checkup'), L.t('reminder.type.checkup'));
+    });
+
+    test('提醒类型图标认得库里存的下划线式类型', () {
+      // 库里存的是 deworm_internal（PlanItemType.wireName），
+      // 早年只匹配驼峰式，导致驱虫/体检一律显示默认铃铛。
+      expect(reminderTypeIcon('deworm_internal'),
+          isNot(reminderTypeIcon('unknown_type')));
+      expect(reminderTypeIcon('deworm_external'),
+          isNot(reminderTypeIcon('unknown_type')));
+      expect(reminderTypeIcon('checkup'),
+          isNot(reminderTypeIcon('unknown_type')));
+    });
+  });
+
+  group('版本比较', () {    test('按数字段比大小，后缀不参与', () {
+      expect(AppUpdateService.compareVersion('0.2.0', '0.1.9') > 0, isTrue);
+      expect(AppUpdateService.compareVersion('0.1.0', '0.1.0'), 0);
+      expect(AppUpdateService.compareVersion('1.0.0-beta', '0.9.9') > 0, isTrue);
+    });
+
+    test('清单缺字段或格式不对时解析失败，而不是抛异常', () {
+      expect(UpdateManifest.tryParse(null), isNull);
+      expect(UpdateManifest.tryParse({'version': '0.2.0'}), isNull); // 缺 build/url
+      expect(UpdateManifest.tryParse({'version': '', 'build': 2, 'url': 'x'}), isNull);
+
+      final ok = UpdateManifest.tryParse({
+        'version': '0.2.0',
+        'build': 2,
+        'url': 'https://example.com/app.apk',
+        'notes': '修了几个问题',
+        'minBuild': 2,
+      });
+      expect(ok, isNotNull);
+      expect(ok!.build, 2);
+      expect(ok.minBuild, 2);
     });
   });
 }

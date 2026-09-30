@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标的背景色。
+
+  与 AppColors.primary（#7657E8）同一族 —— 图标底色是从生成图里采样的
+  (118,78,207)，比 primary 略深一点，为的是让白色剪影有足够对比度。
+  换主色时这两个值要一起看，别只改一边。
+-->
+<resources>
+    <color name="ic_launcher_background">#764ECF</color>
+</resources>

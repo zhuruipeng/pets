@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  intl（海外）flavor 的应用名 —— 桌面图标下面显示的就是它。
+  与 cn 分开是为了让中文区看到「我的宠物」、海外看到 "My Pet"。
+
+  ⚠️ 同 cn：不能用 resValue()，AGP 9.0 起会构建失败。见 src/cn/res/values/strings.xml 的说明。
+-->
+<resources>
+    <string name="app_name">My Pet</string>
+</resources>

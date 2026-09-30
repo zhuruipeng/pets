@@ -1,0 +1,430 @@
+/// 多设备同步引擎。
+///
+/// 策略部分（先推后拉、LWW 合并、回环抑制）都在这里，网络细节在 [SyncApi]。
+/// 这样拆是为了让策略能脱离网络单测。
+///
+/// 完整流程与取舍见 docs/同步协议.md 第七节。三处最容易错的地方，
+/// 在下面各自的位置都写了原因：
+/// 1. **必须先 push 后 pull**（否则自己的改动会被远端旧值覆盖一次）
+/// 2. **应用远端变更期间要置 applying 标志**（否则无限推拉循环）
+/// 3. **被拒的变更也要从 outbox 删掉**（否则队列永远卡在那一条上）
+library;
+
+import 'dart:convert';
+
+import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
+
+import '../db/app_database.dart';
+import 'sync_api.dart';
+
+/// 哪些表参与同步。与 schema.dart 的 kSyncedTables 一致 ——
+/// 那边决定「谁产生变更」，这边决定「谁能被应用」。
+const List<String> kSyncableTables = [
+  'users',
+  'pets',
+  'members',
+  'records',
+  'attachments',
+  'reminders',
+  'walk_sessions',
+];
+
+/// 一次同步的结果。
+class SyncReport {
+  const SyncReport({
+    required this.pushed,
+    required this.pulled,
+    required this.rejected,
+    this.error,
+  });
+
+  final int pushed;
+  final int pulled;
+
+  /// 被服务端拒掉的条数（stale / forbidden）。
+  final int rejected;
+
+  /// 出错时的原因。**同步失败不弹窗**，只记在这里给设置页看。
+  final Object? error;
+
+  bool get ok => error == null;
+
+  static const SyncReport skipped =
+      SyncReport(pushed: 0, pulled: 0, rejected: 0);
+}
+
+/// 同步状态。UI 据此显示「同步中 / 上次同步时间 / 出错」。
+enum SyncPhase { idle, syncing, offline, notLoggedIn, error }
+
+class SyncEngine {
+  SyncEngine({SyncApi? api, Database Function()? dbProvider})
+      : _api = api ?? SyncApi(),
+        _dbProvider = dbProvider ?? (() => AppDatabase.instance.db);
+
+  final SyncApi _api;
+  final Database Function() _dbProvider;
+
+  static const _uuid = Uuid();
+
+  /// 每批推送条数。太大容易在弱网下半途失败、整批重来。
+  static const int _pushBatch = 200;
+
+  /// pull 的分页上限（服务端上限 500，取小一点让进度可见）。
+  static const int _pullLimit = 200;
+
+  /// 防止并发同步：定时器、前台恢复、手动按钮可能同时触发。
+  bool _running = false;
+
+  Database get _db => _dbProvider();
+
+  // ---------------------------------------------------------------- 元数据
+
+  Future<String?> _meta(String key) async {
+    final rows = await _db
+        .query('sync_meta', where: 'key = ?', whereArgs: [key], limit: 1);
+    if (rows.isEmpty) return null;
+    return rows.first['value'] as String?;
+  }
+
+  Future<void> _setMeta(String key, String? value) async {
+    if (value == null) {
+      await _db.delete('sync_meta', where: 'key = ?', whereArgs: [key]);
+      return;
+    }
+    await _db.insert(
+      'sync_meta',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// 本机设备 id。首次调用时生成并持久化 —— 服务端用它区分设备
+  /// （目前只用于排查，不做 per-device 冲突）。
+  Future<String> deviceId() async {
+    final existing = await _meta('device_id');
+    if (existing != null && existing.isNotEmpty) return existing;
+    final id = _uuid.v4();
+    await _setMeta('device_id', id);
+    return id;
+  }
+
+  Future<bool> isLoggedIn() async {
+    final token = await _meta('token');
+    return token != null && token.isNotEmpty;
+  }
+
+  Future<String?> token() => _meta('token');
+
+  Future<DateTime?> lastSyncAt() async {
+    final raw = await _meta('last_sync_at');
+    final ms = int.tryParse(raw ?? '');
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  /// 有没有待推送的变更。用于「是否值得发一次同步」的判断 ——
+  /// 定时器每次都打网络是浪费电和流量。
+  Future<int> pendingCount() async {
+    final rows = await _db.rawQuery('SELECT COUNT(*) AS c FROM sync_outbox');
+    return (rows.first['c'] as num?)?.toInt() ?? 0;
+  }
+
+  // ---------------------------------------------------------------- 登录态
+
+  Future<void> saveSession(AuthSession session, {required String accountRegion}) async {
+    await _setMeta('token', session.token);
+    await _setMeta('account_id', session.user.id);
+    await _setMeta('account_region', accountRegion);
+  }
+
+  Future<void> signOut() async {
+    final t = await token();
+    if (t != null) {
+      try {
+        await _api.logout(t);
+      } catch (_) {
+        // 服务端不可达也要允许本地退出 —— 否则用户被卡在登录态里出不来。
+      }
+    }
+    // 只清登录态，**不动 outbox 与 last_seq**：
+    // 下次登录同一个账号能接着推，不用从头再来。
+    await _setMeta('token', null);
+  }
+
+  // ---------------------------------------------------------------- 同步
+
+  /// 跑一次完整同步。任何异常都被兜住并写进 [SyncReport.error]。
+  Future<SyncReport> sync() async {
+    if (_running) return SyncReport.skipped;
+    _running = true;
+    try {
+      final t = await token();
+      if (t == null || t.isEmpty) return SyncReport.skipped;
+
+      var pushed = 0;
+      var rejected = 0;
+      try {
+        final device = await deviceId();
+        final push = await _pushAll(t, device);
+        pushed = push.$1;
+        rejected = push.$2;
+      } on SyncApiException catch (e) {
+        // token 失效：清掉，让 UI 回到「未登录」。这不是错误，是正常状态。
+        if (e.isUnauthorized) {
+          await _setMeta('token', null);
+          return SyncReport(pushed: pushed, pulled: 0, rejected: rejected, error: e);
+        }
+        rethrow;
+      }
+
+      final pulled = await _pullAll(t);
+      await _setMeta('last_sync_at', '${DateTime.now().millisecondsSinceEpoch}');
+
+      return SyncReport(pushed: pushed, pulled: pulled, rejected: rejected);
+    } catch (e) {
+      return SyncReport(pushed: 0, pulled: 0, rejected: 0, error: e);
+    } finally {
+      _running = false;
+    }
+  }
+
+  /// 推完全部 outbox。返回 (成功条数, 被拒条数)。
+  ///
+  /// **先推后拉**：反过来的话，会先把远端的旧版本拉下来覆盖本地的新改动，
+  /// 再把自己的改动推上去 —— 等于自己这次的编辑白做了一次。
+  Future<(int, int)> _pushAll(String token, String device) async {
+    var applied = 0;
+    var rejected = 0;
+
+    // 循环直到 outbox 空：推送过程中可能又有新写入（比如用户还在记东西）。
+    for (var round = 0; round < 50; round++) {
+      final rows = await _db.query(
+        'sync_outbox',
+        orderBy: 'updated_at ASC',
+        limit: _pushBatch,
+      );
+      if (rows.isEmpty) break;
+
+      final changes = <SyncChange>[];
+      for (final row in rows) {
+        final c = await _snapshot(row);
+        // 本地行已经不存在（被硬删或表对不上）：丢掉这条，别让它卡住队列。
+        if (c != null) changes.add(c);
+      }
+      // 取不到快照的行直接清掉，否则每轮都会捞到它们，死循环。
+      if (changes.isEmpty) {
+        await _db.delete('sync_outbox');
+        break;
+      }
+
+      final result = await _api.push(
+        token: token,
+        deviceId: device,
+        changes: changes,
+      );
+      applied += result.applied.length;
+      rejected += result.rejected.length;
+
+      // **被拒的也要删**：`stale` 表示服务端已有更新版本，本地这条推不上去，
+      // 留着只会每轮重推一次；`forbidden` 是权限问题，重推一万次也一样。
+      // 都删掉，然后由随后的 pull 把服务端那份正确数据拉回来。
+      for (final c in [...result.applied, ...result.rejected.map((r) => r.change)]) {
+        await _db.delete(
+          'sync_outbox',
+          where: 'table_name = ? AND row_id = ?',
+          whereArgs: [c.table, c.rowId],
+        );
+      }
+
+      // 服务端一条都没收（全被拒）且队列没变短，说明这批怎么推都推不动，
+      // 直接退出，避免空转。
+      if (result.applied.isEmpty) break;
+    }
+    return (applied, rejected);
+  }
+
+  /// 把 outbox 的一行还原成完整变更（含行快照）。
+  ///
+  /// 返回值需要 `pet_id` 与 `points`：前者服务端用来判可见性，后者是
+  /// 轨迹点随 session 一起传的约定（见协议第三节）。
+  Future<SyncChange?> _snapshot(Map<String, dynamic> outboxRow) async {
+    final table = outboxRow['table_name'] as String;
+    final rowId = outboxRow['row_id'] as String;
+    if (!kSyncableTables.contains(table)) return null;
+
+    final rows =
+        await _db.query(table, where: 'id = ?', whereArgs: [rowId], limit: 1);
+    if (rows.isEmpty) return null;
+    final payload = Map<String, dynamic>.from(rows.first);
+
+    if (table == 'walk_sessions') {
+      final points = await _db.query(
+        'walk_points',
+        where: 'session_id = ?',
+        whereArgs: [rowId],
+        orderBy: 'recorded_at ASC',
+      );
+      payload['points'] = [
+        for (final p in points)
+          {
+            'lat': p['lat'],
+            'lng': p['lng'],
+            if (p['altitude'] != null) 'altitude': p['altitude'],
+            if (p['accuracy'] != null) 'accuracy': p['accuracy'],
+            'recorded_at': p['recorded_at'],
+          },
+      ];
+    }
+
+    return SyncChange(
+      table: table,
+      rowId: rowId,
+      op: (outboxRow['op'] as String?) ?? 'upsert',
+      petId: outboxRow['pet_id'] as String?,
+      updatedAt: (outboxRow['updated_at'] as num?)?.toInt(),
+      payload: payload,
+    );
+  }
+
+  /// 拉到看到的最末。返回应用条数。
+  Future<int> _pullAll(String token) async {
+    var since = int.tryParse(await _meta('last_seq') ?? '') ?? 0;
+    var appliedCount = 0;
+
+    for (var round = 0; round < 200; round++) {
+      final result = await _api.pull(token: token, since: since, limit: _pullLimit);
+      if (result.changes.isNotEmpty) {
+        appliedCount += await _applyRemote(result.changes);
+      }
+      // 即使没有变更也要落游标：服务端会在空页时返回当前最大 seq，
+      // 存下来下次就不用从头扫。
+      since = result.nextSince;
+      await _setMeta('last_seq', '$since');
+      if (!result.hasMore) break;
+    }
+    return appliedCount;
+  }
+
+  /// 应用远端变更：逐条 LWW 比较，更新的才写。
+  ///
+  /// 整段包在 `applying = 1` 里，让 outbox 触发器哑火 —— 否则刚应用完
+  /// 就又变成待推送变更，推上去、再拉下来，无限循环。
+  Future<int> _applyRemote(List<SyncChange> changes) async {
+    var n = 0;
+    await _db.transaction((txn) async {
+      await txn.insert(
+        'sync_meta',
+        {'key': 'applying', 'value': '1'},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      for (final c in changes) {
+        if (!kSyncableTables.contains(c.table)) continue;
+        final ok = await _applyOne(txn, c);
+        if (ok) n++;
+      }
+
+      await txn.delete('sync_meta', where: 'key = ?', whereArgs: ['applying']);
+    });
+    return n;
+  }
+
+  Future<bool> _applyOne(DatabaseExecutor txn, SyncChange c) async {
+    final payload = Map<String, dynamic>.from(c.payload);
+    payload.remove('points'); // 轨迹点是子资源，单独处理
+
+    // 本地现有的 updated_at，用来判新旧。
+    final local = await txn.query(
+      c.table,
+      columns: ['updated_at'],
+      where: 'id = ?',
+      whereArgs: [c.rowId],
+      limit: 1,
+    );
+    final localUpdatedAt =
+        local.isEmpty ? null : (local.first['updated_at'] as num?)?.toInt();
+    final remoteUpdatedAt = c.updatedAt ??
+        (payload['updated_at'] as num?)?.toInt() ??
+        c.seq;
+
+    // 远端不比本地新就跳过。**不抛异常、不记录**：这是正常情况
+    // （同一行两处都改过，本地那份更新）。
+    if (localUpdatedAt != null &&
+        remoteUpdatedAt != null &&
+        remoteUpdatedAt <= localUpdatedAt) {
+      return false;
+    }
+
+    if (local.isEmpty) {
+      payload['id'] = c.rowId;
+      // 远端推来的行可能缺列（对面设备 schema 更旧）。用 REPLACE 补齐，
+      // 缺的列会是 NULL —— 这些列在对面本来也是空的。
+      await txn.insert(c.table, payload, conflictAlgorithm: ConflictAlgorithm.replace);
+    } else {
+      // **用 update 而不是 REPLACE**：REPLACE 是「删了重插」，
+      // payload 里没有的列会被清成 NULL。比如对面推 pets 时没带图片字段，
+      // REPLACE 会把本地头像抹掉。
+      payload.remove('id');
+      if (payload.isNotEmpty) {
+        await txn.update(c.table, payload,
+            where: 'id = ?', whereArgs: [c.rowId]);
+      }
+    }
+
+    if (c.table == 'walk_sessions') {
+      final points = c.payload['points'];
+      if (points is List) {
+        await txn.delete('walk_points',
+            where: 'session_id = ?', whereArgs: [c.rowId]);
+        for (final raw in points) {
+          final p = (raw as Map).cast<String, dynamic>();
+          await txn.insert(
+            'walk_points',
+            {
+              'id': '${c.rowId}_${p['recorded_at']}',
+              'session_id': c.rowId,
+              'lat': p['lat'],
+              'lng': p['lng'],
+              if (p['altitude'] != null) 'altitude': p['altitude'],
+              if (p['accuracy'] != null) 'accuracy': p['accuracy'],
+              'recorded_at': p['recorded_at'],
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+    }
+    return true;
+  }
+
+  /// 把本地联系方式推给服务端（`PATCH /me` 是即时接口，不进 outbox 批量）。
+  Future<void> pushContact({
+    String? phone,
+    String? email,
+    String? wechat,
+    String? contactNote,
+  }) async {
+    final t = await token();
+    if (t == null) return;
+    await _api.patchMe(
+      t,
+      phone: phone,
+      email: email,
+      wechat: wechat,
+      contactNote: contactNote,
+    );
+  }
+
+  /// 调试用：把 outbox 清空（例如服务端数据被重置之后）。
+  Future<void> clearOutbox() async {
+    await _db.delete('sync_outbox');
+  }
+
+  /// 调试用：把游标归零，下次同步从头拉。
+  Future<void> resetCursor() async {
+    await _setMeta('last_seq', null);
+  }
+
+  /// 让调用方（测试）能拿到 JSON 编码后的快照大小，用于评估批大小。
+  static int snapshotBytes(SyncChange c) => utf8.encode(jsonEncode(c.payload)).length;
+}

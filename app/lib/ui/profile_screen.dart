@@ -12,6 +12,8 @@
 /// 落在 M2/M3，先摆空态 —— 空态也要写清楚「以后这里放什么」。
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,13 +21,20 @@ import '../core/feature_flags.dart';
 import '../core/l10n.dart';
 import '../core/region.dart';
 import '../core/theme.dart';
+import '../core/traits.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../data/repositories/member_repository.dart';
 import '../domain/immunization.dart' show Species;
 import '../providers.dart';
+import 'avatar_sheet.dart';
+import 'edit_pet_sheet.dart';
+import 'lost_card.dart';
+import 'members_sheet.dart';
 import 'records_screen.dart';
+import 'reminder_sheet.dart';
 import 'sheets.dart';
+import 'walk_detail.dart';
 import 'widgets.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -107,20 +116,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
         children: [
           _InfoTab(pet: pet),
           _HealthTab(pet: pet),
-          _PlaceholderTab(
-            icon: Icons.checklist_rounded,
-            title: L.t('profile.tab.records'),
-            hint: L.isZh
-                ? '疫苗、驱虫、用药等已完成的条目按时间排列'
-                : 'Completed vaccines, deworming and meds in time order',
-          ),
-          _PlaceholderTab(
-            icon: Icons.photo_album_outlined,
-            title: L.t('profile.tab.memory'),
-            hint: L.isZh
-                ? '把照片按时间聚起来，长成一本相册'
-                : 'Photos grouped by time into an album',
-          ),
+          _RecordsTab(pet: pet),
+          _MemoriesTab(pet: pet),
         ],
       ),
     );
@@ -188,7 +185,7 @@ class _HeroHeader extends ConsumerWidget {
               const SizedBox(width: 38),
               const Spacer(),
               TextButton(
-                onPressed: () => _editSoon(context),
+                onPressed: () => showEditPetSheet(context, pet: pet),
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   minimumSize: const Size(0, 34),
@@ -218,7 +215,7 @@ class _HeroHeader extends ConsumerWidget {
                 right: -2,
                 bottom: -2,
                 child: GestureDetector(
-                  onTap: () => _avatarSoon(context),
+                  onTap: () => showAvatarSheet(context, ref, pet),
                   child: Container(
                     width: 30,
                     height: 30,
@@ -305,21 +302,6 @@ class _HeroHeader extends ConsumerWidget {
         Species.cat => L.t('addPet.species.cat'),
         Species.other => L.t('addPet.species.other'),
       };
-
-  void _editSoon(BuildContext context) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(L.t('profile.editSoon'))));
-  }
-
-  void _avatarSoon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          L.isZh ? '头像上传在 M2 实现' : 'Avatar upload arrives in M2',
-        ),
-      ),
-    );
-  }
 }
 
 /// 性别符号。与今日页保持同一套绘制。
@@ -359,6 +341,7 @@ class _InfoTab extends ConsumerWidget {
     final latestWeight =
         (series == null || series.isEmpty) ? null : series.last.kg;
     final basicRows = _basicRows(pet, latestWeight, unit);
+    final traits = knownPersonalities(pet.personality);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -432,13 +415,26 @@ class _InfoTab extends ConsumerWidget {
             borderRadius: AppRadius.cardBorder,
             border: Border.all(color: AppColors.border),
           ),
-          child: Text(
-            L.t('profile.traits.empty'),
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.textSecondary,
-            ),
-          ),
+          child: traits.isEmpty
+              ? Text(
+                  L.t('profile.traits.empty'),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: AppColors.textSecondary,
+                  ),
+                )
+              : Wrap(
+                  spacing: AppSpace.gapS,
+                  runSpacing: AppSpace.gapS,
+                  children: [
+                    for (final code in traits)
+                      SoftTag(
+                        personalityLabel(code),
+                        color: AppColors.primary,
+                        bg: AppColors.primaryLight,
+                      ),
+                  ],
+                ),
         ),
 
         // ---- 家庭成员 ----
@@ -452,7 +448,7 @@ class _InfoTab extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: AppSpace.gapM),
-        _FamilyCard(petId: pet.id),
+        _FamilyCard(pet: pet),
 
         // ---- 提醒计划（这个 App 的核心价值，不能因为改版就藏起来） ----
         const SizedBox(height: AppSpace.gapXl),
@@ -480,9 +476,31 @@ class _InfoTab extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: AppSpace.gapM),
-          _WalksCard(petId: pet.id),
+          _WalksCard(petId: pet.id, petName: pet.name),
           const SizedBox(height: AppSpace.gapXl),
         ],
+        // 走失协查卡片和归档放在最后一组：都是低频、且需要确认的动作，
+        // 不放在页面显眼处 —— 平时用不到，真要用时一眼能找到就行。
+        Center(
+          child: OutlinedButton.icon(
+            onPressed: () => showLostCardSheet(context, pet),
+            icon: const Icon(Icons.priority_high_rounded, size: 17),
+            label: Text(L.t('lost.action')),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.danger,
+              side: const BorderSide(color: AppColors.border),
+              minimumSize: const Size(0, 42),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.tile),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpace.gapS),
         Center(
           child: TextButton.icon(
             onPressed: () => _archive(context, ref, pet),
@@ -927,13 +945,15 @@ class _VisitRow extends StatelessWidget {
 // ------------------------------------------------------------------ 家庭成员
 
 class _FamilyCard extends ConsumerWidget {
-  const _FamilyCard({required this.petId});
+  const _FamilyCard({required this.pet});
 
-  final String petId;
+  final Pet pet;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final members = ref.watch(petMembersProvider(petId)).valueOrNull ??
+    // 待接受的成员也一并显示（下面标「待接受」）—— 否则邀请发出去之后
+    // 发起人看不到任何变化，会以为没成功，转头再邀请一次。
+    final members = ref.watch(petMembersProvider(pet.id)).valueOrNull ??
         const <PetMember>[];
 
     // 至少显示当前用户一条 —— 创建者一定在，否则共养无从谈起。
@@ -947,7 +967,9 @@ class _FamilyCard extends ConsumerWidget {
         if (m.role != MemberRole.owner)
           (
             name: m.userId,
-            role: L.t('profile.role.member'),
+            role: m.status == MemberStatus.pending
+                ? L.t('members.status.pending')
+                : L.t('profile.role.member'),
             icon: Icons.person_rounded,
           ),
     ];
@@ -1012,11 +1034,7 @@ class _FamilyCard extends ConsumerWidget {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(L.t('profile.member.addSoon'))),
-                );
-              },
+              onPressed: () => showMembersSheet(context, pet: pet),
               icon: const Icon(Icons.person_add_alt_1_rounded, size: 17),
               label: Text(L.t('profile.addFamily')),
               style: OutlinedButton.styleFrom(
@@ -1050,40 +1068,78 @@ class _RemindersCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final reminders = ref.watch(petRemindersProvider(pet.id));
 
+    final addButton = Padding(
+      padding: const EdgeInsets.only(top: AppSpace.gapM),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: () => showReminderSheet(context, pet: pet),
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: Text(L.t('reminder.add')),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.primary,
+            side: const BorderSide(color: AppColors.border),
+            minimumSize: const Size(0, 42),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.tile),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+
     return reminders.when(
       loading: () => const SizedBox.shrink(),
       error: (e, _) => Text('$e'),
       data: (list) {
         if (list.isEmpty) {
-          return _PlainHint(
-            icon: Icons.notifications_none_rounded,
-            text: L.isZh
-                ? '还没有提醒。填了生日就会自动生成疫苗和驱虫计划。'
-                : 'No reminders yet. Add a birthday to generate a plan.',
+          return Column(
+            children: [
+              _PlainHint(
+                icon: Icons.notifications_none_rounded,
+                text: L.isZh
+                    ? '还没有提醒。填了生日会自动生成疫苗和驱虫计划，也可以自己加一条。'
+                    : 'No reminders yet. A birthday generates a plan, or add your own.',
+              ),
+              addButton,
+            ],
           );
         }
 
         final sorted = [...list]..sort((a, b) => a.nextAt.compareTo(b.nextAt));
         final now = DateTime.now();
 
-        return Container(
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: AppRadius.cardBorder,
-            border: Border.all(color: AppColors.border),
-          ),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpace.gapL,
-            vertical: AppSpace.gapXs,
-          ),
-          child: Column(
-            children: [
-              for (var i = 0; i < sorted.length; i++) ...[
-                if (i > 0) const RowDivider(),
-                _ReminderRow(reminder: sorted[i], overdue: sorted[i].nextAt.isBefore(now)),
-              ],
-            ],
-          ),
+        return Column(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: AppRadius.cardBorder,
+                border: Border.all(color: AppColors.border),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpace.gapL,
+                vertical: AppSpace.gapXs,
+              ),
+              child: Column(
+                children: [
+                  for (var i = 0; i < sorted.length; i++) ...[
+                    if (i > 0) const RowDivider(),
+                    _ReminderRow(
+                      reminder: sorted[i],
+                      pet: pet,
+                      overdue: sorted[i].nextAt.isBefore(now),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            addButton,
+          ],
         );
       },
     );
@@ -1091,69 +1147,114 @@ class _RemindersCard extends ConsumerWidget {
 }
 
 class _ReminderRow extends ConsumerWidget {
-  const _ReminderRow({required this.reminder, required this.overdue});
+  const _ReminderRow({
+    required this.reminder,
+    required this.pet,
+    required this.overdue,
+  });
 
   final Reminder reminder;
+  final Pet pet;
   final bool overdue;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: overdue ? AppColors.dangerBg : AppColors.primaryLight,
-              borderRadius: BorderRadius.circular(10),
+    final manual = reminder.source == 'manual';
+
+    return InkWell(
+      // 点进编辑，长按删除 —— 列表行放不下两个按钮，
+      // 而「删除」是低频且危险的动作，长按是合适的门槛。
+      onTap: () => showReminderSheet(context, pet: pet, existing: reminder),
+      onLongPress: () => _confirmDelete(context, ref),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: overdue ? AppColors.dangerBg : AppColors.primaryLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                overdue
+                    ? Icons.error_outline_rounded
+                    : reminderTypeIcon(reminder.type),
+                size: 16,
+                color: overdue ? AppColors.danger : AppColors.primary,
+              ),
             ),
-            child: Icon(
-              overdue
-                  ? Icons.error_outline_rounded
-                  : Icons.notifications_none_rounded,
-              size: 16,
-              color: overdue ? AppColors.danger : AppColors.primary,
-            ),
-          ),
-          const SizedBox(width: AppSpace.gapM),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  reminderTitle(reminder),
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimary,
+            const SizedBox(width: AppSpace.gapM),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    reminderTitle(reminder),
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${_short(reminder.nextAt)} · ${dueLabel(reminder.nextAt)}',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: overdue
-                        ? AppColors.danger
-                        : AppColors.textSecondary,
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      '${_short(reminder.nextAt)} · ${dueLabel(reminder.nextAt)}',
+                      if (reminder.isRecurring)
+                        L.tp('reminder.repeat.everyNDays',
+                            {'n': reminder.everyDays}),
+                      // 手动建的标一下来源，方便和系统生成的区分开
+                      if (manual) L.t('reminder.source.manual'),
+                    ].join(' · '),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: overdue
+                          ? AppColors.danger
+                          : AppColors.textSecondary,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
+            Switch(
+              value: reminder.enabled,
+              onChanged: (v) async {
+                // 走 updateReminder 而不是只改库里的 enabled：它会顺带
+                // 撤掉/重排本地通知。只写数据的话，关掉的提醒照样会弹。
+                await ref
+                    .read(appActionsProvider)
+                    .updateReminder(reminder.copyWith(enabled: v));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(L.t('reminder.deleteConfirm')),
+        content: Text(L.t('reminder.deleteConfirm.hint')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(L.t('action.cancel')),
           ),
-          Switch(
-            value: reminder.enabled,
-            onChanged: (v) async {
-              await ref.read(reminderRepositoryProvider).setEnabled(reminder.id, v);
-              ref.invalidate(petRemindersProvider(reminder.petId));
-              ref.invalidate(upcomingRemindersProvider);
-            },
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: Text(L.t('reminder.delete')),
           ),
         ],
       ),
     );
+    if (ok != true) return;
+    await ref.read(appActionsProvider).deleteReminder(reminder);
   }
 
   static String _short(DateTime d) =>
@@ -1165,9 +1266,12 @@ class _ReminderRow extends ConsumerWidget {
 // ------------------------------------------------------------------ 遛狗记录
 
 class _WalksCard extends ConsumerWidget {
-  const _WalksCard({required this.petId});
+  const _WalksCard({required this.petId, this.petName});
 
   final String petId;
+
+  /// 分享轨迹时要在文案里带上名字，取不到就留空。
+  final String? petName;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1201,7 +1305,13 @@ class _WalksCard extends ConsumerWidget {
               final w = walks[i];
               final (h, m) = Units.splitDuration(w.durationS);
               final dur = h > 0 ? '${h}h ${m}m' : '${m}m';
-              return Padding(
+              return InkWell(
+                onTap: () => showWalkDetailSheet(
+                  context,
+                  session: w,
+                  petName: petName,
+                ),
+                child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Row(
                   children: [
@@ -1260,6 +1370,7 @@ class _WalksCard extends ConsumerWidget {
                     ),
                   ],
                 ),
+                ),
               );
             }),
           ],
@@ -1269,18 +1380,165 @@ class _WalksCard extends ConsumerWidget {
   }
 }
 
-// ------------------------------------------------------------------ 其他页签
+// ------------------------------------------------------------------ 记录页签
 
-class _PlaceholderTab extends StatelessWidget {
-  const _PlaceholderTab({
+/// 记录页签：这只宠物**已经完成**的条目，按时间倒序，点进详情。
+///
+/// 与底部「记录」Tab 的分工：那边是全宇宙（筛选、搜索、补录入口都在那），
+/// 这边只回答「这只宠物都发生过什么」—— 换个宠物就是另一段历史。
+/// 渲染直接复用 [RecordTimeline]，不另写一套。
+class _RecordsTab extends ConsumerWidget {
+  const _RecordsTab({required this.pet});
+
+  final Pet pet;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final records = ref.watch(petRecordsProvider(pet.id));
+
+    return records.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('$e')),
+      data: (list) {
+        if (list.isEmpty) {
+          return const _TabEmpty(
+            icon: Icons.checklist_rounded,
+            titleKey: 'profile.records.empty',
+            hintKey: 'profile.records.emptyHint',
+          );
+        }
+        final sorted = [...list]
+          ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.page,
+            AppSpace.gapL,
+            AppSpace.page,
+            96,
+          ),
+          children: [RecordTimeline(records: sorted)],
+        );
+      },
+    );
+  }
+}
+
+// ------------------------------------------------------------------ 回忆页签
+
+/// 回忆页签：这只宠物的照片墙。
+///
+/// 数据源是**记录上的附件**，不另存一份。这样「回忆」不是又一个需要维护的
+/// 功能，而是记录页的另一种读法 —— 用户随手给记录加的照片，攒起来就是相册，
+/// 不用逼他「先建相册再传图」。
+class _MemoriesTab extends ConsumerWidget {
+  const _MemoriesTab({required this.pet});
+
+  final Pet pet;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final photos = ref.watch(petPhotosProvider(pet.id));
+
+    return photos.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('$e')),
+      data: (list) {
+        if (list.isEmpty) {
+          return const _TabEmpty(
+            icon: Icons.photo_album_outlined,
+            titleKey: 'profile.memory.empty',
+            hintKey: 'profile.memory.emptyHint',
+          );
+        }
+        final paths = [for (final p in list) p.localPath ?? ''];
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.page,
+            AppSpace.gapL,
+            AppSpace.page,
+            96,
+          ),
+          children: [
+            Text(
+              L.tp('profile.memory.count', {'n': '${paths.length}'}),
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: AppSpace.gapM),
+            _PhotoGrid(paths: paths),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 照片网格。三列正方形，间距按页面栅格走。
+///
+/// 只渲染**本地文件真的在**的那些格子 —— 附件记录可能在（同步过来的、
+/// 或者用户清过存储），文件却没了，那种格子只会是一块灰。
+class _PhotoGrid extends StatelessWidget {
+  const _PhotoGrid({required this.paths});
+
+  final List<String> paths;
+
+  @override
+  Widget build(BuildContext context) {
+    final files = [
+      for (final path in paths)
+        if (path.trim().isNotEmpty && File(path).existsSync()) path,
+    ];
+    if (files.isEmpty) {
+      return Text(
+        L.t('profile.memory.empty'),
+        style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+      );
+    }
+
+    const gap = AppSpace.gapS;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const cols = 3;
+        final size = (constraints.maxWidth - gap * (cols - 1)) / cols;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final path in files)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(
+                  File(path),
+                  width: size,
+                  height: size,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: size,
+                    height: size,
+                    color: AppColors.divider,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 页签空态。三个页签共用一套，免得每处各写一遍「图标 + 标题 + 两行说明」。
+class _TabEmpty extends StatelessWidget {
+  const _TabEmpty({
     required this.icon,
-    required this.title,
-    required this.hint,
+    required this.titleKey,
+    required this.hintKey,
   });
 
   final IconData icon;
-  final String title;
-  final String hint;
+  final String titleKey;
+  final String hintKey;
 
   @override
   Widget build(BuildContext context) {
@@ -1301,7 +1559,7 @@ class _PlaceholderTab extends StatelessWidget {
             ),
             const SizedBox(height: AppSpace.gapL),
             Text(
-              title,
+              L.t(titleKey),
               style: const TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
@@ -1310,7 +1568,7 @@ class _PlaceholderTab extends StatelessWidget {
             ),
             const SizedBox(height: AppSpace.gapS),
             Text(
-              hint,
+              L.t(hintKey),
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 12.5,

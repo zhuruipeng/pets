@@ -126,7 +126,7 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
                                 ),
                               )
                             else
-                              _Timeline(records: visible),
+                              RecordTimeline(records: visible),
                           ],
                         ),
                         Positioned(
@@ -555,8 +555,8 @@ class WeightChartCard extends ConsumerWidget {
 
 // ------------------------------------------------------------------ 时间线
 
-class _Timeline extends StatelessWidget {
-  const _Timeline({required this.records});
+class RecordTimeline extends StatelessWidget {
+  const RecordTimeline({super.key, required this.records});
 
   final List<PetRecord> records;
 
@@ -590,7 +590,7 @@ class _Timeline extends StatelessWidget {
               children: [
                 for (var i = 0; i < entry.value.length; i++) ...[
                   if (i > 0) const RowDivider(),
-                  _RecordRow(
+                  RecordRow(
                     record: entry.value[i],
                     weightDelta: deltas[entry.value[i].id],
                   ),
@@ -620,8 +620,12 @@ class _Timeline extends StatelessWidget {
   }
 }
 
-class _RecordRow extends ConsumerWidget {
-  const _RecordRow({required this.record, this.weightDelta});
+class RecordRow extends ConsumerWidget {
+  const RecordRow({
+    super.key,
+    required this.record,
+    this.weightDelta,
+  });
 
   final PetRecord record;
 

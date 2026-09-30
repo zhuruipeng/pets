@@ -34,6 +34,53 @@ class Settings(BaseSettings):
     storage_bucket: str = ""
     storage_region: str = ""
 
+    # ---- 应用内更新 ----
+    # 客户端启动时会 GET /app/version.json，拿这份配置和自己本机的
+    # versionName / versionCode 比。**发新版时只改这几个环境变量并重启服务，
+    # 不用动代码**，这是把它做成接口而不是静态文件的原因。
+    #
+    # app_build 必须与客户端 pubspec.yaml 的 version 段（+ 号后的数字）
+    # 严格同源递增：客户端拿 versionCode 比大小，比错了会反复提示更新。
+    app_version: str = "0.1.0"
+    app_build: int = 1
+
+    # APK 直链。可以放在对象存储/CDN，不必与接口同域 ——
+    # 但要保证是 **HTTPS**：Android 9+ 默认禁止明文 HTTP。
+    app_apk_url: str = ""
+
+    # 更新说明，纯文本，换行即分段。
+    app_notes: str = ""
+
+    # 低于这个 build 强制更新。用来推掉有严重问题的版本；
+    # 留 0 表示不强制。
+    app_min_build: int = 0
+
+    # 海外区 iOS 跳商店用。国内不上 App Store，留空即可。
+    app_ios_store_url: str = ""
+
+    # ---- 账号与验证码 ----
+    # 登录令牌有效期。用「天」而不是「秒」是因为这是个产品决策（用户多久
+    # 要重新登录一次），不是调参项；30 天兼顾了「不用天天登录」与「丢了手机
+    # 不至于永久有效」。令牌可被 /auth/logout 立即撤销，所以这个值不承担安全兜底。
+    token_ttl_days: int = 30
+
+    # 验证码有效期 5 分钟：短到被猜中的窗口很小，长到用户找得到手机。
+    code_ttl_seconds: int = 300
+
+    # 同一 target 的重发间隔。防的是「点一下没收到就连点十下」，
+    # 顺带把短信费用按住。调大不影响正常用户（重发一次就够）。
+    code_resend_seconds: int = 60
+
+    # 是否在响应里回显验证码。**只能在开发/联调环境开启** ——
+    # 默认 True 是为了「不接短信服务商也能把整条登录链路跑通」；
+    # 上线前必须置 false，否则任何人都能拿别人的手机号直接登录。
+    dev_echo_code: bool = True
+
+    # 短信/邮件服务商标识。留空表示「没有配置真实通道」，此时只写库不发码，
+    # 依赖 dev_echo_code 回显。中国区短信需模板报备，海外区可用邮件兜底。
+    sms_provider: str = ""
+    email_provider: str = ""
+
     # 是否强制要求备案号展示（中国区合规）
     @property
     def requires_icp_display(self) -> bool:

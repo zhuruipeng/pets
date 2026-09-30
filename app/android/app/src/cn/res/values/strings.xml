@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  cn（中国大陆）flavor 的应用名 —— 桌面图标下面显示的就是它。
+
+  ⚠️ 这里不能用 build.gradle.kts 的 resValue("string", "app_name", ...) 代替。
+  AGP 9.0 起 flavor 里的自定义资源值默认被禁用，构建会直接失败：
+    "Product Flavor cn contains custom resource values, but the feature is disabled."
+  Flutter 官方文档《Set up Flutter flavors for Android》给的替代写法就是
+  每个 flavor 一个 res/values/strings.xml。
+-->
+<resources>
+    <string name="app_name">我的宠物</string>
+</resources>

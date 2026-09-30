@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import auth, members, sync
 from .config import Settings, get_settings
 from .db import get_session, init_db
 from .models import Pet
@@ -37,6 +38,14 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/docs",
 )
+
+# 账号 / 同步 / 共养三组路由都挂在 /api/v1 下（协议第五节）。
+# 老的 /health、/pets、/app/version.json 没有版本前缀，保持原样不动：
+# 已经上线的客户端调的就是这些无前缀路径，改了等于强制所有人升级。
+API_V1 = "/api/v1"
+app.include_router(auth.router, prefix=API_V1)
+app.include_router(sync.router, prefix=API_V1)
+app.include_router(members.router, prefix=API_V1)
 
 
 def _now_ms() -> int:
@@ -57,6 +66,31 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
     }
 
 
+@app.get("/app/version.json", tags=["meta"])
+def app_version(settings: Settings = Depends(get_settings)) -> dict:
+    """应用内更新的版本清单。
+
+    为什么是接口而不是静态文件：发新版时只改环境变量重启服务即可，
+    不必上服务器替换 JSON、也不用担心两区文件不一致（中国区与海外区
+    是两个独立部署，静态文件很容易只改了一边）。
+
+    客户端逻辑（见 app/lib/services/app_update_service.dart）：
+    - 用 **build** 比大小，version 只用于展示；
+    - `localBuild < min_build` → 强制更新，没有「稍后」；
+    - **任何字段缺失/格式不对，客户端会静默放弃更新**，
+      所以这里宁可返回慢一点也不要抛异常。
+    """
+    return {
+        "version": settings.app_version,
+        "build": settings.app_build,
+        "url": settings.app_apk_url,
+        "notes": settings.app_notes,
+        "minBuild": settings.app_min_build,
+        "iosStoreUrl": settings.app_ios_store_url or None,
+        "region": settings.region,
+    }
+
+
 # --------------------------------------------------------------- 数据模型
 
 
@@ -74,6 +108,8 @@ class PetIn(BaseModel):
     color: str | None = None
     allergy: str | None = None
     note: str | None = None
+    # 个性特点：与客户端一致的 JSON 数组字符串。
+    personality: str | None = None
 
 
 class PetOut(PetIn):
@@ -100,6 +136,7 @@ def _to_out(pet: Pet) -> PetOut:
         color=pet.color,
         allergy=pet.allergy,
         note=pet.note,
+        personality=pet.personality,
         created_by=pet.created_by,
         created_at=pet.created_at,
         updated_at=pet.updated_at,

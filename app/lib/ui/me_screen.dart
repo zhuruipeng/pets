@@ -9,13 +9,31 @@ library;
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/l10n.dart';
 import '../core/region.dart';
 import '../core/theme.dart';
 import '../core/units.dart';
+import '../data/models.dart';
+import '../data/sync/sync_api.dart';
 import '../providers.dart';
+import 'auth_sheet.dart';
+import 'contact_sheet.dart';
+import 'legal_page.dart';
+import 'update_flow.dart';
 import 'widgets.dart';
+
+/// 联系方式摘要：一行里把填过的都列出来，没填的跳过。
+///
+/// 不列「手机号：未填」这种 —— 那和「还没填联系方式」的空态重复了。
+String _contactSummary(LocalUser user) => [
+      if ((user.phone ?? '').trim().isNotEmpty) user.phone!.trim(),
+      if ((user.wechat ?? '').trim().isNotEmpty)
+        '${L.t('contact.wechat')} ${user.wechat!.trim()}',
+      if ((user.email ?? '').trim().isNotEmpty) user.email!.trim(),
+      if ((user.contactNote ?? '').trim().isNotEmpty) user.contactNote!.trim(),
+    ].join(' · ');
 
 class MeScreen extends ConsumerWidget {
   const MeScreen({super.key});
@@ -110,12 +128,114 @@ class MeScreen extends ConsumerWidget {
         ],
 
         const SizedBox(height: AppSpace.gapM),
+
+        // ---- 账号与同步（M6）。
+        // 放在联系方式之上：没登录的话，走失卡片、共养都用不起来，
+        // 它才是这个页面第一件该处理的事。 ----
+        const _AccountCard(),
+        const SizedBox(height: AppSpace.gapM),
+        const _InvitesCard(),
+
+        // ---- 联系方式（M5）。走失协查卡片要靠它，所以放在「我的」而不是
+        // 藏在某个二级设置页里。 ----
+        _Card(
+          title: L.t('contact.title'),
+          icon: Icons.contact_phone_outlined,
+          children: [
+            Consumer(
+              builder: (context, ref, _) {
+                final user = ref.watch(currentUserProvider).valueOrNull;
+                final has = user?.hasContact ?? false;
+
+                return InkWell(
+                  onTap: user == null
+                      ? null
+                      : () => showContactSheet(context, user: user),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            has ? _contactSummary(user!) : L.t('contact.empty'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.5,
+                              color: has
+                                  ? AppColors.textPrimary
+                                  : AppColors.textTertiary,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right_rounded,
+                            size: 18, color: AppColors.textTertiary),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+
+        const SizedBox(height: AppSpace.gapM),
         _Card(
           title: L.t('me.about'),
           icon: Icons.info_outline_rounded,
           children: [
+            // 版本号从构建产物读，不硬编码 —— 硬编码的那份迟早和 pubspec 对不上，
+            // 而「我到底装的是哪版」正是排查更新问题的第一句话。
+            FutureBuilder<PackageInfo>(
+              future: PackageInfo.fromPlatform(),
+              builder: (_, snapshot) {
+                final info = snapshot.data;
+                final text = info == null
+                    ? '—'
+                    : 'v${info.version} (${info.buildNumber})';
+                return InfoRow(L.t('me.version'), text);
+              },
+            ),
+            const RowDivider(),
+            _LinkRow(
+              icon: Icons.privacy_tip_outlined,
+              label: L.t('me.privacy'),
+              onTap: () => showLegalPage(context, LegalDoc.privacy),
+            ),
+            const RowDivider(),
+            _LinkRow(
+              icon: Icons.description_outlined,
+              label: L.t('me.terms'),
+              onTap: () => showLegalPage(context, LegalDoc.terms),
+            ),
+            const RowDivider(),
+            InkWell(
+              onTap: () => runUpdateCheck(context, interactive: true),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Row(
+                  children: [
+                    const Icon(Icons.system_update_alt_rounded,
+                        size: 18, color: AppColors.primary),
+                    const SizedBox(width: AppSpace.gapM),
+                    Expanded(
+                      child: Text(
+                        L.t('update.check'),
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded,
+                        size: 18, color: AppColors.textTertiary),
+                  ],
+                ),
+              ),
+            ),
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: AppSpace.gapS, bottom: AppSpace.gapS),
               child: Text(
                 L.t('me.about.body'),
                 style: const TextStyle(
@@ -128,19 +248,323 @@ class MeScreen extends ConsumerWidget {
           ],
         ),
 
-        const SizedBox(height: AppSpace.gapXl),
-        const Center(
-          child: Text(
-            'v0.1.0 · M1',
-            style: TextStyle(fontSize: 11.5, color: AppColors.textTertiary),
-          ),
-        ),
+        // 页脚版本号已移到上面的「关于」卡片里，与「检查更新」放一起 ——
+        // 「我装的是哪版」和「有没有新版」本来是同一个问题。
       ],
     );
   }
 }
 
 // ------------------------------------------------------------------ 小组件
+
+/// 账号与同步状态。
+///
+/// 这里承担三件事，顺序就是用户会关心的顺序：
+/// 1. 登没登录（没登录时一切同步都是空谈）
+/// 2. 上次同步是什么时候、还有多少没上去
+/// 3. 立即同步 / 退出登录
+class _AccountCard extends ConsumerWidget {
+  const _AccountCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(syncControllerProvider);
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final controller = ref.read(syncControllerProvider.notifier);
+
+    return _Card(
+      title: L.t('sync.title'),
+      icon: Icons.sync_rounded,
+      children: [
+        if (!status.loggedIn) ...[
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        L.t('auth.notLoggedIn'),
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        L.t('auth.notLoggedInHint'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          height: 1.5,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: AppSpace.gapM),
+                FilledButton(
+                  onPressed: () => showAuthSheet(context),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                  child: Text(L.t('auth.title')),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          InfoRow(
+            L.t('auth.account'),
+            (user?.nickname ?? '').trim().isEmpty ? '—' : user!.nickname,
+          ),
+          const RowDivider(),
+          InfoRow(L.t('sync.title'), _syncSummary(status)),
+          if (status.message != null) ...[
+            const RowDivider(),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                status.message!,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: AppColors.danger,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpace.gapS),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: status.syncing ? null : controller.runSync,
+                  icon: status.syncing
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync_rounded, size: 17),
+                  label: Text(L.t('sync.now')),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.border),
+                    minimumSize: const Size(0, 40),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpace.gapM),
+              TextButton(
+                onPressed: status.syncing
+                    ? null
+                    : () => _confirmLogout(context, ref, controller),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.textSecondary,
+                ),
+                child: Text(L.t('auth.logout')),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  static String _syncSummary(SyncStatus s) {
+    final parts = <String>[
+      if (s.syncing)
+        L.t('sync.syncing')
+      else if (s.lastSyncAt == null)
+        L.t('sync.never')
+      else
+        L.tp('sync.lastAt', {'time': compactDateTime(s.lastSyncAt!)}),
+      if (s.pending > 0) L.tp('sync.pending', {'n': s.pending}),
+      if (!s.syncing && s.pending == 0 && s.lastSyncAt != null)
+        L.t('sync.upToDate'),
+    ];
+    return parts.join(' · ');
+  }
+
+  Future<void> _confirmLogout(
+    BuildContext context,
+    WidgetRef ref,
+    SyncController controller,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(L.t('auth.logoutConfirm')),
+        content: Text(L.t('auth.logoutHint')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(L.t('action.cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(L.t('auth.logout')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    // 引擎侧撤令牌 + 本地动作层清理，两件事都要做，顺序无所谓。
+    await ref.read(appActionsProvider).logout();
+    await controller.refresh();
+  }
+}
+
+/// 我收到的共养邀请。登录后才有内容，没内容就整块不出现。
+class _InvitesCard extends ConsumerWidget {
+  const _InvitesCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(syncControllerProvider).loggedIn) {
+      return const SizedBox.shrink();
+    }
+    final invites = ref.watch(myInvitesProvider).valueOrNull ?? const [];
+    if (invites.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.gapM),
+      child: _Card(
+        title: L.t('members.invites.title'),
+        icon: Icons.mark_email_unread_outlined,
+        children: [
+          for (var i = 0; i < invites.length; i++) ...[
+            if (i > 0) const RowDivider(),
+            _InviteRow(invite: invites[i]),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _InviteRow extends ConsumerStatefulWidget {
+  const _InviteRow({required this.invite});
+
+  final RemoteInvite invite;
+
+  @override
+  ConsumerState<_InviteRow> createState() => _InviteRowState();
+}
+
+class _InviteRowState extends ConsumerState<_InviteRow> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final invite = widget.invite;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.pets_rounded, size: 18, color: AppColors.primary),
+          const SizedBox(width: AppSpace.gapM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  invite.petName ?? invite.petId,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  L.t('members.role.${invite.role}'),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpace.gapM),
+          FilledButton(
+            onPressed: _busy ? null : _accept,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              textStyle: const TextStyle(fontSize: 13),
+            ),
+            child: Text(L.t('members.invites.accept')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _accept() async {
+    setState(() => _busy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(appActionsProvider).acceptInvite(widget.invite.inviteId);
+      messenger.showSnackBar(
+        SnackBar(content: Text(L.t('members.invites.accepted'))),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+}
+
+/// 可点击的一行（图标 + 文案 + 右箭头）。关于卡里连着四个入口，
+/// 每处各写一遍 InkWell 太啰嗦。
+class _LinkRow extends StatelessWidget {
+  const _LinkRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: AppColors.primary),
+              const SizedBox(width: AppSpace.gapM),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 18, color: AppColors.textTertiary),
+            ],
+          ),
+        ),
+      );
+}
 
 class _PageTitle extends StatelessWidget {
   const _PageTitle(this.text);

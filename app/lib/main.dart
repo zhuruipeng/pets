@@ -10,6 +10,8 @@
 /// 授权率会高得多。见 ui/sheets.dart 的 _AddPetSheetState._submit。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -21,7 +23,16 @@ import 'services/notification_service.dart';
 import 'ui/me_screen.dart';
 import 'ui/profile_screen.dart';
 import 'ui/records_screen.dart';
+import 'ui/reminder_sheet.dart';
 import 'ui/today_screen.dart';
+import 'ui/update_flow.dart';
+
+/// 全局 Navigator key。目前只有一处用途：**通知点击后要从 App 外部
+/// （原生回调）拿到一个能弹层的 context**。别拿它到处做导航。
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+/// 首帧之前来的通知点击先暂存，等 UI 起来再弹。
+String? _pendingReminderId;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,7 +42,29 @@ Future<void> main() async {
   await NotificationService.instance.init();
   await _ensureLocalUser();
 
+  // 点通知进 App → 直接弹这条提醒的操作卡（完成 / 明天再说）。
+  //
+  // onReminderTapped 是 NotificationService 上的**静态**字段，必须走类名赋值。
+  // 写成 NotificationService.instance.onReminderTapped = ... 会被 analyzer 判
+  // `instance_access_to_static_member`（在 Dart 里是 error，构建直接挂）。
+  NotificationService.onReminderTapped = _openReminderFromNotification;
+
+  // 冷启动：App 完全没运行时被通知拉起来，上面那个回调收不到这一次点击，
+  // 必须主动查一次 —— 这是最容易漏的一条路径。
+  final launchId = await NotificationService.instance.launchPayload();
+  if (launchId != null) _pendingReminderId = launchId;
+
   runApp(const ProviderScope(child: PetApp()));
+}
+
+/// 通知点击的统一入口。context 还没准备好就先记下来，首帧后再弹。
+void _openReminderFromNotification(String reminderId) {
+  final ctx = appNavigatorKey.currentContext;
+  if (ctx == null) {
+    _pendingReminderId = reminderId;
+    return;
+  }
+  showReminderDueSheet(ctx, reminderId: reminderId);
 }
 
 /// 建一个本地用户。M6 接入账号后由登录流程取代。
@@ -61,6 +94,7 @@ class PetApp extends StatelessWidget {
     return MaterialApp(
       title: L.t('app.title'),
       debugShowCheckedModeBanner: false,
+      navigatorKey: appNavigatorKey,
       theme: buildAppTheme(),
       home: const HomeShell(),
     );
@@ -185,8 +219,64 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _index = 0;
+  Timer? _syncTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // 定时同步：**只在真的有本地改动时才发请求**（先查一次 outbox 条数）。
+    // 每分钟都打一次网络是纯浪费流量和电，而「有改动才同步」让
+    // 常态下的开销只是一次本地 count 查询。
+    _syncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncIfDirty());
+    // 启动后静默查一次更新。放在首帧之后，不占启动时间；
+    // 检查失败或已是最新都**不打扰用户**（详见 ui/update_flow.dart）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      runUpdateCheck(context, interactive: false);
+
+      // 冷启动时被通知点开：那时还没有 context，只能等首帧。
+      final pending = _pendingReminderId;
+      if (pending != null) {
+        _pendingReminderId = null;
+        showReminderDueSheet(context, reminderId: pending);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 回到前台：**无条件同步一次**。
+  ///
+  /// 与定时器不同，这里不能只看 pending —— 应用在后台期间别的设备
+  /// 可能改了数据，本地 pending 是 0 也需要拉下来。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final container = ProviderScope.containerOf(context, listen: false);
+    container.read(syncControllerProvider.notifier).runSync();
+  }
+
+  Future<void> _syncIfDirty() async {
+    if (!mounted) return;
+    final container = ProviderScope.containerOf(context, listen: false);
+    try {
+      final pending = await container.read(syncEngineProvider).pendingCount();
+      if (pending > 0) {
+        await container.read(syncControllerProvider.notifier).runSync();
+      }
+    } catch (_) {
+      // 后台同步失败不打扰用户：错误会显示在「我的」页的同步卡片里。
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -89,6 +89,7 @@ class Pet {
     this.color,
     this.allergy,
     this.note,
+    this.personality = const <String>[],
     this.archivedAt,
     this.tier = 'free',
     this.deletedAt,
@@ -112,6 +113,9 @@ class Pet {
   final String? color;
   final String? allergy;
   final String? note;
+
+  /// 个性特点。存 code（如 `friendly`），显示时再查文案表 —— 换语言不用改数据。
+  final List<String> personality;
 
   /// 离世后归档，不硬删。数据仍可导出。
   final DateTime? archivedAt;
@@ -155,6 +159,7 @@ class Pet {
         color: m['color'] as String?,
         allergy: m['allergy'] as String?,
         note: m['note'] as String?,
+        personality: _strList(m['personality']),
         archivedAt: _dt(m['archived_at']),
         tier: (m['tier'] as String?) ?? 'free',
         createdBy: m['created_by'] as String,
@@ -179,6 +184,7 @@ class Pet {
         'color': color,
         'allergy': allergy,
         'note': note,
+        'personality': personality.isEmpty ? null : jsonEncode(personality),
         'archived_at': _ms(archivedAt),
         'tier': tier,
         'created_by': createdBy,
@@ -186,6 +192,85 @@ class Pet {
         'updated_at': _ms(updatedAt)!,
         'deleted_at': _ms(deletedAt),
       };
+
+  /// 局部修改。编辑表单只改用户填的字段，id / createdBy / createdAt 一律不动 ——
+  /// 手工拼一个新 Pet 太容易漏字段，那是最难查的一类 bug。
+  ///
+  /// 可空字段用 `clearXxx` 布尔显式置空：`copyWith(note: null)` 的语义是
+  /// 「不改 note」还是「把 note 清空」在 Dart 里没法区分，必须分开表达。
+  Pet copyWith({
+    String? name,
+    Species? species,
+    String? breed,
+    String? gender,
+    DateTime? birthday,
+    bool? birthdayEstimated,
+    DateTime? adoptDate,
+    String? avatarUrl,
+    double? weightBaseline,
+    bool? neutered,
+    String? chipNo,
+    String? color,
+    String? allergy,
+    String? note,
+    List<String>? personality,
+    DateTime? archivedAt,
+    String? tier,
+    bool clearBreed = false,
+    bool clearGender = false,
+    bool clearBirthday = false,
+    bool clearAdoptDate = false,
+    bool clearAvatar = false,
+    bool clearWeightBaseline = false,
+    bool clearChipNo = false,
+    bool clearColor = false,
+    bool clearAllergy = false,
+    bool clearNote = false,
+  }) {
+    return Pet(
+      id: id,
+      name: name ?? this.name,
+      species: species ?? this.species,
+      breed: clearBreed ? null : (breed ?? this.breed),
+      gender: clearGender ? null : (gender ?? this.gender),
+      birthday: clearBirthday ? null : (birthday ?? this.birthday),
+      birthdayEstimated: birthdayEstimated ?? this.birthdayEstimated,
+      adoptDate: clearAdoptDate ? null : (adoptDate ?? this.adoptDate),
+      avatarUrl: clearAvatar ? null : (avatarUrl ?? this.avatarUrl),
+      weightBaseline: clearWeightBaseline
+          ? null
+          : (weightBaseline ?? this.weightBaseline),
+      neutered: neutered ?? this.neutered,
+      chipNo: clearChipNo ? null : (chipNo ?? this.chipNo),
+      color: clearColor ? null : (color ?? this.color),
+      allergy: clearAllergy ? null : (allergy ?? this.allergy),
+      note: clearNote ? null : (note ?? this.note),
+      personality: personality ?? this.personality,
+      archivedAt: archivedAt ?? this.archivedAt,
+      tier: tier ?? this.tier,
+      createdBy: createdBy,
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+      deletedAt: deletedAt,
+    );
+  }
+}
+
+/// JSON 数组字符串 → List<String>。坏数据（不是数组）当空处理，不抛异常 ——
+/// 一条脏数据不该让整页打不开。
+List<String> _strList(Object? v) {
+  if (v == null) return const <String>[];
+  final raw = v as String;
+  if (raw.trim().isEmpty) return const <String>[];
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is List) {
+      return decoded.map((e) => '$e').toList(growable: false);
+    }
+  } on FormatException {
+    return const <String>[];
+  }
+  return const <String>[];
 }
 
 // ---------------------------------------------------------------- 记录
@@ -326,6 +411,36 @@ class Reminder {
     final days = (rule['days'] as num?)?.toInt() ?? 0;
     if (days <= 0) return null;
     return nextAt.add(Duration(days: days));
+  }
+
+  /// 周期天数。0 或缺失 = 一次性提醒。
+  ///
+  /// 界面要显示「每 90 天」这类说明，不能让每个调用点各写一遍取规则的逻辑。
+  int get everyDays => (rule['days'] as num?)?.toInt() ?? 0;
+
+  bool get isRecurring => everyDays > 0;
+
+  Reminder copyWith({
+    String? type,
+    String? title,
+    Map<String, dynamic>? rule,
+    DateTime? nextAt,
+    bool? enabled,
+    String? source,
+  }) {
+    return Reminder(
+      id: id,
+      petId: petId,
+      type: type ?? this.type,
+      title: title ?? this.title,
+      rule: rule ?? this.rule,
+      nextAt: nextAt ?? this.nextAt,
+      enabled: enabled ?? this.enabled,
+      source: source ?? this.source,
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+      deletedAt: deletedAt,
+    );
   }
 }
 
@@ -515,6 +630,7 @@ class RecordAttachment {
     required this.recordId,
     required this.kind,
     required this.createdAt,
+    this.updatedAt,
     this.localPath,
     this.remoteUrl,
     this.width,
@@ -534,7 +650,15 @@ class RecordAttachment {
   final int? width;
   final int? height;
   final DateTime createdAt;
+
+  /// 同步的 LWW 基准（v4 补的列）。附件只在「加进来」和「软删」两刻变化，
+  /// 创建时它与 createdAt 相等，所以为 null 时按 createdAt 处理。
+  final DateTime? updatedAt;
+
   final DateTime? deletedAt;
+
+  /// 实际用来比新旧的时刻。
+  DateTime get effectiveUpdatedAt => updatedAt ?? deletedAt ?? createdAt;
 
   factory RecordAttachment.fromMap(Map<String, dynamic> m) => RecordAttachment(
         id: m['id'] as String,
@@ -545,6 +669,7 @@ class RecordAttachment {
         width: (m['width'] as num?)?.toInt(),
         height: (m['height'] as num?)?.toInt(),
         createdAt: _dt(m['created_at'])!,
+        updatedAt: _dt(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
       );
 
@@ -557,6 +682,109 @@ class RecordAttachment {
         'width': width,
         'height': height,
         'created_at': _ms(createdAt)!,
+        // 用 effectiveUpdatedAt 而不是 updatedAt：后者可空，构造时不给就是 null
+        // （附件只在「加进来」和「软删」两个时刻变化，创建时两者相等）。
+        // 写成 `_ms(updatedAt)!` 会在「new 一个再 toMap」的路径上直接崩，
+        // 而且崩在 `!` 上排查起来毫无线索 —— 触发器拿到的 NULL updated_at
+        // 还会让这条变更排到所有变更最前面。
+        'updated_at': _ms(effectiveUpdatedAt)!,
         'deleted_at': _ms(deletedAt),
       };
+}
+
+// ---------------------------------------------------------------- 用户
+
+/// 本地用户。
+///
+/// 未登录（M6 之前）时只有一行：id = `kCurrentUserId`，region = 'local'。
+/// 登录后这一行的 id 换成服务端返回的账号 id，其余字段开始参与同步。
+///
+/// 为什么联系方式要放在这里而不是塞进「设置」：走失协查卡片要把联系方式
+/// 印在卡片上给拾到的人看 —— 它是**宠物档案的一部分**，不是 App 偏好。
+class LocalUser {
+  const LocalUser({
+    required this.id,
+    required this.nickname,
+    required this.region,
+    required this.createdAt,
+    required this.updatedAt,
+    this.phone,
+    this.email,
+    this.avatarUrl,
+    this.wechat,
+    this.contactNote,
+  });
+
+  final String id;
+  final String nickname;
+  final String region;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  final String? phone;
+  final String? email;
+  final String? avatarUrl;
+
+  /// 微信号。国内场景下比手机号更常用，所以单列出来。
+  final String? wechat;
+
+  /// 其它联系方式，自由文本（如「小区 3 栋 王阿姨」）。
+  final String? contactNote;
+
+  /// 有没有任何一条能让人联系上我。走失卡片据此提示用户去补。
+  bool get hasContact =>
+      [phone, email, wechat, contactNote]
+          .any((v) => (v ?? '').trim().isNotEmpty);
+
+  factory LocalUser.fromMap(Map<String, dynamic> m) => LocalUser(
+        id: m['id'] as String,
+        nickname: (m['nickname'] as String?) ?? '',
+        region: (m['region'] as String?) ?? 'local',
+        phone: m['phone'] as String?,
+        email: m['email'] as String?,
+        avatarUrl: m['avatar_url'] as String?,
+        wechat: m['wechat'] as String?,
+        contactNote: m['contact_note'] as String?,
+        createdAt: _dt(m['created_at'])!,
+        updatedAt: _dt(m['updated_at'])!,
+      );
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'nickname': nickname,
+        'region': region,
+        'phone': phone,
+        'email': email,
+        'avatar_url': avatarUrl,
+        'wechat': wechat,
+        'contact_note': contactNote,
+        'created_at': _ms(createdAt)!,
+        'updated_at': _ms(updatedAt)!,
+      };
+
+  LocalUser copyWith({
+    String? nickname,
+    String? phone,
+    String? email,
+    String? avatarUrl,
+    String? wechat,
+    String? contactNote,
+    bool clearPhone = false,
+    bool clearEmail = false,
+    bool clearWechat = false,
+    bool clearContactNote = false,
+  }) {
+    return LocalUser(
+      id: id,
+      nickname: nickname ?? this.nickname,
+      region: region,
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+      phone: clearPhone ? null : (phone ?? this.phone),
+      email: clearEmail ? null : (email ?? this.email),
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      wechat: clearWechat ? null : (wechat ?? this.wechat),
+      contactNote: clearContactNote ? null : (contactNote ?? this.contactNote),
+    );
+  }
 }

@@ -49,6 +49,25 @@ class AttachmentRepository {
     return RecordAttachment.fromMap(rows.first);
   }
 
+  /// 一只宠物的全部照片（跨记录）。档案页的「回忆」相册用。
+  ///
+  /// 走 JOIN 而不是「先查记录再逐条查附件」：后者是 N+1，一只记录多的宠物
+  /// 会发出几十次查询。照片按时间倒序 —— 相册永远是「最近的先看到」。
+  Future<List<RecordAttachment>> listPhotosByPet(
+    String petId, {
+    bool includeDeleted = false,
+  }) async {
+    final rows = await _db.rawQuery(
+      'SELECT a.* FROM $_table a '
+      'JOIN records r ON r.id = a.record_id '
+      'WHERE r.pet_id = ? '
+      '${includeDeleted ? '' : 'AND a.deleted_at IS NULL AND r.deleted_at IS NULL '}'
+      'ORDER BY a.created_at DESC',
+      [petId],
+    );
+    return rows.map(RecordAttachment.fromMap).toList();
+  }
+
   /// 把一张已存在的图片文件收编为附件：拷贝 → 落库。
   ///
   /// [sourcePath] 通常是 image_picker 给的临时文件。拷贝失败就整体失败，
@@ -73,6 +92,7 @@ class AttachmentRepository {
     final destPath = p.join(attDir.path, '${_uuid.v4()}$ext');
     await src.copy(destPath);
 
+    final now = DateTime.now();
     final att = RecordAttachment(
       id: _uuid.v4(),
       recordId: recordId,
@@ -80,7 +100,10 @@ class AttachmentRepository {
       localPath: destPath,
       width: width,
       height: height,
-      createdAt: DateTime.now(),
+      createdAt: now,
+      // 同步的 LWW 基准。创建时与 createdAt 相等，但显式写上 ——
+      // 触发器取的是 NEW.updated_at，为 NULL 会让这条变更排在所有变更最前面。
+      updatedAt: now,
     );
     await _db.insert(_table, att.toMap(),
         conflictAlgorithm: ConflictAlgorithm.abort);
@@ -91,16 +114,20 @@ class AttachmentRepository {
     final now = at ?? DateTime.now();
     return _db.update(
       _table,
-      {'deleted_at': now.millisecondsSinceEpoch},
+      {
+        'deleted_at': now.millisecondsSinceEpoch,
+        'updated_at': now.millisecondsSinceEpoch,
+      },
       where: 'id = ? AND deleted_at IS NULL',
       whereArgs: [id],
     );
   }
 
   Future<int> restore(String id) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
     return _db.update(
       _table,
-      {'deleted_at': null},
+      {'deleted_at': null, 'updated_at': now},
       where: 'id = ?',
       whereArgs: [id],
     );

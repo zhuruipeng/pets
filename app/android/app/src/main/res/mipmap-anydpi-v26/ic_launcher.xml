@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标（Android 8.0+）。
+
+  分三层：
+  - background：纯色，取自品牌主色
+  - foreground：白色剪影，**透明底**、内容只占中央 58%（见 tool/make_icons.py）。
+    这个比例不是随便定的：系统会按不同形状裁切（圆、方、水滴、squircle…），
+    前景内容必须落在中央约 66% 的安全区内，否则圆角裁切会把耳朵和尾巴切掉。
+  - monochrome：Android 13 的「主题图标」。系统只取这张图的 alpha 通道来上色，
+    而我们的前景正好是「白色剪影 + 透明底」，天然就符合要求，直接复用。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

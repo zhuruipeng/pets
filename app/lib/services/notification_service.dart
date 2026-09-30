@@ -11,6 +11,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../core/reminder_text.dart';
 import '../data/models.dart';
 
 class NotificationService {
@@ -43,10 +44,38 @@ class NotificationService {
 
     await _plugin.initialize(
       const InitializationSettings(android: android, iOS: ios),
-      onDidReceiveNotificationResponse: (_) {},
+      onDidReceiveNotificationResponse: _onResponse,
     );
 
     _inited = true;
+  }
+
+  /// 通知被点击时的回调。由 main.dart 注入 —— 服务层不认识 Navigator，
+  /// 只负责把 payload（提醒 id）交出去。
+  ///
+  /// 用静态字段而不是构造参数：通知可能在 App **完全没启动**时被点开，
+  /// 那时引擎刚起来，回调注册必须简单可靠。
+  static void Function(String reminderId)? onReminderTapped;
+
+  static void _onResponse(NotificationResponse resp) {
+    final payload = (resp.payload ?? '').trim();
+    if (payload.isEmpty) return;
+    onReminderTapped?.call(payload);
+  }
+
+  /// App 是被点通知拉起来的吗？是的话返回 payload。
+  ///
+  /// 冷启动场景：onDidReceiveNotificationResponse 在 initialize 之前就
+  /// 已经发生过了，光靠回调会漏掉这一次点击，必须主动查一次。
+  Future<String?> launchPayload() async {
+    try {
+      final details = await _plugin.getNotificationAppLaunchDetails();
+      if (details?.didNotificationLaunchApp != true) return null;
+      final payload = (details?.notificationResponse?.payload ?? '').trim();
+      return payload.isEmpty ? null : payload;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 本地时区名。取系统偏移对应的 IANA 名称，
@@ -139,6 +168,9 @@ class NotificationService {
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
+        // payload 只放提醒 id，不放宠物名之类的展示信息 ——
+        // 那些会过期（改了名字就对不上），id 永远能查到最新状态。
+        payload: reminder.id,
       );
     } catch (e) {
       // 通知调度失败不能影响业务主流程：提醒数据已入库，UI 照常展示。
@@ -170,13 +202,10 @@ class NotificationService {
     await _plugin.cancelAll();
   }
 
-  /// 通知标题。reminders.title 里存的是 i18n key，交给调用方翻译后传入更佳；
-  /// 这里做一次兜底，保证 key 缺失时也不会显示英文变量名。
-  static String _titleOf(Reminder reminder) {
-    final t = reminder.title;
-    if (t.contains('.')) return t.split('.').last;
-    return t;
-  }
+  /// 通知标题。解析规则与列表页完全一致（core/reminder_text.dart）——
+  /// 两处各写一份的话，会出现「列表里是『疫苗』、通知栏是 plan.vaccine.core」。
+  static String _titleOf(Reminder reminder) =>
+      reminderTitleFrom(reminder.title, reminder.type);
 
   /// 通知 id 必须是 32 位 int。用 uuid 的稳定哈希。
   static int _stableId(String uuid) {

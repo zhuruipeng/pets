@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  app_name 的兜底值。
+
+  真正生效的是各 flavor 自己的 strings.xml：
+    src/cn/res/values/strings.xml    -> 我的宠物
+    src/intl/res/values/strings.xml  -> My Pet
+  这里留一份是给「不带 flavor 的临时构建」用的 —— 那种构建下
+  @string/app_name 没有 flavor 覆盖，少了这一条会直接编译失败
+  （AAPT: resource string/app_name not found）。
+
+  ⚠️ 曾经这里靠 build.gradle.kts 的 resValue() 覆盖，AGP 9.0 起那样会构建失败。
+-->
+<resources>
+    <string name="app_name">Pet App</string>
+</resources>

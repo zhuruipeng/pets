@@ -11,9 +11,11 @@ import 'package:pet_app/core/species.dart';
 import 'package:pet_app/data/db/schema.dart';
 import 'package:pet_app/data/models.dart';
 import 'package:pet_app/data/repositories/attachment_repository.dart';
+import 'package:pet_app/data/repositories/member_repository.dart';
 import 'package:pet_app/data/repositories/pet_repository.dart';
 import 'package:pet_app/data/repositories/record_repository.dart';
 import 'package:pet_app/data/repositories/reminder_repository.dart';
+import 'package:pet_app/data/repositories/user_repository.dart';
 import 'package:pet_app/data/repositories/walk_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -686,6 +688,442 @@ void main() {
       expect(a.first.id, 'att-0');
       expect(a.last.id, 'att-1');
       await db.close();
+    });
+  });
+
+  // M2.2 / M2.3 -----------------------------------------------------------------
+
+  group('宠物档案 · 个性特点', () {
+    test('personality 以 JSON 数组落库，读回来是同一串 code', () async {
+      await pets.create(
+        _pet('p1', '豆豆').copyWith(personality: const ['playful', 'foodie']),
+      );
+
+      final loaded = await pets.findById('p1');
+      expect(loaded!.personality, ['playful', 'foodie']);
+
+      // 库里存的确实是 JSON 字符串，而不是「逗号拼接」之类的临时格式 ——
+      // 服务端 M6 同步要按同一形态读写。
+      final row = (await db.query('pets', where: 'id = ?', whereArgs: ['p1'])).first;
+      expect(row['personality'], '["playful","foodie"]');
+    });
+
+    test('没勾任何标签时存 NULL，不是空串', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final row = (await db.query('pets', where: 'id = ?', whereArgs: ['p1'])).first;
+      expect(row['personality'], isNull);
+      expect((await pets.findById('p1'))!.personality, isEmpty);
+    });
+
+    test('脏数据（不是 JSON 数组）按空处理，不抛异常', () async {
+      await db.insert('pets', _pet('p1', '豆豆').copyWith(personality: const ['a']).toMap());
+      await db.update(
+        'pets',
+        {'personality': '{"not":"a list"}'},
+        where: 'id = ?',
+        whereArgs: ['p1'],
+      );
+
+      // 一条脏数据不该让档案页整页打不开。
+      expect((await pets.findById('p1'))!.personality, isEmpty);
+    });
+  });
+
+  group('宠物档案 · copyWith 语义', () {
+    test('clearXxx 才能把可空字段置空，传 null 等于「不改」', () async {
+      final base = _pet('p1', '豆豆').copyWith(breed: '金毛', chipNo: '123');
+
+      // 传 null 但没给 clear 标记 → 保持原值。
+      expect(base.copyWith(breed: null).breed, '金毛');
+      // 显式 clear → 真的清空。
+      expect(base.copyWith(clearBreed: true).breed, isNull);
+      expect(base.copyWith(clearChipNo: true).chipNo, isNull);
+      // 没碰的字段不受影响。
+      expect(base.copyWith(clearBreed: true).chipNo, '123');
+    });
+
+    test('copyWith 不动身份字段，只更新 updatedAt', () async {
+      final origin = _pet('p1', '豆豆');
+      final edited = origin.copyWith(name: '豆豆子');
+
+      expect(edited.id, origin.id);
+      expect(edited.createdBy, origin.createdBy);
+      expect(edited.createdAt, origin.createdAt);
+      expect(edited.name, '豆豆子');
+    });
+
+    test('改完落库能被读回（编辑保存的核心路径）', () async {
+      final origin = await pets.create(_pet('p1', '豆豆'));
+      await pets.update(
+        origin.copyWith(
+          name: '豆豆子',
+          breed: '金毛',
+          gender: 'female',
+          neutered: true,
+          weightBaseline: 23.4,
+          personality: const ['calm'],
+        ),
+      );
+
+      final loaded = await pets.findById('p1');
+      expect(loaded!.name, '豆豆子');
+      expect(loaded.breed, '金毛');
+      expect(loaded.gender, 'female');
+      expect(loaded.neutered, isTrue);
+      expect(loaded.weightBaseline, 23.4);
+      expect(loaded.personality, ['calm']);
+    });
+  });
+
+  group('附件 · 按宠物汇总照片', () {
+    test('跨记录 JOIN，只取没被软删的', () async {
+      final repo = AttachmentRepository(db);
+      // 直接建带固定 id 的记录：这条测试要按 id 断言，不能让仓储随机生成。
+      for (final spec in [
+        ('rec-a', 'p1', RecordType.medication),
+        ('rec-b', 'p2', RecordType.medical),
+      ]) {
+        await records.create(PetRecord(
+          id: spec.$1,
+          petId: spec.$2,
+          type: spec.$3,
+          recordedAt: DateTime(2026, 9, 29, 8),
+          createdBy: 'u1',
+          createdAt: DateTime(2026, 9, 29, 8),
+          updatedAt: DateTime(2026, 9, 29, 8),
+        ));
+      }
+
+      for (final spec in [('att-1', 'rec-a'), ('att-2', 'rec-a'), ('att-3', 'rec-b')]) {
+        await db.insert(
+          'attachments',
+          RecordAttachment(
+            id: spec.$1,
+            recordId: spec.$2,
+            kind: 'photo',
+            localPath: '/x/${spec.$1}.jpg',
+            createdAt: DateTime(2026, 9, 29, 10),
+          ).toMap(),
+        );
+      }
+      // 软删一张：相册里不该再出现。
+      await repo.softDelete('att-2');
+
+      final p1Photos = await repo.listPhotosByPet('p1');
+      expect(p1Photos.map((a) => a.id), ['att-1']);
+      expect((await repo.listPhotosByPet('p2')).length, 1);
+
+      // 记录被软删时，它下面的照片也一起消失（否则相册会出现无主照片）。
+      await records.softDelete('rec-b');
+      expect(await repo.listPhotosByPet('p2'), isEmpty);
+    });
+  });
+
+  // M4：手动提醒 ---------------------------------------------------------------
+
+  group('提醒 · 手动新建与完成', () {
+    test('新建周期提醒，rule 存成 interval 天数', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'deworm_internal',
+        title: 'reminder.type.deworm_internal',
+        everyDays: 90,
+        firstAt: DateTime(2026, 10, 1, 9),
+      );
+
+      final loaded = await reminders.findById(r.id);
+      expect(loaded!.everyDays, 90);
+      expect(loaded.isRecurring, isTrue);
+      expect(loaded.source, 'manual');
+    });
+
+    test('一次性提醒完成后停用，不再有下次', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'other',
+        title: '剪指甲',
+        everyDays: 0,
+        firstAt: DateTime(2026, 9, 1, 9),
+      );
+
+      final result = await reminders.completeOnce(r.id, at: DateTime(2026, 9, 1, 10));
+      expect(result.nextAt, isNull);
+
+      final loaded = await reminders.findById(r.id);
+      expect(loaded!.enabled, isFalse);
+      // 是一次性提醒，「间隔天数」读出来是 0，界面据此显示「只提醒一次」。
+      expect(loaded.isRecurring, isFalse);
+    });
+
+    test('周期提醒完成后 next_at 往后推一个周期', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final first = DateTime(2026, 9, 1, 9);
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'deworm_external',
+        title: 'reminder.type.deworm_external',
+        everyDays: 30,
+        firstAt: first,
+      );
+
+      final result = await reminders.completeOnce(r.id);
+      expect(result.nextAt, first.add(const Duration(days: 30)));
+
+      final loaded = await reminders.findById(r.id);
+      expect(loaded!.enabled, isTrue, reason: '周期提醒不该被停用');
+      expect(loaded.nextAt, first.add(const Duration(days: 30)));
+    });
+
+    test('编辑会覆写类型/名称/规则/时间，但 id 与 pet_id 不动', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      await pets.create(_pet('p2', '毛毛'));
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'other',
+        title: '旧名字',
+        everyDays: 0,
+        firstAt: DateTime(2026, 9, 1, 9),
+      );
+
+      await reminders.update(r.copyWith(
+        type: 'medication',
+        title: '新名字',
+        rule: {'mode': 'interval', 'days': 7},
+        nextAt: DateTime(2026, 9, 20, 9),
+      ));
+
+      final loaded = await reminders.findById(r.id);
+      expect(loaded!.id, r.id);
+      expect(loaded.petId, 'p1');
+      expect(loaded.type, 'medication');
+      expect(loaded.title, '新名字');
+      expect(loaded.everyDays, 7);
+      expect(loaded.nextAt, DateTime(2026, 9, 20, 9));
+    });
+
+    test('延后只推 next_at，不写完成日志', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'checkup',
+        title: 'reminder.type.checkup',
+        everyDays: 365,
+        firstAt: DateTime(2026, 9, 1, 9),
+      );
+
+      final next = await reminders.snooze(r.id, const Duration(days: 1));
+      expect(next, DateTime(2026, 9, 2, 9));
+      // 延后不算完成，完成率不能因此上升。
+      expect(await reminders.completionRate(), 0);
+    });
+
+    test('删除后 listForPet 查不到，findById 仍能查到（软删除语义）', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'other',
+        title: '洗澡',
+        everyDays: 30,
+        firstAt: DateTime(2026, 9, 1, 9),
+      );
+
+      await reminders.softDelete(r.id);
+      expect(await reminders.listForPet('p1'), isEmpty);
+      expect((await reminders.findById(r.id))!.deletedAt, isNotNull);
+    });
+  });
+
+  // M5 / M6：联系方式、同步底座 -------------------------------------------------
+
+  group('同步底座 · outbox 触发器', () {
+    test('任何写入都会自动进 outbox，不需要仓储配合', () async {
+      // 关键点：这条走的是 PetRepository.create，仓储里没有任何
+      // 「记一笔待同步」的代码 —— 全靠触发器。
+      await pets.create(_pet('p1', '豆豆'));
+
+      final rows = await db.query('sync_outbox');
+      expect(rows.length, 1);
+      expect(rows.first['table_name'], 'pets');
+      expect(rows.first['row_id'], 'p1');
+      // pets 的分发键就是自己
+      expect(rows.first['pet_id'], 'p1');
+      expect(rows.first['op'], 'upsert');
+    });
+
+    test('软删除记为 delete（墓碑要同步，否则别的设备不知道删过）', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      await pets.softDelete('p1');
+
+      final rows = await db.query('sync_outbox', where: 'row_id = ?', whereArgs: ['p1']);
+      expect(rows.length, 1, reason: '同一行只留最后一次，中间态没有推送价值');
+      expect(rows.first['op'], 'delete');
+    });
+
+    test('同一行改多次只留一条 outbox', () async {
+      final origin = await pets.create(_pet('p1', '豆豆'));
+      await pets.update(origin.copyWith(name: '豆豆子'));
+      await pets.update(origin.copyWith(name: '豆豆子2'));
+
+      final rows = await db.query('sync_outbox');
+      expect(rows.length, 1);
+    });
+
+    test('applying=1 期间触发器哑火（防止推拉无限循环）', () async {
+      final batch = db.batch();
+      batch.insert('sync_meta', {'key': 'applying', 'value': '1'});
+      await batch.commit(noResult: true);
+
+      await pets.create(_pet('p1', '豆豆'));
+      expect(await db.query('sync_outbox'), isEmpty);
+
+      await db.delete('sync_meta', where: 'key = ?', whereArgs: ['applying']);
+      await pets.create(_pet('p2', '毛毛'));
+      expect((await db.query('sync_outbox')).length, 1);
+    });
+
+    test('附件的 pet_id 经 record 反查', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      await records.create(PetRecord(
+        id: 'rec-a',
+        petId: 'p1',
+        type: RecordType.medication,
+        recordedAt: DateTime(2026, 9, 29, 8),
+        createdBy: 'u1',
+        createdAt: DateTime(2026, 9, 29, 8),
+        updatedAt: DateTime(2026, 9, 29, 8),
+      ));
+      await db.delete('sync_outbox'); // 清掉前面两条，只看附件这条
+
+      await db.insert(
+        'attachments',
+        RecordAttachment(
+          id: 'att-1',
+          recordId: 'rec-a',
+          kind: 'photo',
+          localPath: '/x/1.jpg',
+          createdAt: DateTime(2026, 9, 29, 9),
+          updatedAt: DateTime(2026, 9, 29, 9),
+        ).toMap(),
+      );
+
+      final rows = await db.query('sync_outbox',
+          where: 'table_name = ?', whereArgs: ['attachments']);
+      expect(rows.length, 1);
+      expect(rows.first['pet_id'], 'p1', reason: '附件自己没有 pet_id 列');
+    });
+
+    test('不同步的表不产生 outbox', () async {
+      await db.insert('walk_points', {
+        'id': 'wp1',
+        'session_id': 's1',
+        'lat': 1.0,
+        'lng': 2.0,
+        'recorded_at': DateTime(2026, 9, 29).millisecondsSinceEpoch,
+      });
+      expect(
+        await db.query('sync_outbox', where: 'table_name = ?', whereArgs: ['walk_points']),
+        isEmpty,
+        reason: '轨迹点随 session 一起传，逐点同步会把变更日志撑爆',
+      );
+    });
+  });
+
+  group('联系方式 · users 表', () {
+    test('联系方式往返（清空要显式 clear，传 null 等于不改）', () async {
+      final users = UserRepository(db);
+      final now = DateTime(2026, 9, 30);
+      await users.create(LocalUser(
+        id: 'u1',
+        nickname: '我',
+        region: 'local',
+        createdAt: now,
+        updatedAt: now,
+      ));
+
+      final base = (await users.current())!;
+      expect(base.hasContact, isFalse);
+
+      await users.update(base.copyWith(
+        phone: '13800138000',
+        wechat: 'pet-dad',
+        contactNote: '小区 3 栋王阿姨',
+      ));
+      final filled = (await users.current())!;
+      expect(filled.phone, '13800138000');
+      expect(filled.wechat, 'pet-dad');
+      expect(filled.hasContact, isTrue);
+
+      await users.update(filled.copyWith(clearPhone: true));
+      final cleared = (await users.current())!;
+      expect(cleared.phone, isNull);
+      expect(cleared.wechat, 'pet-dad', reason: '没碰的字段不该被清掉');
+    });
+  });
+
+  group('登录过户 · adoptAccount', () {
+    test('账号 id 接管本地数据，created_by 一起改', () async {
+      final users = UserRepository(db);
+      final now = DateTime(2026, 9, 30);
+      await users.create(LocalUser(
+        id: UserRepository.localUserId,
+        nickname: '我',
+        region: 'local',
+        createdAt: now,
+        updatedAt: now,
+        phone: '13800138000',
+      ));
+      await pets.create(Pet(
+        id: 'p1',
+        name: '豆豆',
+        species: Species.dog,
+        createdBy: UserRepository.localUserId,
+        createdAt: now,
+        updatedAt: now,
+      ));
+      await records.create(PetRecord(
+        id: 'rec-a',
+        petId: 'p1',
+        type: RecordType.weight,
+        recordedAt: now,
+        createdBy: UserRepository.localUserId,
+        createdAt: now,
+        updatedAt: now,
+        valueNum: 5,
+      ));
+
+      await users.adoptAccount(accountId: 'acct-9', region: 'cn');
+
+      final user = (await users.current())!;
+      expect(user.id, 'acct-9');
+      expect(user.region, 'cn');
+      // 本地填的联系方式不能被服务端那份空值覆盖。
+      expect(user.phone, '13800138000');
+
+      final petRows = await db.query('pets', where: 'id = ?', whereArgs: ['p1']);
+      expect(petRows.first['created_by'], 'acct-9');
+      final recRows = await db.query('records', where: 'id = ?', whereArgs: ['rec-a']);
+      expect(recRows.first['created_by'], 'acct-9');
+    });
+  });
+
+  group('共养角色 · 兼容旧值', () {
+    test('老数据里的 caretaker 当 editor 处理', () {
+      expect(MemberRoleX.fromWire('owner'), MemberRole.owner);
+      expect(MemberRoleX.fromWire('caretaker'), MemberRole.editor);
+      expect(MemberRoleX.fromWire('editor'), MemberRole.editor);
+      expect(MemberRoleX.fromWire('viewer'), MemberRole.viewer);
+      // 认不出来的值按最小权限给（editor），不能给 owner。
+      expect(MemberRoleX.fromWire('whatever'), MemberRole.editor);
+      expect(MemberRoleX.fromWire(null), MemberRole.editor);
+    });
+
+    test('权限判断：viewer 不能写，只有 owner 能管成员', () {
+      expect(MemberRole.viewer.canWrite, isFalse);
+      expect(MemberRole.editor.canWrite, isTrue);
+      expect(MemberRole.editor.canManage, isFalse);
+      expect(MemberRole.owner.canManage, isTrue);
     });
   });
 }

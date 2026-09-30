@@ -108,6 +108,19 @@ class ReminderRepository {
     ));
   }
 
+  /// 整体覆写一条提醒（编辑用）。id 与 pet_id 不动 —— 改归属不是编辑，
+  /// 那是新建 + 删除。
+  Future<int> update(Reminder reminder) async {
+    final next = reminder.toMap()
+      ..['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+    return _db.update(
+      _table,
+      next,
+      where: 'id = ?',
+      whereArgs: [reminder.id],
+    );
+  }
+
   /// 完成一次。
   ///
   /// [recordId] 可关联到实际记录（比如完成「驱虫」时顺手写了条 deworm 记录）。
