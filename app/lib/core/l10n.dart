@@ -286,6 +286,8 @@ class L {
     'timeline.yesterday': '昨天',
     'timeline.daysAgo': '{n} 天前',
     'timeline.backfilled': '补录',
+    // 从回忆相册加的照片，记录行上显示成「照片」而不是「笔记」
+    'record.kind.photo': '照片',
 
     'walk.title': '遛狗',
     'walk.start': '开始记录',
@@ -381,8 +383,10 @@ class L {
     'profile.records.empty': '还没有完成的条目',
     'profile.records.emptyHint': '在记录页记一条，这里就会按时间排起来',
     'profile.memory.empty': '还没有照片',
-    'profile.memory.emptyHint': '给记录加张照片，这里会长成一本相册',
+    'profile.memory.emptyHint': '直接拍一张，或者从相册挑一张 —— 会存成一条带图的记录',
     'profile.memory.count': '共 {n} 张',
+    'profile.memory.add': '添加照片',
+    'profile.memory.added': '已加入回忆',
 
     // ---- M4 手动新建提醒 ----
     'reminder.add': '添加提醒',
@@ -760,6 +764,7 @@ class L {
     'timeline.yesterday': 'Yesterday',
     'timeline.daysAgo': '{n} days ago',
     'timeline.backfilled': 'Backfilled',
+    'record.kind.photo': 'Photo',
 
     'walk.title': 'Walk',
     'walk.start': 'Start tracking',
@@ -855,8 +860,10 @@ class L {
     'profile.records.empty': 'No entries yet',
     'profile.records.emptyHint': 'Log something on the Records tab and it shows up here by time',
     'profile.memory.empty': 'No photos yet',
-    'profile.memory.emptyHint': 'Attach a photo to a record and it grows into an album here',
+    'profile.memory.emptyHint': 'Take one now or pick from your gallery — it saves as a record with a photo',
     'profile.memory.count': '{n} photos',
+    'profile.memory.add': 'Add photo',
+    'profile.memory.added': 'Added to memories',
 
     // ---- M4 manual reminders ----
     'reminder.add': 'Add reminder',

@@ -246,6 +246,8 @@ class AppActions {
     return u?.id ?? kCurrentUserId;
   }
   RecordRepository get _records => ref.read(recordRepositoryProvider);
+  AttachmentRepository get _attachments =>
+      ref.read(attachmentRepositoryProvider);
   ReminderRepository get _reminders => ref.read(reminderRepositoryProvider);
   WalkRepository get _walks => ref.read(walkRepositoryProvider);
   NotificationService get _notify => ref.read(notificationServiceProvider);
@@ -414,6 +416,37 @@ class AppActions {
     );
     ref.invalidate(petRecordsProvider(petId));
     ref.invalidate(weightSeriesProvider(petId));
+  }
+
+  /// 从「回忆」页直接加一张照片。
+  ///
+  /// 附件在数据模型上**必须挂在一条 record 上**（`attachments.record_id` 非空），
+  /// 所以这里顺手建一条 `note` 记录当载体，而不是另开一张「无主照片」表。
+  /// 换来两个好处：这张照片同时出现在记录时间线里（用户点得进去、改得了
+  /// 事件时间、删得掉），同步也走同一条链路，不用为它单独定协议。
+  ///
+  /// `payload.kind = 'photo'` 是给界面认的标记，用来把这类记录显示成「照片」
+  /// 而不是光秃秃一个「笔记」。
+  Future<void> addPhotoMemory({
+    required String petId,
+    required String sourcePath,
+    DateTime? recordedAt,
+    String? note,
+  }) async {
+    final record = await _records.createSimple(
+      petId: petId,
+      type: RecordType.note,
+      recordedAt: recordedAt ?? DateTime.now(),
+      createdBy: await _currentUserId(),
+      payload: const {'kind': 'photo'},
+      note: note,
+    );
+    // 先落库、后收编文件：addPhoto 自己保证「拷贝失败就不落库」，
+    // 但记录已经写进去了 —— 那种情况会留下一条没有照片的空笔记。
+    // 真发生了也不致命（用户删掉即可），比丢照片好。
+    await _attachments.addPhoto(recordId: record.id, sourcePath: sourcePath);
+    ref.invalidate(petRecordsProvider(petId));
+    ref.invalidate(petPhotosProvider(petId));
   }
 
   /// 完成一次提醒：留档 + 排下次 + 重排通知。

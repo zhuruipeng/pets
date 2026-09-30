@@ -350,10 +350,41 @@ void main() {
         'profile.records.emptyHint',
         'profile.memory.empty',
         'profile.memory.emptyHint',
+        'profile.memory.add',
+        'profile.memory.added',
       ]) {
         expect(L.t(k), isNot(k), reason: '$k 没有翻译');
       }
       expect(L.tp('profile.memory.count', {'n': 3}), contains('3'));
+    });
+
+    test('相册照片在记录行上显示成「照片」而不是「笔记」', () {
+      // 回忆页加的照片 = 一条 payload.kind=photo 的 note 记录，
+      // 记录行靠这个标记换名字（库里不存 i18n 文本）。
+      final photo = PetRecord(
+        id: 'r1',
+        petId: 'p1',
+        type: RecordType.note,
+        recordedAt: DateTime(2026, 9, 30),
+        createdBy: 'u1',
+        createdAt: DateTime(2026, 9, 30),
+        updatedAt: DateTime(2026, 9, 30),
+        payload: const {'kind': 'photo'},
+      );
+      expect(recordPayloadSummary(photo), L.t('record.kind.photo'));
+
+      // 普通笔记不受影响 —— 不能把所有 note 都改叫照片。
+      final plain = PetRecord(
+        id: 'r2',
+        petId: 'p1',
+        type: RecordType.note,
+        recordedAt: DateTime(2026, 9, 30),
+        createdBy: 'u1',
+        createdAt: DateTime(2026, 9, 30),
+        updatedAt: DateTime(2026, 9, 30),
+        payload: const {},
+      );
+      expect(recordPayloadSummary(plain), isEmpty);
     });
 
     test('联系方式与走失卡片文案都已翻译', () {

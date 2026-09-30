@@ -525,6 +525,11 @@ String recordPayloadSummary(PetRecord r) {
       final brand = (p['brand'] as String?)?.trim() ?? '';
       if (brand.isNotEmpty) parts.add(brand);
       break;
+    case RecordType.note:
+      // 从「回忆」相册加的照片，库里是一条 note + payload.kind=photo。
+      // 翻译在展示层做 —— 库里存 i18n 文本，切区或改文案就成历史脏数据。
+      if ((p['kind'] as String?) == 'photo') parts.add(L.t('record.kind.photo'));
+      break;
     default:
       break;
   }

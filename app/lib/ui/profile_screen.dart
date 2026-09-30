@@ -16,6 +16,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/feature_flags.dart';
 import '../core/l10n.dart';
@@ -32,6 +33,7 @@ import 'avatar_sheet.dart';
 import 'edit_pet_sheet.dart';
 import 'lost_card.dart';
 import 'members_sheet.dart';
+import 'record_detail.dart';
 import 'records_screen.dart';
 import 'reminder_sheet.dart';
 import 'sheets.dart';
@@ -1625,6 +1627,10 @@ class _RecordsTab extends ConsumerWidget {
 /// 数据源是**记录上的附件**，不另存一份。这样「回忆」不是又一个需要维护的
 /// 功能，而是记录页的另一种读法 —— 用户随手给记录加的照片，攒起来就是相册，
 /// 不用逼他「先建相册再传图」。
+///
+/// 但「另一种读法」不等于**只读**：只读的相册是个死胡同，用户在这里看到
+/// 空态、被告知「给记录加张照片」，却找不到入口。所以这里自带添加入口，
+/// 并且每个格子点得进它所属的那条记录（改时间、删照片都在那边）。
 class _MemoriesTab extends ConsumerWidget {
   const _MemoriesTab({required this.pet});
 
@@ -1633,19 +1639,38 @@ class _MemoriesTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final photos = ref.watch(petPhotosProvider(pet.id));
+    // 记录也读一份，用来把格子映射回所属记录 —— 不然点开没东西可点。
+    // 记录页签本来就在 watch 它，这里不额外查库。
+    final records =
+        ref.watch(petRecordsProvider(pet.id)).valueOrNull ?? const <PetRecord>[];
+    final recordById = {for (final r in records) r.id: r};
 
     return photos.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('$e')),
       data: (list) {
-        if (list.isEmpty) {
-          return const _TabEmpty(
+        // 只留**本地文件真的在**的那些 —— 附件行可能在（同步过来的、
+        // 或者用户清过存储），文件却没了，那种格子只会是一块灰。
+        final visible = [
+          for (final att in list)
+            if ((att.localPath ?? '').trim().isNotEmpty &&
+                File(att.localPath!).existsSync())
+              att,
+        ];
+
+        if (visible.isEmpty) {
+          return _TabEmpty(
             icon: Icons.photo_album_outlined,
             titleKey: 'profile.memory.empty',
             hintKey: 'profile.memory.emptyHint',
+            action: FilledButton.icon(
+              onPressed: () => _addMemoryPhoto(context, ref, pet),
+              icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+              label: Text(L.t('profile.memory.add')),
+            ),
           );
         }
-        final paths = [for (final p in list) p.localPath ?? ''];
+
         return ListView(
           padding: const EdgeInsets.fromLTRB(
             AppSpace.page,
@@ -1654,15 +1679,34 @@ class _MemoriesTab extends ConsumerWidget {
             96,
           ),
           children: [
-            Text(
-              L.tp('profile.memory.count', {'n': '${paths.length}'}),
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textSecondary,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    L.tp('profile.memory.count', {'n': '${visible.length}'}),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () => _addMemoryPhoto(context, ref, pet),
+                  icon: const Icon(Icons.add_a_photo_outlined, size: 17),
+                  label: Text(L.t('profile.memory.add')),
+                ),
+              ],
             ),
             const SizedBox(height: AppSpace.gapM),
-            _PhotoGrid(paths: paths),
+            _PhotoGrid(
+              attachments: visible,
+              onTap: (att) {
+                final record = recordById[att.recordId];
+                if (record != null) {
+                  showRecordDetailSheet(context, ref, record: record);
+                }
+              },
+            ),
           ],
         );
       },
@@ -1670,28 +1714,73 @@ class _MemoriesTab extends ConsumerWidget {
   }
 }
 
+/// 从「回忆」页加照片：拍照 / 相册 → 建一条带图的记录。
+///
+/// 附件在数据模型上**必须挂在一条记录上**（`attachments.record_id` 非空），
+/// 所以这里会顺带建一条 `note` 记录当载体 —— 用户看到的是「加了张照片」，
+/// 不是「建了条笔记」；那条记录在时间线里显示成「照片」。
+Future<void> _addMemoryPhoto(
+  BuildContext context,
+  WidgetRef ref,
+  Pet pet,
+) async {
+  // 弹层一关，context 可能已经失效。**在任何 await 之前**把 messenger
+  // 抓在手里，后面全程不再碰 context —— 免得靠 `context.mounted` 事后补救。
+  final messenger = ScaffoldMessenger.of(context);
+  final source = await showModalBottomSheet<ImageSource>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera_rounded),
+            title: Text(L.t('detail.photos.camera')),
+            onTap: () => Navigator.pop(ctx, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_rounded),
+            title: Text(L.t('detail.photos.gallery')),
+            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (source == null) return;
+
+  try {
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 2048,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    await ref.read(appActionsProvider).addPhotoMemory(
+          petId: pet.id,
+          sourcePath: picked.path,
+        );
+    messenger.showSnackBar(
+      SnackBar(content: Text(L.t('profile.memory.added'))),
+    );
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
+  }
+}
+
 /// 照片网格。三列正方形，间距按页面栅格走。
 ///
-/// 只渲染**本地文件真的在**的那些格子 —— 附件记录可能在（同步过来的、
-/// 或者用户清过存储），文件却没了，那种格子只会是一块灰。
+/// 调用方负责过滤掉文件已丢失的附件 —— 这里只管画。
 class _PhotoGrid extends StatelessWidget {
-  const _PhotoGrid({required this.paths});
+  const _PhotoGrid({required this.attachments, required this.onTap});
 
-  final List<String> paths;
+  final List<RecordAttachment> attachments;
+  final void Function(RecordAttachment att) onTap;
 
   @override
   Widget build(BuildContext context) {
-    final files = [
-      for (final path in paths)
-        if (path.trim().isNotEmpty && File(path).existsSync()) path,
-    ];
-    if (files.isEmpty) {
-      return Text(
-        L.t('profile.memory.empty'),
-        style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
-      );
-    }
-
     const gap = AppSpace.gapS;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1701,18 +1790,21 @@ class _PhotoGrid extends StatelessWidget {
           spacing: gap,
           runSpacing: gap,
           children: [
-            for (final path in files)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  File(path),
-                  width: size,
-                  height: size,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+            for (final att in attachments)
+              GestureDetector(
+                onTap: () => onTap(att),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    File(att.localPath!),
                     width: size,
                     height: size,
-                    color: AppColors.divider,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: size,
+                      height: size,
+                      color: AppColors.divider,
+                    ),
                   ),
                 ),
               ),
@@ -1729,11 +1821,16 @@ class _TabEmpty extends StatelessWidget {
     required this.icon,
     required this.titleKey,
     required this.hintKey,
+    this.action,
   });
 
   final IconData icon;
   final String titleKey;
   final String hintKey;
+
+  /// 空态下的动作按钮。**空态光说明不给出路等于没说** ——
+  /// 能加东西的页签（比如回忆）应该在这里就把入口摆出来。
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -1771,6 +1868,10 @@ class _TabEmpty extends StatelessWidget {
                 color: AppColors.textSecondary,
               ),
             ),
+            if (action != null) ...[
+              const SizedBox(height: AppSpace.gapL),
+              action!,
+            ],
           ],
         ),
       ),
