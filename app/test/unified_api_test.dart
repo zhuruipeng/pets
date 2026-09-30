@@ -17,7 +17,7 @@ import 'package:http/testing.dart';
 import 'package:pet_app/core/region.dart';
 import 'package:pet_app/data/sync/unified_api.dart';
 
-const String _base = 'https://weiyuantool.com';
+const String _base = 'https://www.weiyuantool.com';
 
 /// 记录收到的请求，方便断言「发出去的是什么」。
 class _Recorder {
@@ -61,9 +61,15 @@ void main() {
       expect(Region.intl.unifiedAccountBaseUrl, isNull);
     });
 
-    test('cn 有默认地址', () {
-      expect(Region.cn.unifiedAccountBaseUrl, isNotNull);
-      expect(Region.cn.unifiedAccountBaseUrl, startsWith('https://'));
+    test('cn 有默认地址，且必须带 www', () {
+      final base = Region.cn.unifiedAccountBaseUrl;
+      expect(base, isNotNull);
+      expect(base, startsWith('https://'));
+      // 裸域对**所有**请求（含 POST）301 到 www，而 Dart 的 HttpClient
+      // 对非 GET 的 301 不自动跟随 → 拿到的是 nginx 的 HTML 错误页。
+      // 实测见 tool/probe_unified_account.dart；配错的表现是
+      // 「验证码永远发不出去」，排查时很难联想到域名。
+      expect(base, contains('//www.'), reason: '必须是 www 这个规范主机');
     });
   });
 
@@ -99,7 +105,12 @@ void main() {
       expect(rec.requests.last.method, 'POST');
       expect(rec.lastUri.toString(), '$_base/api/auth/sms/send');
       expect(rec.lastBody['phone'], '13800138000');
-      // scene 必须是 login：官网用它选短信模板，写错会走到别的模板上。
+      // scene=login 与官网登录进的是**同一个码池**。这不是巧合，正是 A 方案
+      // 的要义：同一个账号域，用户在官网发的码也能拿来登宠物 App。
+      //
+      // 注意 scene **不决定短信模板** —— 模板是按 `ALIYUN_SMS_TEMPLATE_{SCENE}`
+      // 环境变量找、找不到就回退到 `ALIYUN_SMS_TEMPLATE_CODE`（服务器上只配了
+      // 后者），所以各 scene 最终都走同一条已报备模板。
       expect(rec.lastBody['scene'], 'login');
       expect(rec.lastBody.keys.toSet(), {'phone', 'scene'});
     });
@@ -173,6 +184,24 @@ void main() {
       }
       expect(caught?.statusCode, 502);
       expect(caught?.message, contains('502'));
+    });
+
+    test('301 要提示「地址被重定向」，而不是一句无信息的状态码', () async {
+      // 真实现场：baseUrl 配成裸域 weiyuantool.com 时，nginx 对 POST 也回
+      // 301 到 www，而 Dart 不跟随非 GET 的 301 → 响应体是那张 HTML 错误页。
+      // 没有这条特判，用户看到的是「操作失败」、开发者看到 error (301)，
+      // 两边都指不到真正的原因（域名少了 www）。
+      final rec = _Recorder();
+      UnifiedApiException? caught;
+      try {
+        await _api(rec, status: 301, body: '<html>301 Moved Permanently</html>')
+            .requestCode(phone: '13800138000');
+      } on UnifiedApiException catch (e) {
+        caught = e;
+      }
+      expect(caught?.statusCode, 301);
+      expect(caught?.message, contains('redirected'));
+      expect(caught?.message, contains('UNIFIED_ACCOUNT_BASE'));
     });
   });
 

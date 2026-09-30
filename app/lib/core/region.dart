@@ -57,10 +57,20 @@ extension RegionBehavior on Region {
   /// `if (base != null)`，而不是在业务代码里判断区域 —— 那正是本文件
   /// 开头禁止的事情。海外区没有出岫账号，也不能把用户数据送到中国节点，
   /// 所以这里是 null。
+  ///
+  /// ⚠️ **必须带 `www.`，这不是笔误。** 裸域 `weiyuantool.com` 对**所有**
+  /// 请求（含 POST）返回 301 到 `www.weiyuantool.com`，而 Dart 的
+  /// `HttpClient` 对非 GET 的 301 **不会自动跟随** —— 客户端拿到的是 nginx
+  /// 那张 `301 Moved Permanently` 的 HTML 页，不是 JSON。
+  /// 已验证（`dart tool/probe_unified_account.dart`）：
+  /// 裸域 → `status=301`、无重定向记录、body 是 HTML；
+  /// www  → `status=400 {"detail":"请输入正确的中国大陆手机号"}`（请求完好到达）。
+  /// 配错的表现是「验证码永远发不出去，提示 error (301)」，
+  /// 排查时很难联想到域名。
   String? get unifiedAccountBaseUrl => switch (this) {
         Region.cn => const String.fromEnvironment(
             'UNIFIED_ACCOUNT_BASE',
-            defaultValue: 'https://weiyuantool.com',
+            defaultValue: 'https://www.weiyuantool.com',
           ),
         Region.intl => null,
       };

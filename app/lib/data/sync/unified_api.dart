@@ -186,6 +186,14 @@ class UnifiedAccountApi {
     final detail = '${body['detail'] ?? body['error'] ?? body['msg'] ?? ''}'.trim();
     if (detail.isNotEmpty) return detail;
     if (status == 429) return 'too many requests';
+    // 3xx 不可能来自业务逻辑，只会来自「地址配错了」。
+    // 实测：裸域 weiyuantool.com 对所有请求（含 POST）301 到 www，
+    // 而 Dart 的 HttpClient 对非 GET 的 301 不自动跟随 → 响应体是 nginx
+    // 的 HTML 错误页、解不出 detail，界面只显示一句通用的「操作失败」。
+    // 这个提示把排查方向直接指到 UNIFIED_ACCOUNT_BASE 上。
+    if (status >= 300 && status < 400) {
+      return 'base url redirected ($status) — check UNIFIED_ACCOUNT_BASE';
+    }
     return 'unified account error ($status)';
   }
 }

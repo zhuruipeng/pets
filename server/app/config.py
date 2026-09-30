@@ -86,7 +86,17 @@ class Settings(BaseSettings):
     email_provider: str = ""
 
     # ---- 统一账号（仅中国区，A 方案）----
-    # 官网账号域地址，例如 https://weiyuantool.com。
+    # 官网账号域地址，建议写规范主机：https://www.weiyuantool.com
+    #
+    # 这里写裸域 weiyuantool.com 也能工作（本模块只发 GET，Python 的 urllib
+    # 会自动跟随 301，且请求头会保留），只是每次多一跳 —— 所以这里不是硬门禁，
+    # 但两处保持一致能少一类「为什么这边好使那边不好使」的困惑。
+    #
+    # ⚠️ 真正会被 301 打死的是**客户端**：Dart 的 HttpClient 对非 GET 的 301
+    # 不自动跟随，裸域会让「发验证码」这个 POST 直接拿到 nginx 的 HTML 页，
+    # 且 GET 会自动跟随 → 手工探一下还以为地址是对的。
+    # 客户端侧同一个值见 app/lib/core/region.dart 的 unifiedAccountBaseUrl。
+    #
     # 留空 = 这个部署不提供统一账号登录，/api/v1/auth/unified 直接 404。
     # 海外区即使误配了也不会启用：unified_enabled() 同时要求 region == "cn"。
     unified_account_base_url: str = ""
