@@ -81,13 +81,31 @@ $ErrorActionPreference = 'Stop'
 try { [System.IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch { }
 
 $script:EmitSink = $null
+# 两种 UTF-8，各有用处，别混：
+# - Utf8NoBom：写 **pubspec.yaml** 用。它本来就是无 BOM 的，加 BOM 会让 Flutter 解析出问题。
+# - Utf8Bom：写 **结果文件** 用。无 BOM 的 UTF-8 在 Windows 上被老工具（记事本、
+#   PS 5.1 的 Get-Content）按 GBK 解读，中文直接变乱码（已实测踩到）。
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$script:Utf8Bom = New-Object System.Text.UTF8Encoding($true)
 
 function Emit([string]$text) {
     Write-Output $text
     if ($script:EmitSink) {
         [System.IO.File]::AppendAllText(
-            $script:EmitSink, $text + [Environment]::NewLine, $script:Utf8NoBom)
+            $script:EmitSink, $text + [Environment]::NewLine, $script:Utf8Bom)
+    }
+}
+
+# 只落盘、不上屏。
+#
+# 为什么需要它：**正常流程的输出全走 Write-Host**（彩色、给人看），而 Write-Host
+# 既不进管道也不被重定向 —— 于是只靠 Emit 的话，`-ResultFile` 在真实构建后
+# 只会得到一个**空文件**（已实测：老板跑完发回来的就是空的，这一版修掉）。
+# 需要留档的几项在结尾单独过一遍 Record，终端显示保持不变。
+function Record([string]$text) {
+    if ($script:EmitSink) {
+        [System.IO.File]::AppendAllText(
+            $script:EmitSink, $text + [Environment]::NewLine, $script:Utf8Bom)
     }
 }
 
@@ -108,7 +126,10 @@ if ($ResultFile -ne '') {
     if ($dir -ne '' -and -not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
-    [System.IO.File]::WriteAllText($ResultFile, '', $script:Utf8NoBom)
+    # 截断重建：文件从 0 字节起步，之后每次 Append 都沿用同一个编码。
+    # 这里用带 BOM 的 —— 结果文件是给人（和别的工具）读的，无 BOM 的中文
+    # 在 Windows 上会被按 GBK 解读成乱码。
+    [System.IO.File]::WriteAllText($ResultFile, '', $script:Utf8Bom)
     Write-Host "    [i] 结果同时写入: $ResultFile" -ForegroundColor DarkGray
 }
 
@@ -254,6 +275,34 @@ if (Test-Path $metaPath) {
     Write-Host "[!] 没找到 $metaPath，跳过核对（不阻断）" -ForegroundColor Yellow
 }
 
+# ---- 3.5 产物指纹 ----
+# 发版要留档：拿到 SHA1 才能核对「用户下到的确实是这个包」。
+#
+# 顺带写清一个容易误判的现象：**若这次改动对产物没有实际影响**（例如只改了
+# 等价写法、或只动了 test/ 与 tool/），Gradle 会因「打包输入内容未变」判
+# up-to-date 而复用已有 APK —— 此时 `apk/**/release/` 里那份的时间戳不更新，
+# 只有 flutter 拷到 `flutter-apk/` 的那份时间戳变新，**SHA1 与上一版一模一样**。
+# 那不是构建失败，恰恰是「等价改动」的字节级证据（本仓库 03a09ea 那轮实测如此）。
+$artifactName = if ($AppBundle) { "app-$Region-release.aab" } else { "app-$Region-release.apk" }
+$artifactPath = Join-Path $artifact $artifactName
+$artifactSize = 0
+$artifactTime = ''
+$artifactSha1 = ''
+
+Write-Host ''
+if (Test-Path $artifactPath) {
+    $fi = Get-Item $artifactPath
+    $artifactSize = $fi.Length
+    $artifactTime = $fi.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
+    $artifactSha1 = (Get-FileHash $artifactPath -Algorithm SHA1).Hash.ToLower()
+
+    Write-Host "==> 产物指纹: $artifactName" -ForegroundColor Cyan
+    Write-Host ("    {0:N1} MB（{1} 字节）  {2}" -f ($artifactSize / 1MB), $artifactSize, $artifactTime)
+    Write-Host "    SHA1: $artifactSha1"
+} else {
+    Write-Host "[!] 没找到产物 $artifactPath（跳过指纹）" -ForegroundColor Yellow
+}
+
 # ---- 4. 打印服务端要改的环境变量 ----
 $url = if ($ApkUrl -ne '') { $ApkUrl } else { 'https://<把 APK 传到这里>.apk' }
 $notes = if ($Notes -ne '') { $Notes } else { '<这次改了什么，会显示在更新弹框里>' }
@@ -282,3 +331,22 @@ if ($Region -eq 'cn') {
 Write-Host ''
 Write-Host "  产物目录: $artifact" -ForegroundColor DarkGray
 Write-Host '========================================================================' -ForegroundColor Green
+
+# ---- 5. 落盘（-ResultFile）----
+# 上面那些都是 Write-Host，不会进文件；真正需要留档的只有下面这几项。
+Record ''
+Record '================ 发版记录 ================'
+Record ('时间      : ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+Record "区域      : $Region"
+Record "版本      : $raw -> $newRaw"
+Record "产物      : $artifactPath"
+if ($artifactSha1 -ne '') {
+    Record "大小      : $artifactSize 字节（$artifactTime）"
+    Record "SHA1      : $artifactSha1"
+}
+Record "APP_VERSION=$newName"
+Record "APP_BUILD=$newBuild"
+Record "APP_APK_URL=$url"
+Record "APP_NOTES=$notes"
+Record 'APP_MIN_BUILD=0'
+Record '=========================================='
