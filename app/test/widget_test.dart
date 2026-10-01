@@ -161,6 +161,29 @@ void main() {
       }
     });
 
+    test('文档原件文案都已翻译', () {
+      for (final k in [
+        'detail.documents',
+        'detail.documents.empty',
+        'detail.documents.add',
+        'detail.documents.delete',
+        'profile.section.documents',
+        'doc.pickFailed',
+        'doc.added',
+        'doc.unknownType',
+        'doc.localOnly',
+        // {n} 是上限 MB 数，漏了就是一句「文件超过 MB」
+        'doc.tooLarge',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+      expect(
+        L.tp('doc.tooLarge', {'n': 20}),
+        isNot(contains('{n}')),
+        reason: 'doc.tooLarge 的 {n} 没被替换',
+      );
+    });
+
     test('费用页签文案都已翻译', () {
       for (final k in [
         'profile.tab.expense',
@@ -637,7 +660,52 @@ void main() {
     });
   });
 
-  group('版本比较', () {    test('按数字段比大小，后缀不参与', () {
+  group('文档原件 · 展示层', () {
+    RecordAttachment att({
+      String? fileName,
+      String? localPath,
+      int? sizeBytes,
+    }) =>
+        RecordAttachment(
+          id: 'a1',
+          recordId: 'r1',
+          kind: 'document',
+          localPath: localPath ?? '/data/x/abcdef.pdf',
+          fileName: fileName,
+          sizeBytes: sizeBytes,
+          createdAt: DateTime(2026, 9, 29),
+        );
+
+    test('展示名优先原始文件名，没有才退回路径末段', () {
+      // 用户认的是「狂犬疫苗本.pdf」，换成 doc-<uuid>.pdf 之后
+      // 分享给兽医时对方那边也是一串乱码名。
+      expect(attachmentTitle(att(fileName: '狂犬疫苗本.pdf')), '狂犬疫苗本.pdf');
+      expect(attachmentTitle(att(fileName: '  ')), 'abcdef.pdf');
+      expect(attachmentTitle(att(localPath: 'C:\\x\\y\\lab.jpg')), 'lab.jpg');
+      expect(attachmentTitle(att(fileName: '', localPath: '')), '');
+    });
+
+    test('文件大小：KB 取整，MB 一位小数', () {
+      expect(fileSizeLabel(512), '512 B');
+      expect(fileSizeLabel(2048), '2 KB');
+      expect(fileSizeLabel(3 * 1024 * 1024), '3.0 MB');
+      // null / 0 给空串，调用方据此不渲染这一行 —— 不显示「0 B」。
+      expect(fileSizeLabel(null), '');
+      expect(fileSizeLabel(0), '');
+    });
+
+    test('扩展名 → MIME，认不出的落 octet-stream', () {
+      expect(mimeOfExt('pdf'), 'application/pdf');
+      expect(mimeOfExt('.PDF'), 'application/pdf', reason: '大小写与点号都要吃');
+      expect(mimeOfExt('jpg'), 'image/jpeg');
+      expect(mimeOfExt('docx'), startsWith('application/'));
+      expect(mimeOfExt('exe'), 'application/octet-stream');
+      expect(mimeOfExt(null), 'application/octet-stream');
+    });
+  });
+
+  group('版本比较', () {
+    test('按数字段比大小，后缀不参与', () {
       expect(AppUpdateService.compareVersion('0.2.0', '0.1.9') > 0, isTrue);
       expect(AppUpdateService.compareVersion('0.1.0', '0.1.0'), 0);
       expect(AppUpdateService.compareVersion('1.0.0-beta', '0.9.9') > 0, isTrue);

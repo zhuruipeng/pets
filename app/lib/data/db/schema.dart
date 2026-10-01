@@ -18,7 +18,7 @@
 /// 老用户升级时会按版本顺序重放，改一句就会在别人手机上错位。
 library;
 
-const int kSchemaVersion = 5;
+const int kSchemaVersion = 6;
 
 const String createUsers = '''
 CREATE TABLE users (
@@ -103,6 +103,10 @@ CREATE TABLE records (
 );
 ''';
 
+/// 记录附件。M3.3 只落照片；v6（M8）起也能挂 PDF / Word 等文档原件。
+///
+/// `local_only = 1` 的行**不进同步队列**（见 [kSyncSkipWhen]）：文件只在本机，
+/// 把一行指向本机绝对路径的元数据推给别人，对方只会看到点不开的条目。
 const String createAttachments = '''
 CREATE TABLE attachments (
   id          TEXT PRIMARY KEY,
@@ -112,6 +116,10 @@ CREATE TABLE attachments (
   remote_url  TEXT,
   width       INTEGER,
   height      INTEGER,
+  file_name   TEXT,
+  mime        TEXT,
+  size_bytes  INTEGER,
+  local_only  INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER,
   deleted_at  INTEGER
@@ -295,6 +303,20 @@ final List<String> onCreate = [
 /// - `walk_points`：逐点同步会把变更日志撑爆，它随 session 一起传
 /// - `reminder_logs`：本地行为统计，跨设备合并意义不大，且表里没有 updated_at
 /// - `pet_tags`：目前没有任何写入路径
+/// 即使表在 [kSyncedTables] 里，某些行也不该进 outbox。表名 → 额外的 WHEN 条件。
+///
+/// 文档原件（PDF / Word）**只存本机**：别的设备上没有那个文件，把一行
+/// 指向本机绝对路径的元数据推上去，对方只会看到一个点不开的条目。
+/// 文件本身从来没上传过（同步传的是行快照，不是字节），所以把元数据也
+/// 拦下来才是一致的 —— 否则「只存本机」这句话只兑现了一半。
+///
+/// 写成 `COALESCE(..., 0) = 0` 而不是 `local_only = 0`：老行的这一列是 NULL，
+/// `NULL = 0` 在 SQLite 里是 NULL（不是真），整条 WHEN 会被判假、老照片
+/// 从此不同步。这个坑只在升级路径上出现，全新装的库一列都不缺。
+const Map<String, String> kSyncSkipWhen = {
+  'attachments': "COALESCE(NEW.local_only, 0) = 0",
+};
+
 const List<({String table, String petExpr, bool hasDeletedAt})> kSyncedTables = [
   (table: 'users', petExpr: 'NULL', hasDeletedAt: false),
   (table: 'pets', petExpr: 'NEW.id', hasDeletedAt: true),
@@ -329,10 +351,12 @@ List<String> _triggersFor(
   String table,
   String petExpr, {
   required bool hasDeletedAt,
+  String? skipWhen,
 }) {
   final opExpr = hasDeletedAt
       ? "CASE WHEN NEW.deleted_at IS NULL THEN 'upsert' ELSE 'delete' END"
       : "'upsert'";
+  final skip = skipWhen == null ? '' : '\nAND $skipWhen';
 
   /// `suffix` 只用于触发器名，`keyword` 才是 SQL 关键字。
   ///
@@ -342,7 +366,7 @@ List<String> _triggersFor(
   /// 但当时测试还没跑起来，所以这个错一直潜伏到打包后。
   String body(String suffix, String keyword) => '''
 CREATE TRIGGER trg_${table}_outbox_$suffix AFTER $keyword ON $table
-WHEN (SELECT value FROM sync_meta WHERE key = 'applying') IS NOT '1'
+WHEN (SELECT value FROM sync_meta WHERE key = 'applying') IS NOT '1'$skip
 BEGIN
   INSERT OR REPLACE INTO sync_outbox(table_name, row_id, pet_id, op, updated_at)
   VALUES ('$table', NEW.id, $petExpr, $opExpr, NEW.updated_at);
@@ -355,7 +379,12 @@ END;
 /// 全部同步触发器。由 [_triggersFor] 生成，集中在这里方便核对覆盖范围。
 final List<String> createSyncTriggers = [
   for (final t in kSyncedTables)
-    ..._triggersFor(t.table, t.petExpr, hasDeletedAt: t.hasDeletedAt),
+    ..._triggersFor(
+      t.table,
+      t.petExpr,
+      hasDeletedAt: t.hasDeletedAt,
+      skipWhen: kSyncSkipWhen[t.table],
+    ),
 ];
 
 /// 逐级迁移语句。key = 目标版本。
@@ -413,5 +442,33 @@ final Map<int, List<String>> migrations = {
     createExpenses,
     ...createExpenseIndexes,
     ..._triggersFor('expenses', 'NEW.pet_id', hasDeletedAt: true),
+  ],
+
+  // v6：文档原件（M8）。给记录挂 PDF / Word 等文件。
+  //
+  // 四列都是「元数据」而不是文件内容 —— 文件本身拷进应用文档目录，
+  // 只留一个路径。绝不把字节塞进 SQLite：一张化验单照片 3MB，
+  // 几十条记录就能把库撑到几百 MB，而同步推的是整行快照，
+  // 届时每次同步都在传这些字节。
+  //
+  // `local_only` 带 DEFAULT 0 且 NOT NULL：老照片行会自动补 0（继续同步），
+  // 只有新加的文档显式写 1。可空的话就得在触发器和 UI 里到处判空。
+  6: [
+    'ALTER TABLE attachments ADD COLUMN file_name TEXT',
+    'ALTER TABLE attachments ADD COLUMN mime TEXT',
+    'ALTER TABLE attachments ADD COLUMN size_bytes INTEGER',
+    'ALTER TABLE attachments ADD COLUMN local_only INTEGER NOT NULL DEFAULT 0',
+
+    // 触发器要重建：v4 建的那两个 WHEN 里没有 local_only 这一条，
+    // 文档会跟着一起进 outbox。先 DROP 再 CREATE —— 不能直接 CREATE，
+    // 同名的会报 already exists 并把整个迁移事务掀翻。
+    'DROP TRIGGER IF EXISTS trg_attachments_outbox_ins',
+    'DROP TRIGGER IF EXISTS trg_attachments_outbox_upd',
+    ..._triggersFor(
+      'attachments',
+      '(SELECT pet_id FROM records WHERE id = NEW.record_id)',
+      hasDeletedAt: true,
+      skipWhen: kSyncSkipWhen['attachments'],
+    ),
   ],
 };

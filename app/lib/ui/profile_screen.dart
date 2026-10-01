@@ -16,8 +16,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../core/feature_flags.dart';
 import '../core/l10n.dart';
@@ -450,6 +452,19 @@ class _InfoTab extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpace.gapM),
         _FamilyCard(pet: pet),
+
+        // ---- 文档原件 ----
+        const SizedBox(height: AppSpace.gapXl),
+        Text(
+          L.t('profile.section.documents'),
+          style: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: AppSpace.gapM),
+        _DocumentsCard(pet: pet),
 
         // ---- 提醒计划（这个 App 的核心价值，不能因为改版就藏起来） ----
         const SizedBox(height: AppSpace.gapXl),
@@ -2536,6 +2551,180 @@ class _ExpenseRow extends ConsumerWidget {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(L.t('expense.deleted'))),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 文档原件卡
+
+/// 一只宠物的全部文档原件（跨记录）。档案页「资料」页签用。
+///
+/// 为什么在这里也能加：疫苗本、保单这类东西**不属于任何一次事件**
+/// （不是打针那天才有这本本子），让用户先去建一条记录再挂附件，
+/// 会让「存个 PDF」变成三步。这里加的会自动建一条载体记录，
+/// 之后在记录时间线里同样找得到、删得掉。
+///
+/// 与记录详情页那份是同一批数据（同一个 provider 家族的不同成员），
+/// 不会出现「这边删了那边还在」。
+class _DocumentsCard extends ConsumerWidget {
+  const _DocumentsCard({required this.pet});
+
+  final Pet pet;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final docs =
+        ref.watch(petDocumentsProvider(pet.id)).valueOrNull ??
+            const <RecordAttachment>[];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpace.gapL),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppRadius.cardBorder,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (docs.isEmpty)
+            Text(
+              L.t('detail.documents.empty'),
+              style: const TextStyle(
+                fontSize: 12.5,
+                height: 1.5,
+                color: AppColors.textSecondary,
+              ),
+            )
+          else ...[
+            for (var i = 0; i < docs.length; i++) ...[
+              if (i > 0) const RowDivider(),
+              _DocumentLine(attachment: docs[i]),
+            ],
+            const SizedBox(height: AppSpace.gapS),
+            Text(
+              L.t('doc.localOnly'),
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.textTertiary,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpace.gapM),
+          SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: OutlinedButton.icon(
+              onPressed: () => _pick(context, ref),
+              icon: const Icon(Icons.attach_file_rounded, size: 17),
+              label: Text(L.t('detail.documents.add')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pick(BuildContext context, WidgetRef ref) async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: kDocumentExtensions,
+      withData: false,
+    );
+    final file = result?.files.singleOrNull;
+    final path = file?.path;
+    if (file == null || path == null) return;
+
+    if (file.size > kMaxDocumentBytes) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            L.tp('doc.tooLarge', {'n': kMaxDocumentBytes ~/ (1024 * 1024)}),
+          ),
+        ),
+      );
+      return;
+    }
+
+    try {
+      // 不传 recordId：这批文档不属于任何事件，由 Actions 建一条载体记录。
+      await ref.read(appActionsProvider).addDocument(
+            petId: pet.id,
+            sourcePath: path,
+            fileName: file.name,
+            mime: mimeOfExt(file.extension),
+            sizeBytes: file.size,
+          );
+      ref.invalidate(petRecordsProvider(pet.id));
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(L.t('doc.added'))),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+}
+
+class _DocumentLine extends StatelessWidget {
+  const _DocumentLine({required this.attachment});
+
+  final RecordAttachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = attachmentTitle(attachment);
+    final size = fileSizeLabel(attachment.sizeBytes);
+    final dot = (attachment.fileName ?? '').lastIndexOf('.');
+    final ext = dot < 0 ? '' : attachment.fileName!.substring(dot + 1);
+
+    return InkWell(
+      onTap: () async {
+        final p = attachment.localPath;
+        if (p == null) return;
+        await Share.shareXFiles([XFile(p)], subject: name);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.gapS),
+        child: Row(
+          children: [
+            Icon(documentIcon(ext), size: 20, color: AppColors.primary),
+            const SizedBox(width: AppSpace.gapM),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name.isEmpty ? L.t('doc.unknownType') : name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  if (size.isNotEmpty)
+                    Text(
+                      size,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const Icon(Icons.open_in_new_rounded,
+                size: 16, color: AppColors.textTertiary),
+          ],
+        ),
+      ),
     );
   }
 }

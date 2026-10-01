@@ -678,6 +678,85 @@ void main() {
 
       await db.close();
     });
+
+    test('v6 迁移后文档原件不进 outbox，照片照常进', () async {
+      // 单开一个库，并**手工建一个 v4 时代的老触发器**：v6 要改的正是
+      // 已经存在的那个触发器，用 onCreate 建的全新库走不到 DROP/CREATE
+      // 这条路径，而这条路径只会在老用户升级时跑一次 —— 出错就是线上事故。
+      final db = await databaseFactoryFfi.openDatabase(
+        inMemoryDatabasePath,
+        options: OpenDatabaseOptions(singleInstance: false, version: 1),
+      );
+      await db.execute(createSyncMeta);
+      await db.execute(createSyncOutbox);
+      await db.execute(createRecords);
+      await db.execute(createAttachments);
+      await db.execute('''
+CREATE TRIGGER trg_attachments_outbox_ins AFTER INSERT ON attachments
+WHEN (SELECT value FROM sync_meta WHERE key = 'applying') IS NOT '1'
+BEGIN
+  INSERT OR REPLACE INTO sync_outbox(table_name, row_id, pet_id, op, updated_at)
+  VALUES ('attachments', NEW.id,
+    (SELECT pet_id FROM records WHERE id = NEW.record_id),
+    CASE WHEN NEW.deleted_at IS NULL THEN 'upsert' ELSE 'delete' END,
+    NEW.updated_at);
+END;
+''');
+
+      for (final stmt in migrations[6]!) {
+        await db.execute(stmt);
+      }
+
+      // 老触发器被换掉了（名字还在，但 WHEN 里多了 local_only 这一条）。
+      final triggers = await db.rawQuery(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='trg_attachments_outbox_ins'",
+      );
+      expect(triggers, hasLength(1));
+      expect(triggers.first['sql'] as String, contains('local_only'),
+          reason: '迁移必须把触发器换成带 local_only 条件的那版');
+
+      await db.insert('records', {
+        'id': 'rec-1',
+        'pet_id': 'p1',
+        'type': 'medical',
+        'recorded_at': 1000,
+        'created_by': 'u1',
+        'created_at': 1000,
+        'updated_at': 1000,
+      });
+
+      await db.insert('attachments', {
+        'id': 'doc-1',
+        'record_id': 'rec-1',
+        'kind': 'document',
+        'local_path': '/tmp/fake/vaccine.pdf',
+        'file_name': '疫苗本.pdf',
+        'local_only': 1,
+        'created_at': 1000,
+        'updated_at': 1000,
+      });
+      expect(await db.query('sync_outbox'), isEmpty,
+          reason: '文档原件只存本机，不该进同步队列');
+
+      // 照片照常同步 —— 顺带验证 COALESCE 那一层：老行没写过 local_only，
+      // 列上是 NULL，`NULL = 0` 在 SQLite 里是 NULL 不是真，漏了 COALESCE
+      // 会让所有老照片从此不同步，而全新装的库一列都不缺、测不出来。
+      await db.insert('attachments', {
+        'id': 'photo-1',
+        'record_id': 'rec-1',
+        'kind': 'photo',
+        'local_path': '/tmp/fake/photo.jpg',
+        'created_at': 1000,
+        'updated_at': 1000,
+      });
+      final outbox = await db.query('sync_outbox');
+      expect(outbox, hasLength(1));
+      expect(outbox.first['table_name'], 'attachments');
+      expect(outbox.first['row_id'], 'photo-1');
+
+      await db.close();
+    });
   });
 
   group('附件仓储', () {
@@ -736,6 +815,72 @@ void main() {
       expect(a.first.id, 'att-0');
       expect(a.last.id, 'att-1');
       await db.close();
+    });
+
+    test('照片与文档按 kind 分开取，相册里不会混进 PDF', () async {
+      final db = await _memDb();
+      final repo = AttachmentRepository(db);
+
+      await db.insert('records', {
+        'id': 'rec-a',
+        'pet_id': 'p1',
+        'type': 'medical',
+        'recorded_at': 1000,
+        'created_by': 'u1',
+        'created_at': 1000,
+        'updated_at': 1000,
+      });
+
+      Future<void> put(String id, String kind, {bool localOnly = false}) =>
+          db.insert(
+            'attachments',
+            RecordAttachment(
+              id: id,
+              recordId: 'rec-a',
+              kind: kind,
+              localPath: '/x/$id',
+              fileName: '$id.${kind == 'document' ? 'pdf' : 'jpg'}',
+              sizeBytes: 2048,
+              localOnly: localOnly,
+              createdAt: DateTime(2026, 9, 29, 10),
+            ).toMap(),
+          );
+
+      await put('att-photo', 'photo');
+      await put('att-doc', 'document', localOnly: true);
+
+      expect((await repo.listByRecord('rec-a', kind: 'photo')).length, 1);
+      expect((await repo.listByRecord('rec-a', kind: 'document')).length, 1);
+      expect((await repo.listByRecord('rec-a')).length, 2, reason: '不传 kind 取全部');
+
+      // 跨记录的相册/文档夹同样要分开。
+      expect((await repo.listPhotosByPet('p1')).length, 1);
+      expect((await repo.listDocumentsByPet('p1')).length, 1);
+
+      // 元数据往返：只存本机这个标记不能丢了 —— 丢了的后果是
+      // 文档元数据被推上去，别人那边看到一个点不开的条目。
+      final docs = await repo.listDocumentsByPet('p1');
+      expect(docs.single.localOnly, isTrue);
+      expect(docs.single.isDocument, isTrue);
+      expect(docs.single.fileName, 'att-doc.pdf');
+      expect(docs.single.sizeBytes, 2048);
+
+      await db.close();
+    });
+
+    test('老行没有 local_only 列时读作 false，不能抛', () async {
+      // 模型层直接读一行**只有老列**的 map：升级路径上真实存在这种情况，
+      // 写成 `(m['local_only'] as int) == 1` 会在这儿直接抛。
+      final att = RecordAttachment.fromMap({
+        'id': 'att-1',
+        'record_id': 'rec-a',
+        'kind': 'photo',
+        'local_path': '/x/1.jpg',
+        'created_at': 1000,
+      });
+      expect(att.localOnly, isFalse);
+      expect(att.isPhoto, isTrue);
+      expect(att.fileName, isNull);
     });
   });
 

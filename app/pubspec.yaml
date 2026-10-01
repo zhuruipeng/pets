@@ -73,6 +73,17 @@ dependencies:
   # 11.x 新增的是生物识别增强，本 App 用不到。
   flutter_secure_storage: ^10.3.4
 
+  # 文档原件（M8）：给记录挂 PDF / Word / 图片等原件。
+  # image_picker 只认系统相册与相机，取不到「下载目录里的化验单 PDF」，
+  # 所以文档走这个包；照片仍然走 image_picker，两条路不合并 ——
+  # 合并后相册那套（权限、裁剪、EXIF）会被文件选择器带偏。
+  #
+  # ⚠️ **只存本机**：选到的文件拷进应用文档目录，不上传服务端
+  # （见 schema 里 attachments.local_only 与同步触发器的 WHEN 条件）。
+  # 打开方式走 share_plus 起系统分享页，不引 PDF 渲染库 —— 那类库动辄
+  # +5MB 且要 embed 字体，为一个「能看」的入口不值。
+  file_picker: ^11.0.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

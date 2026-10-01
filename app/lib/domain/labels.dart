@@ -72,6 +72,54 @@ String? petAgeLabel(DateTime? birthday, DateTime now) {
   return L.isZh ? '$y岁$m个月' : '${y}y ${m}mo';
 }
 
+/// 扩展名 → MIME。只覆盖允许上传的那十来种，其余落 octet-stream。
+///
+/// 手写而不用 mime 包：那个包目前只是传递依赖，直接 import 属于
+/// 「用了没声明的依赖」，上游改依赖树就会突然编译不过。为十来个
+/// 常量引一个包也不划算。
+String mimeOfExt(String? ext) =>
+    switch ((ext ?? '').toLowerCase().replaceFirst('.', '')) {
+      'pdf' => 'application/pdf',
+      'doc' => 'application/msword',
+      'docx' =>
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'xls' => 'application/vnd.ms-excel',
+      'xlsx' =>
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'txt' => 'text/plain',
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'heic' => 'image/heic',
+      'heif' => 'image/heif',
+      'webp' => 'image/webp',
+      _ => 'application/octet-stream',
+    };
+
+/// 文档原件的展示名。
+///
+/// 优先原始文件名；没有就退回路径末段（早期版本的附件没存名）。
+/// 都取不到给空串，调用方按「无名文档」处理 —— 不拿 id 糊弄，
+/// 那串字符对用户在辨认文件这件事上毫无帮助。
+String attachmentTitle(RecordAttachment a) {
+  final name = (a.fileName ?? '').trim();
+  if (name.isNotEmpty) return name;
+  final p = (a.localPath ?? '').trim();
+  if (p.isEmpty) return '';
+  final seg = p.split(RegExp(r'[\\/]'));
+  return seg.isEmpty ? '' : seg.last;
+}
+
+/// 文件大小（「2.4 MB」）。文档列表上用来帮用户认出自己要找的那份。
+///
+/// 阈值取整到 KB 就不带小数：1 KB 以内的差别没人关心，而「2.43 MB」
+/// 这种精度只会让列表显得更技术化。
+String fileSizeLabel(int? bytes) {
+  if (bytes == null || bytes <= 0) return '';
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
 /// 费用类别 → 展示名。
 ///
 /// 刻意与台账（`careKindLabel`）分开：那边是「疫苗 / 体内驱虫」这种**事实**，

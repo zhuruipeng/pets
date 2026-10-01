@@ -650,20 +650,45 @@ class RecordAttachment {
     this.remoteUrl,
     this.width,
     this.height,
+    this.fileName,
+    this.mime,
+    this.sizeBytes,
+    this.localOnly = false,
     this.deletedAt,
   });
 
   final String id;
   final String recordId;
 
-  /// 'photo' / 'document' —— 目前只落 photo，document 等 M6 文件上传。
+  /// 'photo' / 'document'。
   final String kind;
+
+  bool get isDocument => kind == 'document';
+  bool get isPhoto => !isDocument;
 
   /// 应用文档目录内的绝对路径。展示用 Image.file。
   final String? localPath;
   final String? remoteUrl;
   final int? width;
   final int? height;
+
+  /// 文档原件的三个元数据（v6）。照片为 null —— EXIF 与尺寸已经够了，
+  /// 而「IMG_20260930.jpg」这种相机名对相册没有意义。
+  ///
+  /// 存**原始文件名**而不是自己生成一个：用户认的是「狂犬疫苗本.pdf」，
+  /// 换成 `doc-<uuid>.pdf` 之后导出/分享给兽医时对方那边也是一串乱码名。
+  final String? fileName;
+
+  /// 形如 'application/pdf'。
+  final String? mime;
+
+  /// 字节数。列表上显示「2.4 MB」用 —— 用户据此判断这张化验单是不是
+  /// 自己要找的那份（扫描件大、照片小）。
+  final int? sizeBytes;
+
+  /// true = 只存在本机，不进同步队列（文档原件）。见 schema 的 kSyncSkipWhen。
+  final bool localOnly;
+
   final DateTime createdAt;
 
   /// 同步的 LWW 基准（v4 补的列）。附件只在「加进来」和「软删」两刻变化，
@@ -683,6 +708,12 @@ class RecordAttachment {
         remoteUrl: m['remote_url'] as String?,
         width: (m['width'] as num?)?.toInt(),
         height: (m['height'] as num?)?.toInt(),
+        fileName: m['file_name'] as String?,
+        mime: m['mime'] as String?,
+        sizeBytes: (m['size_bytes'] as num?)?.toInt(),
+        // 老行这一列是 NULL → false（照片继续同步）。写成 `(m[...] as int) == 1`
+        // 会在老库上直接抛，而老库恰恰是升级路径上唯一的真实场景。
+        localOnly: ((m['local_only'] as num?)?.toInt() ?? 0) == 1,
         createdAt: _dt(m['created_at'])!,
         updatedAt: _dt(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
@@ -696,6 +727,10 @@ class RecordAttachment {
         'remote_url': remoteUrl,
         'width': width,
         'height': height,
+        'file_name': fileName,
+        'mime': mime,
+        'size_bytes': sizeBytes,
+        'local_only': localOnly ? 1 : 0,
         'created_at': _ms(createdAt)!,
         // 用 effectiveUpdatedAt 而不是 updatedAt：后者可空，构造时不给就是 null
         // （附件只在「加进来」和「软删」两个时刻变化，创建时两者相等）。

@@ -176,11 +176,26 @@ final weightSeriesProvider = FutureProvider.family<
   return ref.read(recordRepositoryProvider).weightSeries(petId);
 });
 
-/// 某条记录的附件（照片）。详情页用；增删后 invalidate 这个 family。
-final recordAttachmentsProvider =
+/// 某条记录的照片（详情页照片区）。
+///
+/// 与 [recordDocumentsProvider] 分开：两者在同一张表，但一个是缩略图画廊、
+/// 一个是文件列表，混在一起任一侧都要在渲染时自己再筛一遍 —— 而筛错的表现
+/// 是「PDF 当成图片渲染出一堆灰块」，很难联想到是漏了 kind 条件。
+final recordPhotosProvider =
     FutureProvider.family<List<RecordAttachment>, String>((ref, recordId) async {
   await ref.watch(dbReadyProvider.future);
-  return ref.read(attachmentRepositoryProvider).listByRecord(recordId);
+  return ref
+      .read(attachmentRepositoryProvider)
+      .listByRecord(recordId, kind: 'photo');
+});
+
+/// 某条记录挂的文档原件（PDF / Word…）。
+final recordDocumentsProvider =
+    FutureProvider.family<List<RecordAttachment>, String>((ref, recordId) async {
+  await ref.watch(dbReadyProvider.future);
+  return ref
+      .read(attachmentRepositoryProvider)
+      .listByRecord(recordId, kind: 'document');
 });
 
 /// 某只宠物的全部照片（跨记录）。档案页「回忆」相册用。
@@ -188,6 +203,13 @@ final petPhotosProvider =
     FutureProvider.family<List<RecordAttachment>, String>((ref, petId) async {
   await ref.watch(dbReadyProvider.future);
   return ref.read(attachmentRepositoryProvider).listPhotosByPet(petId);
+});
+
+/// 某只宠物的全部文档原件（跨记录）。档案页「资料」页签用。
+final petDocumentsProvider =
+    FutureProvider.family<List<RecordAttachment>, String>((ref, petId) async {
+  await ref.watch(dbReadyProvider.future);
+  return ref.read(attachmentRepositoryProvider).listDocumentsByPet(petId);
 });
 
 // ------------------------------------------------------------------ 费用
@@ -500,6 +522,7 @@ class AppActions {
     // 真发生了也不致命（用户删掉即可），比丢照片好。
     await _attachments.addPhoto(recordId: record.id, sourcePath: sourcePath);
     ref.invalidate(petRecordsProvider(petId));
+    ref.invalidate(recordPhotosProvider(record.id));
     ref.invalidate(petPhotosProvider(petId));
   }
 
@@ -537,6 +560,78 @@ class AppActions {
   Future<void> deleteExpense(String petId, String expenseId) async {
     await _expenses.softDelete(expenseId);
     ref.invalidate(petExpensesProvider(petId));
+  }
+
+  /// 给一条已有记录加照片：拷贝进应用目录 + 落库 + 失效相关 provider。
+  ///
+  /// 与 [addPhotoMemory] 的区别：那边连载体记录一起建（用于「回忆」相册
+  /// 直接加照片），这里记录已经存在。
+  Future<RecordAttachment> addPhotoToRecord({
+    required String recordId,
+    required String petId,
+    required String sourcePath,
+  }) async {
+    final att = await _attachments.addPhoto(
+      recordId: recordId,
+      sourcePath: sourcePath,
+    );
+    ref.invalidate(recordPhotosProvider(recordId));
+    ref.invalidate(petPhotosProvider(petId));
+    return att;
+  }
+
+  /// 挂一份文档原件（PDF / Word / 图片）。
+  ///
+  /// [recordId] 为空时**顺手建一条 note 记录当载体**（与 [addPhotoMemory]
+  /// 同一套路）：附件在数据模型上必须挂在 record 上，而疫苗本、保单这类
+  /// 文档不属于任何一次事件。建了载体记录，它就会出现在记录时间线里，
+  /// 用户点得进去、改得了时间、删得掉。
+  ///
+  /// 文件**只拷进本机**，不上传服务端（见 schema 的 kSyncSkipWhen）。
+  Future<RecordAttachment> addDocument({
+    required String petId,
+    required String sourcePath,
+    required String fileName,
+    String? mime,
+    int? sizeBytes,
+    String? recordId,
+  }) async {
+    String target = recordId ?? '';
+    if (target.isEmpty) {
+      final carrier = await _records.createSimple(
+        petId: petId,
+        type: RecordType.note,
+        recordedAt: DateTime.now(),
+        createdBy: await _currentUserId(),
+        payload: const {'kind': 'document'},
+      );
+      target = carrier.id;
+      ref.invalidate(petRecordsProvider(petId));
+    }
+
+    final att = await _attachments.addDocument(
+      recordId: target,
+      sourcePath: sourcePath,
+      fileName: fileName,
+      mime: mime,
+      sizeBytes: sizeBytes,
+    );
+    ref.invalidate(recordDocumentsProvider(target));
+    ref.invalidate(petDocumentsProvider(petId));
+    return att;
+  }
+
+  /// 删除一个附件（照片或文档，软删除）。
+  Future<void> deleteAttachment({
+    required String petId,
+    required String recordId,
+    required String attachmentId,
+  }) async {
+    await _attachments.softDelete(attachmentId);
+    ref.invalidate(recordPhotosProvider(recordId));
+    ref.invalidate(recordDocumentsProvider(recordId));
+    ref.invalidate(petPhotosProvider(petId));
+    ref.invalidate(petDocumentsProvider(petId));
   }
 
   /// 完成一次提醒：留档 + 排下次 + 重排通知。

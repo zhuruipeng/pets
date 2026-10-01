@@ -23,7 +23,10 @@ export '../domain/labels.dart'
         careKindLabel,
         expenseCategoryLabel,
         feedKindLabel,
+        fileSizeLabel,
+        attachmentTitle,
         medRouteLabel,
+        mimeOfExt,
         planTypeLabel,
         petAgeLabel,
         recordPayloadSummary,
@@ -532,6 +535,20 @@ String _p(int v) => v.toString().padLeft(2, '0');
 /// 日期时间紧凑格式。
 String compactDateTime(DateTime dt) =>
     '${_p(dt.month)}-${_p(dt.day)} ${_p(dt.hour)}:${_p(dt.minute)}';
+
+/// 文档原件 → 图标，按扩展名分。
+///
+/// 只认扩展名不认 MIME：MIME 是我们自己从扩展名推出来的，看它等于绕一圈；
+/// 而用户认的「PDF」就是文件后缀那三个字母。
+IconData documentIcon(String? ext) =>
+    switch ((ext ?? '').toLowerCase().replaceFirst('.', '')) {
+      'pdf' => Icons.picture_as_pdf_outlined,
+      'doc' || 'docx' || 'txt' || 'rtf' => Icons.description_outlined,
+      'xls' || 'xlsx' || 'csv' => Icons.table_chart_outlined,
+      'jpg' || 'jpeg' || 'png' || 'heic' || 'heif' || 'webp' || 'gif' =>
+        Icons.image_outlined,
+      _ => Icons.insert_drive_file_outlined,
+    };
 
 /// 日期紧凑格式（只有年月日）。
 ///

@@ -11,7 +11,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../core/l10n.dart';
 import '../core/region.dart';
@@ -187,7 +189,9 @@ class _RecordDetailSheetState extends ConsumerState<_RecordDetailSheet> {
             ],
 
             const SizedBox(height: 16),
-            _PhotosSection(recordId: r.id),
+            _PhotosSection(recordId: r.id, petId: r.petId),
+            const SizedBox(height: 16),
+            _DocumentsSection(recordId: r.id, petId: r.petId),
 
             const SizedBox(height: 22),
             Row(
@@ -364,17 +368,21 @@ class _DetailRow extends StatelessWidget {  const _DetailRow({required this.labe
 ///
 /// 只用 Image.file 读本地拷贝 —— 附件仓储保证入库前已把文件
 /// 拷进应用文档目录，这里不处理相册临时路径。
+///
+/// 只取 `kind = 'photo'`：文档原件也在 attachments 表里，
+/// 混进来的话这里会把 PDF 当图片渲染成一排灰块。
 class _PhotosSection extends ConsumerWidget {
-  const _PhotosSection({required this.recordId});
+  const _PhotosSection({required this.recordId, required this.petId});
 
   final String recordId;
+  final String petId;
 
   static const _thumbSize = 76.0;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final attachments =
-        ref.watch(recordAttachmentsProvider(recordId)).valueOrNull ??
+        ref.watch(recordPhotosProvider(recordId)).valueOrNull ??
             const <RecordAttachment>[];
 
     return Column(
@@ -470,11 +478,11 @@ class _PhotosSection extends ConsumerWidget {
       );
       if (picked == null) return;
 
-      await ref
-          .read(attachmentRepositoryProvider)
-          .addPhoto(recordId: recordId, sourcePath: picked.path);
-      // 新附件时间晚于旧附件，顺序无关紧要；invalidate 让缩略图立刻出现。
-      ref.invalidate(recordAttachmentsProvider(recordId));
+      await ref.read(appActionsProvider).addPhotoToRecord(
+            recordId: recordId,
+            petId: petId,
+            sourcePath: picked.path,
+          );
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)
@@ -506,8 +514,11 @@ class _PhotosSection extends ConsumerWidget {
     );
     if (ok != true) return;
 
-    await ref.read(attachmentRepositoryProvider).softDelete(att.id);
-    ref.invalidate(recordAttachmentsProvider(recordId));
+    await ref.read(appActionsProvider).deleteAttachment(
+          petId: petId,
+          recordId: recordId,
+          attachmentId: att.id,
+        );
   }
 }
 
@@ -535,5 +546,245 @@ class _AddPhotoTile extends StatelessWidget {
             size: 24, color: AppColors.primary),
       ),
     );
+  }
+}
+
+// ---------------------------------------------------------------- 文档原件
+
+/// 允许挂上来的文档类型。
+///
+/// **刻意只放行这几类**：疫苗本 / 化验单 / 保单基本就是 PDF、Word、图片
+/// 三种。放开任意类型（尤其 .apk / .exe）既没有用处，又会让「用其他应用
+/// 打开」这个入口变成一条执行本机文件的路子。
+const List<String> kDocumentExtensions = [
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'txt',
+  'jpg',
+  'jpeg',
+  'png',
+  'heic',
+  'webp',
+];
+
+/// 单个文档的大小上限。
+///
+/// 20 MB 的依据：一页扫描的化验单 300 KB - 2 MB，整本疫苗本扫描件也就
+/// 十几 MB。再大要么是选错了文件，要么是会把备份体积拖爆 ——
+/// 这些文件存在本机，会进整机备份（iCloud / 各厂商云备份）。
+const int kMaxDocumentBytes = 20 * 1024 * 1024;
+
+/// 文档原件区：列表 + 添加。
+///
+/// **不内嵌 PDF 渲染**：渲染库要 embed CJK 字体（+5MB）且各家实现质量参差，
+/// 而用户设备里本来就有 WPS / 系统 PDF 阅读器，做得比我们好。
+/// 点击走 share_plus 起系统分享页，对方应用直接打开 —— 顺带还能发给兽医。
+///
+/// **只存本机**：文件拷进应用文档目录，同步时连元数据都不推
+/// （见 schema 的 kSyncSkipWhen），列表底部明说一句，不藏着。
+class _DocumentsSection extends ConsumerWidget {
+  const _DocumentsSection({required this.recordId, required this.petId});
+
+  final String recordId;
+  final String petId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final docs = ref.watch(recordDocumentsProvider(recordId)).valueOrNull ??
+        const <RecordAttachment>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          L.t('detail.documents'),
+          style: const TextStyle(
+            fontSize: 13,
+            color: AppColors.textTertiary,
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        for (final d in docs) _DocumentTile(attachment: d, petId: petId),
+
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          height: 40,
+          child: OutlinedButton.icon(
+            onPressed: () => _pickAndSave(context, ref),
+            icon: const Icon(Icons.attach_file_rounded, size: 17),
+            label: Text(L.t('detail.documents.add')),
+          ),
+        ),
+
+        if (docs.isEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            L.t('detail.documents.empty'),
+            style: const TextStyle(
+              fontSize: 11.5,
+              color: AppColors.textTertiary,
+            ),
+          ),
+        ] else ...[
+          const SizedBox(height: 6),
+          Text(
+            L.t('doc.localOnly'),
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.textTertiary,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _pickAndSave(BuildContext context, WidgetRef ref) async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: kDocumentExtensions,
+      // 不要 withData：那会把整个文件读进内存，20 MB 的 PDF 在
+      // 低端机上就是一次 OOM。我们只要路径，自己拷。
+      withData: false,
+    );
+
+    final file = result?.files.singleOrNull;
+    if (file == null) return;
+
+    final path = file.path;
+    if (path == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(L.t('doc.pickFailed'))),
+      );
+      return;
+    }
+
+    if (file.size > kMaxDocumentBytes) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            L.tp('doc.tooLarge', {'n': kMaxDocumentBytes ~/ (1024 * 1024)}),
+          ),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await ref.read(appActionsProvider).addDocument(
+            petId: petId,
+            recordId: recordId,
+            sourcePath: path,
+            fileName: file.name,
+            // file_picker 只给扩展名不给 MIME，这里按扩展名推（见 mimeOfExt）。
+            mime: mimeOfExt(file.extension),
+            sizeBytes: file.size,
+          );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(L.t('doc.added'))),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+}
+
+/// 一份文档：图标 + 名字 + 大小 + 删除。
+class _DocumentTile extends ConsumerWidget {
+  const _DocumentTile({required this.attachment, required this.petId});
+
+  final RecordAttachment attachment;
+  final String petId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ext = _extOf(attachment);
+    final name = attachmentTitle(attachment);
+    final size = fileSizeLabel(attachment.sizeBytes);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpace.gapS),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.tile),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: AppSpace.gapM),
+        leading: Icon(documentIcon(ext), size: 22, color: AppColors.primary),
+        title: Text(
+          name.isEmpty ? L.t('doc.unknownType') : name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        ),
+        subtitle: size.isEmpty ? null : Text(size),
+        onTap: () => _open(context),
+        trailing: IconButton(
+          iconSize: 18,
+          icon: const Icon(Icons.delete_outline_rounded,
+              color: AppColors.textTertiary),
+          tooltip: L.t('action.delete'),
+          onPressed: () => _confirmDelete(context, ref),
+        ),
+      ),
+    );
+  }
+
+  String _extOf(RecordAttachment a) {
+    final name = a.fileName ?? a.localPath ?? '';
+    final dot = name.lastIndexOf('.');
+    return dot < 0 ? '' : name.substring(dot + 1);
+  }
+
+  /// 起系统分享页：「打开方式」里挑一个应用，也能直接发给兽医。
+  Future<void> _open(BuildContext context) async {
+    final path = attachment.localPath;
+    if (path == null) return;
+    await Share.shareXFiles([XFile(path)], subject: attachmentTitle(attachment));
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(L.t('detail.documents.delete')),
+        content: Text(
+          attachmentTitle(attachment).isEmpty
+              ? L.t('doc.unknownType')
+              : attachmentTitle(attachment),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(L.t('action.cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: Text(L.t('action.delete')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    await ref.read(appActionsProvider).deleteAttachment(
+          petId: petId,
+          recordId: attachment.recordId,
+          attachmentId: attachment.id,
+        );
   }
 }
