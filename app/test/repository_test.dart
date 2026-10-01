@@ -690,7 +690,24 @@ void main() {
       await db.execute(createSyncMeta);
       await db.execute(createSyncOutbox);
       await db.execute(createRecords);
-      await db.execute(createAttachments);
+      // ⚠️ 不能用 createAttachments：那份 DDL 已经含 v6 的四个新列，
+      // 再跑 migrations[6] 的 ALTER TABLE ADD COLUMN 会报
+      // "duplicate column name"。要按**升级前**（v5 时代）的样子建 ——
+      // 这才是老用户手机上真实存在的表结构。
+      await db.execute('''
+CREATE TABLE attachments (
+  id          TEXT PRIMARY KEY,
+  record_id   TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  local_path  TEXT,
+  remote_url  TEXT,
+  width       INTEGER,
+  height      INTEGER,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER,
+  deleted_at  INTEGER
+);
+''');
       await db.execute('''
 CREATE TRIGGER trg_attachments_outbox_ins AFTER INSERT ON attachments
 WHEN (SELECT value FROM sync_meta WHERE key = 'applying') IS NOT '1'

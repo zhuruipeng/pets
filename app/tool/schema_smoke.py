@@ -196,6 +196,78 @@ def main():
     assert not bad, "迁移语句有 SQLite 解析不过的：\n" + "\n".join(bad)
     print(f"迁移语句：{len(migs)} 级，无 SQLite 语法错误")
 
+    # ---- 6) v6 升级路径：老库（v5 时代、没有新列）真跑一遍迁移 ----
+    # 上面的语法检查是在「onCreate 已含新列」的库上重放，只能查语法；
+    # 这里按老用户手机上真实的表结构建库再升级，才验得到列真的补上、
+    # 触发器真的被换掉。曾在此抓到过 flutter test 里的同款错误：
+    # 用新 DDL 建表再跑迁移 = duplicate column。
+    OLD_ATTACHMENTS = """
+CREATE TABLE attachments (
+  id          TEXT PRIMARY KEY,
+  record_id   TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  local_path  TEXT,
+  remote_url  TEXT,
+  width       INTEGER,
+  height      INTEGER,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER,
+  deleted_at  INTEGER
+);
+"""
+    probe = sqlite3.connect(":memory:")
+    probe.row_factory = sqlite3.Row
+    for stmt in on_create:
+        # 凡是引用 attachments 的语句全部跳过：表用老结构另建，
+        # 它身上的索引与触发器这里用不上（触发器由 v6 迁移重建）。
+        if "attachments" in stmt:
+            continue
+        probe.execute(stmt)
+    probe.execute(OLD_ATTACHMENTS)
+    probe.execute(
+        "CREATE TRIGGER trg_attachments_outbox_ins AFTER INSERT ON attachments "
+        "WHEN (SELECT value FROM sync_meta WHERE key = 'applying') IS NOT '1' "
+        "BEGIN "
+        "INSERT OR REPLACE INTO sync_outbox(table_name, row_id, pet_id, op,"
+        " updated_at) VALUES ('attachments', NEW.id,"
+        " (SELECT pet_id FROM records WHERE id = NEW.record_id),"
+        " CASE WHEN NEW.deleted_at IS NULL THEN 'upsert' ELSE 'delete' END,"
+        " NEW.updated_at); END;"
+    )
+
+    for stmt in migs["migration 6"]:
+        probe.execute(stmt)
+
+    sql = probe.execute(
+        "SELECT sql FROM sqlite_master WHERE name='trg_attachments_outbox_ins'"
+    ).fetchone()
+    assert sql and "local_only" in sql[0], "升级后触发器必须带 local_only 条件"
+
+    probe.execute(
+        "INSERT INTO records (id, pet_id, type, recorded_at, created_by,"
+        " created_at, updated_at) VALUES ('r1','p1','medical',1000,'u1',1000,1000)"
+    )
+    # 上面这条 records 本身就会进 outbox，先清掉再看文档那笔。
+    probe.execute("DELETE FROM sync_outbox")
+    probe.execute(
+        "INSERT INTO attachments (id, record_id, kind, local_path, file_name,"
+        " local_only, created_at, updated_at) VALUES"
+        " ('d1','r1','document','/x/v.pdf','疫苗本.pdf',1,1500,1500)"
+    )
+    assert not list(probe.execute("SELECT * FROM sync_outbox")), \
+        "升级后文档仍不该进同步队列"
+    # 老照片行：不带 local_only 列插入（老代码就是这么写的）。
+    probe.execute(
+        "INSERT INTO attachments (id, record_id, kind, local_path,"
+        " created_at, updated_at) VALUES"
+        " ('a1','r1','photo','/x/1.jpg',1500,1500)"
+    )
+    rows = list(probe.execute("SELECT * FROM sync_outbox"))
+    assert len(rows) == 1 and rows[0]["row_id"] == "a1", \
+        f"老照片要照常同步，实际 {rows}"
+    probe.close()
+    print("v6 升级路径：老库补列成功、触发器被换掉、文档拦得住、老照片照常同步")
+
     print("\n全部通过")
 
 
