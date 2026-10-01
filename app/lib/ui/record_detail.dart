@@ -645,7 +645,7 @@ class _DocumentsSection extends ConsumerWidget {
   }
 
   Future<void> _pickAndSave(BuildContext context, WidgetRef ref) async {
-    final result = await FilePicker.pickFiles(
+    final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: kDocumentExtensions,
       // 不要 withData：那会把整个文件读进内存，20 MB 的 PDF 在
