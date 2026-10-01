@@ -254,6 +254,24 @@ void main() {
     '用药的剂量应进 detail，实际 ${med.records.first.detail}',
   );
 
+  // ---- 10) 每日日志的两个新类型：单位与小数位 ----
+  final daily = buildPetReport(
+    pet: _pet(),
+    ledger: const [],
+    weightSeries: const [],
+    records: [
+      _record(RecordType.water, DateTime(2026, 9, 30), num: 200, unit: 'ml'),
+      _record(RecordType.sleep, DateTime(2026, 9, 30), num: 8.5, unit: 'h'),
+    ],
+    now: now,
+    weightUnit: kg,
+  );
+  final water =
+      daily.records.firstWhere((r) => (r.value ?? '').contains('ml'));
+  check(water.value == '200 ml', '饮水取整不带小数点，实际 ${water.value}');
+  final sleep = daily.records.firstWhere((r) => (r.value ?? '').contains('h'));
+  check(sleep.value == '8.5 h', '睡眠保留一位小数，实际 ${sleep.value}');
+
   print('');
   print('通过 $_passed 项，失败 $_failed 项');
   if (_failed > 0) {

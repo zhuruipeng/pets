@@ -445,7 +445,10 @@ IconData recordTypeIcon(RecordType type) => switch (type) {
       RecordType.medical => Icons.local_hospital_outlined,
       RecordType.grooming => Icons.shower_outlined,
       RecordType.feeding => Icons.restaurant_outlined,
+      // 注意 toilet 已经占了 water_drop，饮水另用一个杯子图标。
+      RecordType.water => Icons.local_drink_outlined,
       RecordType.toilet => Icons.water_drop_outlined,
+      RecordType.sleep => Icons.bedtime_outlined,
       RecordType.note => Icons.sticky_note_2_outlined,
     };
 

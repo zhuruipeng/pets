@@ -24,7 +24,9 @@ String recordTypeLabel(RecordType type) => switch (type) {
       RecordType.medical => L.t('addRecord.type.medical'),
       RecordType.grooming => L.t('addRecord.type.grooming'),
       RecordType.feeding => L.t('addRecord.type.feeding'),
+      RecordType.water => L.t('addRecord.type.water'),
       RecordType.toilet => L.t('addRecord.type.toilet'),
+      RecordType.sleep => L.t('addRecord.type.sleep'),
       RecordType.note => L.t('addRecord.type.note'),
     };
 
@@ -94,7 +96,9 @@ String? recordValueLine(PetRecord r, WeightUnit unit) {
     if (r.type == RecordType.weight) return Units.formatWeight(v, unit);
     final u = r.unit;
     if (u == null) return v.toStringAsFixed(1);
-    return '${v.toStringAsFixed(u == 'g' ? 0 : 1)} $u';
+    // 整数就不带小数点 —— 「200 ml」比「200.0 ml」干净，而 2.5 kg 仍保留小数。
+    final decimals = v == v.roundToDouble() ? 0 : 1;
+    return '${v.toStringAsFixed(decimals)} $u';
   }
   final t = (r.valueText ?? '').trim();
   return t.isEmpty ? null : t;

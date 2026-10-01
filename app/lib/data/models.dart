@@ -41,7 +41,14 @@ enum RecordType {
   /// 洗澡 / 剪指甲 / 梳毛等日常护理。
   grooming,
   feeding,
+  /// 饮水。`valueNum` 存毫升。
+  ///
+  /// 为什么值得单列：饮水量突然变化是肾脏 / 糖尿病的早期信号，兽医会问
+  /// 「最近喝得多吗」—— 而这恰恰是主人记不住的。
+  water,
   toilet,
+  /// 睡眠。`valueNum` 存小时。突然嗜睡同样是生病信号。
+  sleep,
   note;
 
   String get wireName => switch (this) {
@@ -53,7 +60,9 @@ enum RecordType {
         RecordType.medical => 'medical',
         RecordType.grooming => 'grooming',
         RecordType.feeding => 'feeding',
+        RecordType.water => 'water',
         RecordType.toilet => 'toilet',
+        RecordType.sleep => 'sleep',
         RecordType.note => 'note',
       };
 }
@@ -67,7 +76,9 @@ RecordType recordTypeFromWire(String? v) => switch (v) {
       'medical' => RecordType.medical,
       'grooming' => RecordType.grooming,
       'feeding' => RecordType.feeding,
+      'water' => RecordType.water,
       'toilet' => RecordType.toilet,
+      'sleep' => RecordType.sleep,
       _ => RecordType.note,
     };
 

@@ -607,7 +607,9 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     RecordType.medical,
     RecordType.grooming,
     RecordType.feeding,
+    RecordType.water,
     RecordType.toilet,
+    RecordType.sleep,
     RecordType.note,
   ];
 
@@ -727,6 +729,10 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
         RecordType.weight => _weightField(unit, lastKg),
         RecordType.medication => _medicationFields(),
         RecordType.feeding => _feedingFields(),
+        // 饮水与睡眠填的是「数值 + 固定单位」。走通用文本框但要补单位后缀 ——
+        // 否则用户不知道那个 200 是毫升还是口数，也没法参与「今天喝了多少」的统计。
+        RecordType.water => _amountField('ml'),
+        RecordType.sleep => _amountField('h'),
         _ => TextField(
             controller: _value,
             decoration: InputDecoration(
@@ -736,6 +742,18 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
             ),
           ),
       };
+
+  /// 数值 + 固定单位的小输入框（饮水 ml / 睡眠 h）。
+  Widget _amountField(String suffix) => TextField(
+        controller: _value,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: L.t('addRecord.value'),
+          suffixText: suffix,
+          border: const OutlineInputBorder(),
+          errorText: _error,
+        ),
+      );
 
   /// 体重：大数字 + 滑块。
   ///
@@ -974,6 +992,28 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
           'kind': _feedKind,
           if (brand.isNotEmpty) 'brand': brand,
         };
+        break;
+
+      // 饮水与睡眠：填的是数字就存成数值（参与汇总），填的是文字就存文本。
+      // 单位固定，用户不用选。
+      case RecordType.water:
+        final ml = double.tryParse(_value.text.trim());
+        if (ml != null && ml > 0) {
+          num_ = ml;
+          unitWire = 'ml';
+        } else if (_value.text.trim().isNotEmpty) {
+          text = _value.text.trim();
+        }
+        break;
+
+      case RecordType.sleep:
+        final h = double.tryParse(_value.text.trim());
+        if (h != null && h > 0) {
+          num_ = h;
+          unitWire = 'h';
+        } else if (_value.text.trim().isNotEmpty) {
+          text = _value.text.trim();
+        }
         break;
 
       default:
