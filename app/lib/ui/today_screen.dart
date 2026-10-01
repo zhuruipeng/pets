@@ -413,6 +413,12 @@ class _WeekOverview extends ConsumerWidget {
 
     // 第三格：有两磅以上体重才谈「较上次」，只有一条时退回「当前体重」
     // —— 恒为「--」的格子摆在那只会让人怀疑 App 是不是坏了。
+    //
+    // ⚠️ 三个分支必须覆盖三种状态：null（还在加载）、**空列表**
+    // （加载完了但这只宠物还没记过体重）、有数据。漏了空列表就是
+    // series.last 直接抛 StateError —— debug 里是红屏一眼能看到，
+    // **release 里是一整块灰屏**（2026-10-01 实测：新装用户建完第一只
+    // 宠物，首页宠物卡以下全灰，记了第一笔才恢复）。
     final String weightValue;
     final String weightLabel;
     if (series != null && series.length >= 2) {
@@ -420,7 +426,7 @@ class _WeekOverview extends ConsumerWidget {
       // 「持平」没有单位；正负差值带上 kg/lb，别让用户猜单位。
       weightValue = d.$2 == null ? d.$1 : '${d.$1} ${d.$2}';
       weightLabel = '${L.t('home.weekWeight')} · ${L.t('home.vsLast')}';
-    } else if (series == null) {
+    } else if (series == null || series.isEmpty) {
       weightValue = '--';
       weightLabel = '${L.t('home.weekWeight')} · ${L.t('home.vsLast')}';
     } else {
