@@ -33,6 +33,7 @@ const List<String> kSyncableTables = [
   'records',
   'attachments',
   'reminders',
+  'expenses',
   'walk_sessions',
 ];
 

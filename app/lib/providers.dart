@@ -16,6 +16,7 @@ import 'core/units.dart';
 import 'data/db/app_database.dart';
 import 'data/models.dart';
 import 'data/repositories/attachment_repository.dart';
+import 'data/repositories/expense_repository.dart';
 import 'data/repositories/member_repository.dart';
 import 'data/repositories/pet_repository.dart';
 import 'data/repositories/record_repository.dart';
@@ -26,6 +27,7 @@ import 'data/sync/secure_token_store.dart';
 import 'data/sync/sync_api.dart';
 import 'data/sync/sync_engine.dart';
 import 'data/sync/unified_api.dart';
+import 'domain/expense_stats.dart';
 import 'domain/health_ledger.dart';
 import 'domain/immunization.dart';
 import 'domain/pet_report.dart';
@@ -53,6 +55,9 @@ final attachmentRepositoryProvider =
 
 final reminderRepositoryProvider =
     Provider<ReminderRepository>((ref) => ReminderRepository());
+
+final expenseRepositoryProvider =
+    Provider<ExpenseRepository>((ref) => ExpenseRepository());
 
 final walkRepositoryProvider =
     Provider<WalkRepository>((ref) => WalkRepository());
@@ -185,6 +190,26 @@ final petPhotosProvider =
   return ref.read(attachmentRepositoryProvider).listPhotosByPet(petId);
 });
 
+// ------------------------------------------------------------------ 费用
+
+/// 某宠物的全部支出（未删除），按消费日期倒序。
+final petExpensesProvider =
+    FutureProvider.family<List<Expense>, String>((ref, petId) async {
+  await ref.watch(dbReadyProvider.future);
+  return ref.read(expenseRepositoryProvider).listByPet(petId);
+});
+
+/// 某宠物的费用汇总：本月 / 累计 / 近 6 个月 / 本月分类。
+///
+/// 从 [petExpensesProvider] 那份全量数据算，而不是为每块各发一条 SQL：
+/// 支出是一个月几十条的规模，四条聚合查询换一次内存计算并不划算，
+/// 而且分开查会出现「卡片上本月 320、下面列表加起来 300」这种对不上。
+final expenseSummaryProvider =
+    FutureProvider.family<ExpenseSummary, String>((ref, petId) async {
+  final all = await ref.watch(petExpensesProvider(petId).future);
+  return buildExpenseSummary(all, now: DateTime.now());
+});
+
 // ------------------------------------------------------------------ 提醒
 
 /// 某宠物的提醒计划。
@@ -274,6 +299,7 @@ class AppActions {
   AttachmentRepository get _attachments =>
       ref.read(attachmentRepositoryProvider);
   ReminderRepository get _reminders => ref.read(reminderRepositoryProvider);
+  ExpenseRepository get _expenses => ref.read(expenseRepositoryProvider);
   WalkRepository get _walks => ref.read(walkRepositoryProvider);
   NotificationService get _notify => ref.read(notificationServiceProvider);
 
@@ -475,6 +501,42 @@ class AppActions {
     await _attachments.addPhoto(recordId: record.id, sourcePath: sourcePath);
     ref.invalidate(petRecordsProvider(petId));
     ref.invalidate(petPhotosProvider(petId));
+  }
+
+  /// 记一笔支出。
+  ///
+  /// 币种取区域默认值（cn → CNY），**不跟着系统 locale 变**：
+  /// 一个在中国生活的用户把手机语言调成英文，记的仍是人民币，
+  /// 按 locale 走会把 ¥120 存成 $120，汇总时两种钱加在一起就是错的。
+  Future<Expense> addExpense({
+    required String petId,
+    required double amount,
+    required ExpenseCategory category,
+    required DateTime spentAt,
+    String? note,
+    String? recordId,
+  }) async {
+    final expense = await _expenses.createSimple(
+      petId: petId,
+      amount: amount,
+      category: category,
+      spentAt: spentAt,
+      createdBy: await _currentUserId(),
+      currency: AppRegion.current.defaultCurrency,
+      note: note,
+      recordId: recordId,
+    );
+    ref.invalidate(petExpensesProvider(petId));
+    return expense;
+  }
+
+  /// 删除一笔支出（软删除）。
+  ///
+  /// 软删而不是物理删：费用也能同步到云端，硬删会变成一个「删除」变更，
+  /// 万一对方设备上还有这条的新版本，两边就会反复打架。
+  Future<void> deleteExpense(String petId, String expenseId) async {
+    await _expenses.softDelete(expenseId);
+    ref.invalidate(petExpensesProvider(petId));
   }
 
   /// 完成一次提醒：留档 + 排下次 + 重排通知。

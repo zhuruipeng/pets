@@ -21,6 +21,7 @@ export '../core/reminder_text.dart' show kManualReminderTypes, reminderTypeLabel
 export '../domain/labels.dart'
     show
         careKindLabel,
+        expenseCategoryLabel,
         feedKindLabel,
         medRouteLabel,
         planTypeLabel,
@@ -452,6 +453,21 @@ IconData recordTypeIcon(RecordType type) => switch (type) {
       RecordType.note => Icons.sticky_note_2_outlined,
     };
 
+/// 费用类别 → 图标。
+///
+/// 与 [recordTypeIcon] 隔开：费用是「钱花在哪」，记录是「发生了什么」。
+/// 主粮用米袋而不是餐厅盘（那是喂食记录），用品用购物袋，寄养用房子。
+IconData expenseCategoryIcon(ExpenseCategory c) => switch (c) {
+      ExpenseCategory.food => Icons.rice_bowl_outlined,
+      ExpenseCategory.medical => Icons.local_hospital_outlined,
+      ExpenseCategory.vaccine => Icons.vaccines_outlined,
+      ExpenseCategory.deworm => Icons.bug_report_outlined,
+      ExpenseCategory.grooming => Icons.shower_outlined,
+      ExpenseCategory.supply => Icons.shopping_bag_outlined,
+      ExpenseCategory.boarding => Icons.night_shelter_outlined,
+      ExpenseCategory.other => Icons.more_horiz_rounded,
+    };
+
 /// 秒数 → 「1 小时 23 分」/「1h 23m」。
 ///
 /// 遛狗结果、档案页的遛狗列表都要这一段，各写一份迟早会长出两个格式。
@@ -516,6 +532,14 @@ String _p(int v) => v.toString().padLeft(2, '0');
 /// 日期时间紧凑格式。
 String compactDateTime(DateTime dt) =>
     '${_p(dt.month)}-${_p(dt.day)} ${_p(dt.hour)}:${_p(dt.minute)}';
+
+/// 日期紧凑格式（只有年月日）。
+///
+/// 与 [compactDateTime] 分开：费用、疫苗本这类「发生在哪天」的场合
+/// 显示几点几分是噪声，而且会让人以为时间是有意义的。
+String compactDate(DateTime dt) => L.isZh
+    ? '${dt.year}年${dt.month}月${dt.day}日'
+    : '${_p(dt.month)}/${_p(dt.day)}/${dt.year}';
 
 /// 台账分类 → 图标。转发给 [reminderTypeIcon]，同一件事在两处不能长两个样。
 IconData careKindIcon(PlanItemType kind) => reminderTypeIcon(kind.wireName);

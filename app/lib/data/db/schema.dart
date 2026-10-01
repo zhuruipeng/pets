@@ -18,7 +18,7 @@
 /// 老用户升级时会按版本顺序重放，改一句就会在别人手机上错位。
 library;
 
-const int kSchemaVersion = 4;
+const int kSchemaVersion = 5;
 
 const String createUsers = '''
 CREATE TABLE users (
@@ -117,6 +117,39 @@ CREATE TABLE attachments (
   deleted_at  INTEGER
 );
 ''';
+
+/// 费用记录（M8）。养宠开支，用于「这个月花了多少 / 花在哪」这类统计。
+///
+/// 为什么不复用 records：records 记的是**事件**（打了一针疫苗），费用记的是
+/// **钱的流向**（这针疫苗花了 120）。同一天可以有几笔支出而没有任何对应事件
+/// （买粮、买玩具、寄养），也可能一次事件分几次付。硬塞进 records 会让
+/// 「按类别汇总本月开支」这种查询没法写。
+///
+/// currency 存 ISO 代码而不是符号：符号有歧义（$ 可能是 USD / CAD / AUD），
+/// 且不随区域变化 —— 在美国记的 50 USD 永远是 50 USD。
+/// record_id 可选：想的话能把一笔支出挂到具体那条记录上，不挂也不影响统计。
+const String createExpenses = '''
+CREATE TABLE expenses (
+  id          TEXT PRIMARY KEY,
+  pet_id      TEXT NOT NULL,
+  amount      REAL NOT NULL,
+  currency    TEXT NOT NULL,
+  category    TEXT NOT NULL,
+  spent_at    INTEGER NOT NULL,
+  note        TEXT,
+  record_id   TEXT,
+  created_by  TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  deleted_at  INTEGER
+);
+''';
+
+/// 费用的索引单独列出来：建库时要包含它，v5 迁移里也要建同一份，
+/// 两处写两遍迟早对不上。
+const List<String> createExpenseIndexes = [
+  'CREATE INDEX idx_expenses_pet_time ON expenses(pet_id, spent_at DESC);',
+];
 
 /// 同步元数据。key/value 表，见 docs/同步协议.md 第八节。
 ///
@@ -222,6 +255,7 @@ const List<String> createIndexes = [
   'CREATE INDEX idx_walk_points_session ON walk_points(session_id, recorded_at);',
   'CREATE INDEX idx_walk_sessions_pet ON walk_sessions(pet_id, started_at DESC);',
   'CREATE INDEX idx_attachments_record ON attachments(record_id);',
+  ...createExpenseIndexes,
 ];
 
 /// 建库顺序（有外键依赖关系的先建）。
@@ -234,6 +268,7 @@ final List<String> onCreate = [
   createMembers,
   createRecords,
   createAttachments,
+  createExpenses,
   createReminders,
   createReminderLogs,
   createWalkSessions,
@@ -271,6 +306,7 @@ const List<({String table, String petExpr, bool hasDeletedAt})> kSyncedTables = 
     hasDeletedAt: true,
   ),
   (table: 'reminders', petExpr: 'NEW.pet_id', hasDeletedAt: true),
+  (table: 'expenses', petExpr: 'NEW.pet_id', hasDeletedAt: true),
   (table: 'walk_sessions', petExpr: 'NEW.pet_id', hasDeletedAt: true),
 ];
 
@@ -365,5 +401,17 @@ final Map<int, List<String>> migrations = {
     createSyncMeta,
     createSyncOutbox,
     ...createSyncTriggers,
+  ],
+
+  // v5：费用记录（M8）。
+  //
+  // 新增的是**表**不是列，所以直接执行建表语句。同步触发器单独生成 ——
+  // **不能复用 createSyncTriggers**：那会把已有表的触发器再建一遍，
+  // SQLite 会报 "trigger trg_xxx_outbox_ins already exists"，
+  // 而迁移是在一个事务里跑的，整次升级就此卡住、App 起不来。
+  5: [
+    createExpenses,
+    ...createExpenseIndexes,
+    ..._triggersFor('expenses', 'NEW.pet_id', hasDeletedAt: true),
   ],
 };

@@ -11,6 +11,7 @@ import 'package:pet_app/core/species.dart';
 import 'package:pet_app/data/db/schema.dart';
 import 'package:pet_app/data/models.dart';
 import 'package:pet_app/data/repositories/attachment_repository.dart';
+import 'package:pet_app/data/repositories/expense_repository.dart';
 import 'package:pet_app/data/repositories/member_repository.dart';
 import 'package:pet_app/data/repositories/pet_repository.dart';
 import 'package:pet_app/data/repositories/record_repository.dart';
@@ -630,6 +631,53 @@ void main() {
         expect(migrations[v], isNotEmpty);
       }
     });
+
+    test('v5 迁移能在老库上跑通，且 expenses 的变更进得了 outbox', () async {
+      // 单开一个库 —— 不能用 _memDb()，那个是按最新 DDL 建好的，
+      // 「升级」路径就测不到了。而升级恰恰是最容易出事的一条：
+      // 语句写错只会在用户手机上炸，我们的开发机永远是全新安装。
+      final db = await databaseFactoryFfi.openDatabase(
+        inMemoryDatabasePath,
+        options: OpenDatabaseOptions(
+          singleInstance: false,
+          version: 1,
+        ),
+      );
+
+      // v5 建的是新表，但它的同步触发器引用了 sync_meta / sync_outbox，
+      // 老库里本来就有 —— 这里补上再跑迁移。
+      await db.execute(createSyncMeta);
+      await db.execute(createSyncOutbox);
+
+      for (final stmt in migrations[5]!) {
+        await db.execute(stmt);
+      }
+
+      final tables = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='expenses'",
+      );
+      expect(tables, isNotEmpty, reason: 'v5 迁移应建出 expenses 表');
+
+      // 触发器必须真的把变更记进 outbox —— 漏了的话这笔支出
+      // 在本地看得见、却永远同步不出去，而且悄无声息。
+      await db.insert('expenses', {
+        'id': 'e1',
+        'pet_id': 'p1',
+        'amount': 120.0,
+        'currency': 'CNY',
+        'category': 'medical',
+        'spent_at': 1000,
+        'created_by': 'u1',
+        'created_at': 1000,
+        'updated_at': 1000,
+      });
+      final outbox = await db.query('sync_outbox');
+      expect(outbox, hasLength(1), reason: 'expenses 的 INSERT 应产生一条 outbox');
+      expect(outbox.first['table_name'], 'expenses');
+      expect(outbox.first['pet_id'], 'p1', reason: 'pet_id 是同步的分发键');
+
+      await db.close();
+    });
   });
 
   group('附件仓储', () {
@@ -1105,6 +1153,96 @@ void main() {
       expect(petRows.first['created_by'], 'acct-9');
       final recRows = await db.query('records', where: 'id = ?', whereArgs: ['rec-a']);
       expect(recRows.first['created_by'], 'acct-9');
+    });
+  });
+
+  group('费用仓储', () {
+    test('按消费日期倒序，软删的不进列表', () async {
+      final db = await _memDb();
+      final repo = ExpenseRepository(db);
+
+      await repo.createSimple(
+        petId: 'p1',
+        amount: 320,
+        category: ExpenseCategory.food,
+        spentAt: DateTime(2026, 9, 3),
+        createdBy: 'u1',
+      );
+      final second = await repo.createSimple(
+        petId: 'p1',
+        amount: 120,
+        category: ExpenseCategory.vaccine,
+        spentAt: DateTime(2026, 9, 28),
+        createdBy: 'u1',
+      );
+      await repo.createSimple(
+        petId: 'p2',
+        amount: 999,
+        category: ExpenseCategory.other,
+        spentAt: DateTime(2026, 9, 28),
+        createdBy: 'u1',
+      );
+
+      var list = await repo.listByPet('p1');
+      expect(list, hasLength(2));
+      expect(list.first.amount, 120, reason: '最近的排最前');
+
+      await repo.softDelete(second.id);
+      list = await repo.listByPet('p1');
+      expect(list, hasLength(1), reason: '软删的默认不返回');
+      expect(await repo.findById(second.id), isNotNull,
+          reason: '软删不是物理删，按 id 仍查得到');
+
+      await db.close();
+    });
+
+    test('spentAt 归一化到当天零点，补录旧账不算进今天', () async {
+      final db = await _memDb();
+      final repo = ExpenseRepository(db);
+
+      final e = await repo.createSimple(
+        petId: 'p1',
+        amount: 88,
+        category: ExpenseCategory.grooming,
+        // 带时分秒进来 —— 也会被压到当天 00:00。
+        spentAt: DateTime(2026, 9, 9, 21, 37, 12),
+        createdBy: 'u1',
+      );
+      expect(e.spentAt, DateTime(2026, 9, 9));
+      expect(e.spentAt.hour, 0);
+
+      final from = DateTime(2026, 9, 1);
+      final to = DateTime(2026, 10, 1);
+      expect(await repo.totalBetween('p1'), 88);
+      expect(await repo.totalBetween('p1', from: from, to: to), 88);
+      // 区间是左闭右开：to 本身不在区间内。
+      expect(await repo.totalBetween('p1', to: DateTime(2026, 9, 9)), 0,
+          reason: '9 月 9 日那笔不应被 9 月 9 日之前的区间算进去');
+      // 没有支出时返回 0 而不是 null —— SQL 的 SUM 在空集上给 NULL，
+      // 漏了这层转换，UI 上会直接印个 null。
+      expect(await repo.totalBetween('p-empty'), 0);
+
+      await db.close();
+    });
+
+    test('写入会进 outbox（同步的分发键是 pet_id）', () async {
+      final db = await _memDb();
+      final repo = ExpenseRepository(db);
+
+      await repo.createSimple(
+        petId: 'p1',
+        amount: 45.5,
+        category: ExpenseCategory.supply,
+        spentAt: DateTime(2026, 9, 30),
+        createdBy: 'u1',
+      );
+
+      final outbox = await db.query('sync_outbox');
+      expect(outbox, hasLength(1));
+      expect(outbox.first['table_name'], 'expenses');
+      expect(outbox.first['pet_id'], 'p1');
+
+      await db.close();
     });
   });
 

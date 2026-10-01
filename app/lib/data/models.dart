@@ -803,3 +803,112 @@ class LocalUser {
     );
   }
 }
+
+// ---------------------------------------------------------------- 费用
+
+/// 费用类别。存 wire 名不存中文 —— 切语言或改文案时不会变成历史脏数据。
+enum ExpenseCategory {
+  food, // 主粮 / 零食
+  medical, // 就诊 / 用药
+  vaccine, // 疫苗
+  deworm, // 驱虫
+  grooming, // 洗澡美容
+  supply, // 用品（玩具、牵引绳、猫砂…）
+  boarding, // 寄养 / 托运
+  other;
+
+  String get wireName => switch (this) {
+        ExpenseCategory.food => 'food',
+        ExpenseCategory.medical => 'medical',
+        ExpenseCategory.vaccine => 'vaccine',
+        ExpenseCategory.deworm => 'deworm',
+        ExpenseCategory.grooming => 'grooming',
+        ExpenseCategory.supply => 'supply',
+        ExpenseCategory.boarding => 'boarding',
+        ExpenseCategory.other => 'other',
+      };
+}
+
+ExpenseCategory expenseCategoryFromWire(String? v) => switch (v) {
+      'food' => ExpenseCategory.food,
+      'medical' => ExpenseCategory.medical,
+      'vaccine' => ExpenseCategory.vaccine,
+      'deworm' => ExpenseCategory.deworm,
+      'grooming' => ExpenseCategory.grooming,
+      'supply' => ExpenseCategory.supply,
+      'boarding' => ExpenseCategory.boarding,
+      _ => ExpenseCategory.other,
+    };
+
+/// 一笔支出。
+///
+/// 与 [PetRecord] 的区别见 schema 里 createExpenses 的注释：那是「事件」，
+/// 这是「钱的流向」。同一天可以有几笔支出而没有任何对应事件。
+class Expense {
+  const Expense({
+    required this.id,
+    required this.petId,
+    required this.amount,
+    required this.currency,
+    required this.category,
+    required this.spentAt,
+    required this.createdBy,
+    required this.createdAt,
+    required this.updatedAt,
+    this.note,
+    this.recordId,
+    this.deletedAt,
+  });
+
+  final String id;
+  final String petId;
+  final double amount;
+
+  /// ISO 代码（CNY / USD…），不是符号。
+  final String currency;
+
+  final ExpenseCategory category;
+
+  /// 消费发生的日期。补录旧账时与 createdAt 不同，必须分开。
+  final DateTime spentAt;
+
+  final String? note;
+
+  /// 可选：挂到具体某条记录上（比如「这次疫苗花了 120」）。
+  final String? recordId;
+
+  final String createdBy;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+
+  factory Expense.fromMap(Map<String, dynamic> m) => Expense(
+        id: m['id'] as String,
+        petId: m['pet_id'] as String,
+        amount: (m['amount'] as num).toDouble(),
+        currency: m['currency'] as String,
+        category: expenseCategoryFromWire(m['category'] as String?),
+        spentAt: _dt(m['spent_at'])!,
+        note: m['note'] as String?,
+        recordId: m['record_id'] as String?,
+        createdBy: m['created_by'] as String,
+        createdAt: _dt(m['created_at'])!,
+        updatedAt: _dt(m['updated_at'])!,
+        deletedAt: _dt(m['deleted_at']),
+      );
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'pet_id': petId,
+        'amount': amount,
+        'currency': currency,
+        'category': category.wireName,
+        'spent_at': _ms(spentAt)!,
+        'note': note,
+        'record_id': recordId,
+        'created_by': createdBy,
+        'created_at': _ms(createdAt)!,
+        'updated_at': _ms(updatedAt)!,
+        'deleted_at': _ms(deletedAt),
+      };
+}

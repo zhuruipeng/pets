@@ -12,6 +12,7 @@ import '../core/species.dart';
 import '../core/theme.dart';
 import '../core/units.dart';
 import '../data/models.dart';
+import '../domain/expense_stats.dart';
 import '../providers.dart';
 import 'widgets.dart';
 
@@ -1299,5 +1300,214 @@ class _MoodTile extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ------------------------------------------------------------------ 记一笔花费
+
+/// 记一笔花费。
+///
+/// 与「记一笔记录」分开弹层，而不是在记录表单里加个金额框：
+/// 一是**不是每件事都花钱**（朋友给的药、自己剪的指甲），硬塞金额框会让
+/// 每次记记录都要面对一个填不填的抉择；二是**不是每笔钱都有对应事件**
+/// （一袋粮吃一个月），反过来塞也塞不进去。
+///
+/// 金额用数字键盘 + 只允许一个小数点，不接单位换算 —— 汇率是外部数据，
+/// 我们没有来源，硬给一个换算出来的数字就是编数据。
+Future<void> showAddExpenseSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  required String petId,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => _AddExpenseSheet(petId: petId),
+  );
+}
+
+class _AddExpenseSheet extends ConsumerStatefulWidget {
+  const _AddExpenseSheet({required this.petId});
+
+  final String petId;
+
+  @override
+  ConsumerState<_AddExpenseSheet> createState() => _AddExpenseSheetState();
+}
+
+class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
+  final _amount = TextEditingController();
+  final _note = TextEditingController();
+
+  ExpenseCategory _category = ExpenseCategory.food;
+
+  /// 消费日期。默认今天 —— 大多数人记的是刚刚花掉的钱。
+  /// 可以回拨（补录上周的账单），但**不能选未来**：那不是支出，是预算，
+  /// 混在一起会让「本月支出」变成一个可以随便改的数字。
+  late DateTime _spentAt = DateTime.now();
+
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final currency = AppRegion.current.defaultCurrency;
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            L.t('expense.add'),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          TextField(
+            controller: _amount,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+            decoration: InputDecoration(
+              labelText: L.t('expense.amount'),
+              prefixText: '${currencySymbolOf(currency)} ',
+              border: const OutlineInputBorder(),
+              errorText: _error,
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          Text(
+            L.t('expense.category'),
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: ExpenseCategory.values.map((c) {
+              return ChoiceChip(
+                selected: c == _category,
+                onSelected: (_) => setState(() => _category = c),
+                avatar: Icon(expenseCategoryIcon(c), size: 16),
+                label: Text(expenseCategoryLabel(c)),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 18),
+
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.event_outlined, size: 18),
+                  label: Text(compactDate(_spentAt)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => setState(() => _spentAt = DateTime.now()),
+                child: Text(L.t('expense.when.today')),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          TextField(
+            controller: _note,
+            maxLines: 2,
+            decoration: InputDecoration(
+              labelText: L.t('expense.note'),
+              border: const OutlineInputBorder(),
+            ),
+          ),
+
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton(
+              onPressed: _submitting ? null : _submit,
+              child: _submitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(L.t('expense.save')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _spentAt,
+      firstDate: DateTime(DateTime.now().year - 20),
+      // 不许选未来：那是预算，不是支出。
+      lastDate: DateTime.now(),
+    );
+    if (date == null || !mounted) return;
+    setState(() => _spentAt = date);
+  }
+
+  Future<void> _submit() async {
+    // 用户可能输入带空格或全角字符，先规整再解析。
+    final raw = _amount.text.replaceAll(RegExp(r'[,\s]'), '').trim();
+    final amount = double.tryParse(raw);
+
+    if (amount == null || amount <= 0) {
+      setState(() => _error = L.t('expense.amountRequired'));
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    try {
+      await ref.read(appActionsProvider).addExpense(
+            petId: widget.petId,
+            amount: amount,
+            category: _category,
+            spentAt: _spentAt,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+          );
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(L.t('expense.saved'))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = '$e';
+      });
+    }
   }
 }

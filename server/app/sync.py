@@ -42,6 +42,7 @@ SYNC_TABLES = frozenset(
         "attachments",
         "reminders",
         "reminder_logs",
+        "expenses",
         "walk_sessions",
         "pet_tags",
     }

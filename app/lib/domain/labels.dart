@@ -72,6 +72,22 @@ String? petAgeLabel(DateTime? birthday, DateTime now) {
   return L.isZh ? '$y岁$m个月' : '${y}y ${m}mo';
 }
 
+/// 费用类别 → 展示名。
+///
+/// 刻意与台账（`careKindLabel`）分开：那边是「疫苗 / 体内驱虫」这种**事实**，
+/// 这边是「这笔钱花在哪」。疫苗那一项两边同名，但医疗与用品只在费用侧出现，
+/// 反过来也成立 —— 合成一套会让两边都长出用不上的项。
+String expenseCategoryLabel(ExpenseCategory c) => switch (c) {
+      ExpenseCategory.food => L.t('expense.category.food'),
+      ExpenseCategory.medical => L.t('expense.category.medical'),
+      ExpenseCategory.vaccine => L.t('expense.category.vaccine'),
+      ExpenseCategory.deworm => L.t('expense.category.deworm'),
+      ExpenseCategory.grooming => L.t('expense.category.grooming'),
+      ExpenseCategory.supply => L.t('expense.category.supply'),
+      ExpenseCategory.boarding => L.t('expense.category.boarding'),
+      ExpenseCategory.other => L.t('expense.category.other'),
+    };
+
 /// 给药方式 code → 展示名。库里存 code，展示时才翻。
 String medRouteLabel(String code) => switch (code) {
       'topical' => L.t('addRecord.med.route.topical'),

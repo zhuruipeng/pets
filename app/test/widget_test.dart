@@ -161,6 +161,36 @@ void main() {
       }
     });
 
+    test('费用页签文案都已翻译', () {
+      for (final k in [
+        'profile.tab.expense',
+        'expense.title',
+        'expense.add',
+        'expense.thisMonth',
+        'expense.allTime',
+        'expense.avgMonth',
+        'expense.trend',
+        'expense.byCategory',
+        'expense.recent',
+        'expense.empty.hint',
+        'expense.amount',
+        'expense.amountRequired',
+        'expense.saved',
+        'expense.deleted',
+        // 八个分类：库里存 wire 名，展示时才翻，少一条界面上就是裸 key
+        'expense.category.food',
+        'expense.category.medical',
+        'expense.category.vaccine',
+        'expense.category.deworm',
+        'expense.category.grooming',
+        'expense.category.supply',
+        'expense.category.boarding',
+        'expense.category.other',
+      ]) {
+        expect(L.t(k), isNot(k), reason: '$k 没有翻译');
+      }
+    });
+
     test('台账的「上次 / 下次」占位符能被替换', () {
       // 这两条是多占位符的：漏一个就是一个字面量 {v} 摆在界面上。
       expect(L.tp('profile.care.last', {'v': '3 天前'}), contains('3 天前'));

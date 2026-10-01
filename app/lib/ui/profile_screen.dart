@@ -2,7 +2,7 @@
 ///
 /// 版式：
 /// 1. 渐变头图 + 圆形大照片（带相机角标）+ 名字 + 品种年龄 + 健康标签
-/// 2. 四个分页签：资料 / 健康 / 记录 / 回忆
+/// 2. 五个分页签：资料 / 健康 / 记录 / 回忆 / 费用
 /// 3. 基本信息卡 —— 标签左、值右，行与行之间用极淡分隔线
 /// 4. 个性特点 —— 圆角标签串
 /// 5. 家庭成员 —— 头像 + 名字 + 角色，底部一个「添加家庭成员」
@@ -16,6 +16,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/feature_flags.dart';
@@ -26,6 +27,7 @@ import '../core/traits.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../data/repositories/member_repository.dart';
+import '../domain/expense_stats.dart';
 import '../domain/health_ledger.dart';
 // PlanItemTypeX 是 wireName 所在的扩展，`show` 列表里漏了它就用不了 wireName。
 import '../domain/immunization.dart'
@@ -58,6 +60,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     'profile.tab.health',
     'profile.tab.records',
     'profile.tab.memory',
+    'profile.tab.expense',
   ];
 
   @override
@@ -123,6 +126,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
           _HealthTab(pet: pet),
           _RecordsTab(pet: pet),
           _MemoriesTab(pet: pet),
+          _ExpenseTab(pet: pet),
         ],
       ),
     );
@@ -1977,6 +1981,561 @@ class _PlainHint extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ------------------------------------------------------------------ 费用页签
+
+/// 费用页签：本月汇总 + 近半年趋势 + 分类占比 + 明细。
+///
+/// **不做预算、不做预警**：我们没有「该花多少」的任何依据，给个
+/// 「本月超支」的红字就是拍脑袋。这里只回答两个问题——花了多少、花在哪。
+///
+/// **不做币种换算**：汇率是外部数据，本 App 没有来源，换算出来的数字
+/// 就是编的。记的时候是什么币种，看的时候就是什么币种。
+class _ExpenseTab extends ConsumerWidget {
+  const _ExpenseTab({required this.pet});
+
+  final Pet pet;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currency = AppRegion.current.defaultCurrency;
+    final expenses =
+        ref.watch(petExpensesProvider(pet.id)).valueOrNull ?? const <Expense>[];
+    final summary = ref.watch(expenseSummaryProvider(pet.id));
+
+    return summary.when(
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(AppSpace.gapXl),
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      error: (e, _) => Padding(
+        padding: const EdgeInsets.all(AppSpace.page),
+        child: _PlainHint(icon: Icons.error_outline_rounded, text: '$e'),
+      ),
+      data: (s) => ListView(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.page,
+          AppSpace.gapL,
+          AppSpace.page,
+          96,
+        ),
+        children: [
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: OutlinedButton.icon(
+              onPressed: () => showAddExpenseSheet(context, ref, petId: pet.id),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: Text(L.t('expense.add')),
+            ),
+          ),
+
+          if (s.isEmpty) ...[
+            const SizedBox(height: AppSpace.gapXl),
+            _PlainHint(
+              icon: Icons.payments_outlined,
+              text: L.t('expense.empty.hint'),
+            ),
+          ] else ...[
+            const SizedBox(height: AppSpace.gapL),
+            _ExpenseHeadCard(summary: s, currency: currency),
+
+            if (s.months.any((m) => m.total > 0)) ...[
+              const SizedBox(height: AppSpace.gapXl),
+              _SectionTitle(L.t('expense.trend')),
+              const SizedBox(height: AppSpace.gapM),
+              _ExpenseTrendCard(summary: s, currency: currency),
+            ],
+
+            if (s.byCategory.isNotEmpty) ...[
+              const SizedBox(height: AppSpace.gapXl),
+              _SectionTitle(L.t('expense.byCategory')),
+              const SizedBox(height: AppSpace.gapM),
+              _ExpenseCategoryCard(summary: s, currency: currency),
+            ],
+
+            if (expenses.isNotEmpty) ...[
+              const SizedBox(height: AppSpace.gapXl),
+              _SectionTitle(L.t('expense.recent')),
+              const SizedBox(height: AppSpace.gapM),
+              _ExpenseListCard(
+                petId: pet.id,
+                expenses: expenses.take(10).toList(),
+                currency: currency,
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 汇总卡：本月大数字 + 累计 + 月均。
+///
+/// 月均的分母刻意取「有支出的月份数」而不是「6」：App 装了半年只记过
+/// 一个月的账，除以 6 会得出一个低得离谱的数字，比不显示更误导。
+class _ExpenseHeadCard extends StatelessWidget {
+  const _ExpenseHeadCard({required this.summary, required this.currency});
+
+  final ExpenseSummary summary;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpace.gapL),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppRadius.cardBorder,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                L.t('expense.thisMonth'),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                L.tp('expense.count', {'n': summary.monthCount}),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textTertiary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpace.gapXs),
+          Text(
+            formatMoney(summary.monthTotal, currency),
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: AppSpace.gapM),
+          const RowDivider(),
+          const SizedBox(height: AppSpace.gapM),
+          Row(
+            children: [
+              Expanded(
+                child: _MiniStat(
+                  label: L.t('expense.allTime'),
+                  value: formatMoney(summary.allTotal, currency),
+                ),
+              ),
+              Expanded(
+                child: _MiniStat(
+                  label: L.t('expense.avgMonth'),
+                  value: formatMoney(summary.avgPerActiveMonth, currency),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniStat extends StatelessWidget {
+  const _MiniStat({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11.5,
+              color: AppColors.textTertiary,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
+      );
+}
+
+/// 近半年柱状图。
+///
+/// 纵轴不标刻度：金额的量级差异很大（几十到几千），固定刻度要么全是 0
+/// 要么挤成一团；柱高本身已经能看出高低，具体数字在下面的列表里。
+class _ExpenseTrendCard extends StatelessWidget {
+  const _ExpenseTrendCard({required this.summary, required this.currency});
+
+  final ExpenseSummary summary;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxV = summary.months
+        .map((m) => m.total)
+        .fold(0.0, (a, b) => a > b ? a : b);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.gapM,
+        AppSpace.gapL,
+        AppSpace.gapL,
+        AppSpace.gapXs,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppRadius.cardBorder,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: SizedBox(
+        height: 150,
+        child: BarChart(
+          BarChartData(
+            alignment: BarChartAlignment.spaceAround,
+            // 顶部留 20% 空隙，最高的那根不会贴着卡片边。
+            maxY: maxV * 1.2,
+            minY: 0,
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: maxV <= 0 ? 1 : maxV / 3,
+              getDrawingHorizontalLine: (_) => const FlLine(
+                color: AppColors.divider,
+                strokeWidth: 1,
+              ),
+            ),
+            borderData: FlBorderData(show: false),
+            // 柱子矮的时候点不到，而数字在下面列表里都有，关掉省事。
+            barTouchData: BarTouchData(enabled: false),
+            titlesData: FlTitlesData(
+              topTitles: const AxisTitles(),
+              rightTitles: const AxisTitles(),
+              leftTitles: const AxisTitles(),
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 24,
+                  getTitlesWidget: (v, meta) {
+                    final i = v.round();
+                    if (i < 0 || i >= summary.months.length) {
+                      return const SizedBox.shrink();
+                    }
+                    final m = summary.months[i];
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        L.tp('expense.month.short', {'m': m.month}),
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          color: AppColors.textTertiary,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            barGroups: [
+              for (var i = 0; i < summary.months.length; i++)
+                BarChartGroupData(
+                  x: i,
+                  barRods: [
+                    BarChartRodData(
+                      toY: summary.months[i].total,
+                      width: 16,
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 分类占比：横条而不是饼图。
+///
+/// 八个分类里经常只有两三个有值，饼图上剩下的碎块既看不出是什么、
+/// 也点不中；横条还能顺带把金额对齐成一列，扫读更快。
+class _ExpenseCategoryCard extends StatelessWidget {
+  const _ExpenseCategoryCard({required this.summary, required this.currency});
+
+  final ExpenseSummary summary;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.gapL,
+        vertical: AppSpace.gapM,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppRadius.cardBorder,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < summary.byCategory.length; i++) ...[
+            if (i > 0) const SizedBox(height: AppSpace.gapS),
+            _CategoryBar(
+              slice: summary.byCategory[i],
+              total: summary.monthTotal,
+              currency: currency,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryBar extends StatelessWidget {
+  const _CategoryBar({
+    required this.slice,
+    required this.total,
+    required this.currency,
+  });
+
+  final ExpenseSlice slice;
+  final double total;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    // total 为 0 时不可能走到这里（分类有值意味着本月有支出），
+    // 但仍挡一下 —— 除零会算出 NaN，宽度 NaN 会让渲染层直接抛。
+    final frac = total <= 0 ? 0.0 : (slice.total / total).clamp(0.0, 1.0);
+
+    return Row(
+      children: [
+        Icon(expenseCategoryIcon(slice.category),
+            size: 16, color: AppColors.primary),
+        const SizedBox(width: AppSpace.gapS),
+        SizedBox(
+          width: 72,
+          child: Text(
+            expenseCategoryLabel(slice.category),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpace.gapS),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, c) => Stack(
+              children: [
+                Container(
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                // 至少留 2px：占比极小时整条变透明，看起来像「没记上」。
+                Container(
+                  height: 6,
+                  width: (c.maxWidth * frac).clamp(2.0, c.maxWidth),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpace.gapS),
+        SizedBox(
+          width: 76,
+          child: Text(
+            formatMoney(slice.total, currency),
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 最近支出明细。长按/点删除按钮可删（软删除）。
+class _ExpenseListCard extends ConsumerWidget {
+  const _ExpenseListCard({
+    required this.petId,
+    required this.expenses,
+    required this.currency,
+  });
+
+  final String petId;
+  final List<Expense> expenses;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.gapL,
+        vertical: AppSpace.gapXs,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppRadius.cardBorder,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < expenses.length; i++) ...[
+            if (i > 0) const RowDivider(),
+            _ExpenseRow(
+              petId: petId,
+              expense: expenses[i],
+              currency: currency,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpenseRow extends ConsumerWidget {
+  const _ExpenseRow({
+    required this.petId,
+    required this.expense,
+    required this.currency,
+  });
+
+  final String petId;
+  final Expense expense;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final note = (expense.note ?? '').trim();
+
+    return Row(
+      children: [
+        Icon(expenseCategoryIcon(expense.category),
+            size: 18, color: AppColors.textSecondary),
+        const SizedBox(width: AppSpace.gapM),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                expenseCategoryLabel(expense.category),
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                note.isEmpty
+                    ? compactDate(expense.spentAt)
+                    : '${compactDate(expense.spentAt)} · $note',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: AppColors.textTertiary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: AppSpace.gapS),
+        Text(
+          formatMoney(expense.amount, expense.currency.isEmpty
+              ? currency
+              : expense.currency),
+          style: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(width: 2),
+        SizedBox(
+          width: 32,
+          child: IconButton(
+            iconSize: 17,
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.delete_outline_rounded,
+                color: AppColors.textTertiary),
+            tooltip: L.t('expense.delete'),
+            onPressed: () => _confirmDelete(context, ref),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(L.t('expense.delete')),
+        content: Text(
+          '${expenseCategoryLabel(expense.category)} '
+          '${formatMoney(expense.amount, currency)}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(L.t('action.cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: Text(L.t('expense.delete')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    await ref.read(appActionsProvider).deleteExpense(petId, expense.id);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(L.t('expense.deleted'))),
     );
   }
 }

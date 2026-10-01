@@ -88,6 +88,15 @@ extension RegionBehavior on Region {
         Region.intl => 'mapbox',
       };
 
+  /// 记账默认币种（ISO 4217 代码）。
+  ///
+  /// 存代码不存符号：符号（¥ / $）在不同地区代表不同币种，
+  /// 而代码是唯一的，展示时再查符号表。
+  String get defaultCurrency => switch (this) {
+        Region.cn => 'CNY',
+        Region.intl => 'USD',
+      };
+
   /// 免疫规则集版本，供免疫计划生成使用。
   String get immunizationRuleSet => switch (this) {
         Region.cn => 'cn',
