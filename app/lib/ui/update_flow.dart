@@ -37,11 +37,17 @@ Future<void> runUpdateCheck(
 
   switch (outcome.status) {
     case UpdateCheckStatus.hasUpdate:
+      // 平时只显示版本名（0.1.3）—— `0.1.3+5` 那种写法是给 pubspec 看的，
+      // 用户看到会困惑。但**两个版本名恰好相同时**（出包用了 -NoBumpName，
+      // 只抬 build 不抬名）必须补上 build，否则弹窗会显示成
+      // 「当前 0.1.3 → 最新 0.1.3」，看起来像没得更新。
+      final sameName = outcome.result!.manifest.version == info.version;
       await _showUpdateDialog(
         context,
         result: outcome.result!,
         service: service,
-        currentVersion: '${info.version}+$currentBuild',
+        currentVersion:
+            sameName ? '${info.version} (+$currentBuild)' : info.version,
       );
     case UpdateCheckStatus.upToDate:
       if (interactive) _toast(context, L.t('update.upToDate'));

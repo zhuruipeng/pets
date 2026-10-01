@@ -213,13 +213,19 @@ class MeScreen extends ConsumerWidget {
           children: [
             // 版本号从构建产物读，不硬编码 —— 硬编码的那份迟早和 pubspec 对不上，
             // 而「我到底装的是哪版」正是排查更新问题的第一句话。
+            //
+            // 正式包只显示版本名（v0.1.3）；那个括号里的数字是 Android 的
+            // versionCode，给系统比版本用的，用户看了只会困惑。开发构建
+            // 保留完整信息 —— 排查时要精确到哪个 build。
             FutureBuilder<PackageInfo>(
               future: PackageInfo.fromPlatform(),
               builder: (_, snapshot) {
                 final info = snapshot.data;
                 final text = info == null
                     ? '—'
-                    : 'v${info.version} (${info.buildNumber})';
+                    : kDebugMode
+                        ? 'v${info.version} (${info.buildNumber})'
+                        : 'v${info.version}';
                 return InfoRow(L.t('me.version'), text);
               },
             ),
