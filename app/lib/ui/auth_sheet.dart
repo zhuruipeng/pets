@@ -53,6 +53,16 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
   String? _passwordError;
   String? _devCode;
 
+  /// 表单级错误（登录/发码失败）。**必须显示在这个 sheet 内部**。
+  ///
+  /// 为什么不能用 SnackBar：`ScaffoldMessenger.of(context)` 在 modal bottom
+  /// sheet 里拿到的是根 Scaffold 的 messenger，SnackBar 显示在屏幕**最底部**，
+  /// 而这个登录框本身就盖在底部 —— 于是错误整条被挡住。实测事故：官网返回
+  /// 400「验证码不存在或已使用」，用户连点 13 次登录，屏幕上什么都没出现，
+  /// 以为「点了没反应」。成功路径看不到这个问题（成功会先 pop 掉 sheet，
+  /// SnackBar 才露出来），所以只有失败路径会翻车。
+  String? _formError;
+
   /// 重发倒计时。服务端也有限流（60 秒），这里只是别让用户白点。
   int _cooldown = 0;
   Timer? _timer;
@@ -139,6 +149,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                                 _channel = c;
                                 _devCode = null;
                                 _targetError = null;
+                                _formError = null;
                               }),
                               showCheckmark: false,
                             ),
@@ -249,7 +260,10 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(
-                        onPressed: () => setState(() => _mode = 'code'),
+                        onPressed: () => setState(() {
+                          _mode = 'code';
+                          _formError = null;
+                        }),
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
                           minimumSize: const Size(0, 28),
@@ -258,6 +272,28 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                         child: Text(
                           L.t('auth.forgotPassword'),
                           style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // 表单级错误显示在按钮上方 —— **不能靠 SnackBar**，
+                  // 它会被这个底部弹窗整个盖住（见 _formError 的注释）。
+                  if (_formError != null) ...[
+                    const SizedBox(height: AppSpace.gapM),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(AppSpace.gapM),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerBg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _formError!,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          height: 1.5,
+                          color: AppColors.danger,
                         ),
                       ),
                     ),
@@ -295,6 +331,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                                     _mode == 'password' ? 'code' : 'password';
                                 _passwordError = null;
                                 _codeError = null;
+                                _formError = null;
                               }),
                       child: Text(
                         _mode == 'password'
@@ -351,6 +388,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
       setState(() {
         _devCode = r.devCode;
         _cooldown = 60;
+        _formError = null;
       });
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -364,7 +402,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
       messenger.showSnackBar(SnackBar(content: Text(L.t('auth.sent'))));
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text(_friendly(e))));
+      setState(() => _formError = _friendly(e));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -376,6 +414,8 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
 
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
+    // 新一次尝试：清掉上一次的错误，免得旧错误一直挂在那里误导人。
+    if (_formError != null) setState(() => _formError = null);
 
     if (_mode == 'password') {
       // 密码登录。
@@ -399,8 +439,10 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
         messenger.showSnackBar(SnackBar(content: Text(L.t('sync.done'))));
       } catch (e) {
         if (!mounted) return;
-        setState(() => _submitting = false);
-        messenger.showSnackBar(SnackBar(content: Text(_friendly(e))));
+        setState(() {
+          _submitting = false;
+          _formError = _friendly(e);
+        });
       }
       return;
     }
@@ -434,8 +476,10 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _submitting = false);
-      messenger.showSnackBar(SnackBar(content: Text(_friendly(e))));
+      setState(() {
+        _submitting = false;
+        _formError = _friendly(e);
+      });
     }
   }
 
@@ -580,16 +624,48 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
   }
 
   /// 把服务端的错误翻成人话。约定见 docs/同步协议.md 5.1。
+  ///
+  /// cn 区走官网统一账号，官网返回的是**中文** detail（如「验证码不存在或
+  /// 已使用」）。这类文案本来就是写给用户看的，能透就透；只对需要补充
+  /// 「下一步怎么办」的做改写。
   String _friendly(Object e) {
     final raw = e.toString();
-    if (raw.contains('code expired')) return L.isZh ? '验证码过期了，重新获取' : 'Code expired';
-    if (raw.contains('code mismatch')) return L.isZh ? '验证码不对' : 'Wrong code';
-    if (raw.contains('too many')) return L.isZh ? '尝试太多次，重新获取' : 'Too many attempts';
-    if (raw.contains('429')) return L.isZh ? '请求太频繁，等一会儿再试' : 'Too many requests';
+
+    if (raw.contains('验证码不存在或已使用') || raw.contains('验证码已使用')) {
+      return L.isZh
+          ? '验证码不对或已经用过，请重新获取'
+          : 'Code is wrong or already used — request a new one.';
+    }
+    if (raw.contains('验证码已过期') || raw.contains('code expired')) {
+      return L.isZh ? '验证码过期了，重新获取' : 'Code expired';
+    }
+    if (raw.contains('验证码错误') || raw.contains('code mismatch')) {
+      return L.isZh ? '验证码不对' : 'Wrong code';
+    }
+    if (raw.contains('too many') || raw.contains('429')) {
+      return L.isZh ? '请求太频繁，等一会儿再试' : 'Too many requests';
+    }
     if (raw.contains('invalid phone/email or password') ||
         raw.contains('401')) {
       return L.t('auth.passwordFailed');
     }
+
+    // 兜底：把服务端说的原话透出来（比笼统的「登录失败，请重试」有用）。
+    final detail = _extractDetail(raw);
+    if (detail != null) return detail;
     return L.t('auth.failed');
+  }
+
+  /// 从异常串里抠出服务端的原始 detail。
+  ///
+  /// `SyncApiException(400): 验证码不存在或已使用` → `验证码不存在或已使用`。
+  /// 只透出**含中文**的 detail：那说明它是写给用户看的；纯英文的
+  /// （`SocketException: ...` / `DioError` …）是技术噪音，不该甩给用户。
+  static String? _extractDetail(String raw) {
+    final i = raw.indexOf('): ');
+    if (i < 0) return null;
+    final s = raw.substring(i + 3).trim();
+    if (s.isEmpty) return null;
+    return s.contains(RegExp(r'[\u4e00-\u9fa5]')) ? s : null;
   }
 }
