@@ -10,8 +10,6 @@
 /// 授权率会高得多。见 ui/sheets.dart 的 _AddPetSheetState._submit。
 library;
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -219,19 +217,21 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
+class _HomeShellState extends State<HomeShell> {
   int _index = 0;
-  Timer? _syncTimer;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
 
-    // 定时同步：**只在真的有本地改动时才发请求**（先查一次 outbox 条数）。
-    // 每分钟都打一次网络是纯浪费流量和电，而「有改动才同步」让
-    // 常态下的开销只是一次本地 count 查询。
-    _syncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncIfDirty());
+    // 同步是**手动**的：只在「我的」页点「立即同步」时跑，外加登录、
+    // 接受邀请这类必要动作后各跑一次。
+    //
+    // 原来这里挂着一个 60 秒的 Timer.periodic 后台同步，外加回到前台
+    // 无条件同步一次。用户反馈「一直在自己同步」，故整体去掉。代价是：
+    // 本地记了东西如果不点同步，就一直只存在本机（「我的」页会显示
+    // 「N 条待同步」）。自动同步要加回来的话，别退回「每分钟都打网络」。
+    //
     // 启动后静默查一次更新。放在首帧之后，不占启动时间；
     // 检查失败或已是最新都**不打扰用户**（详见 ui/update_flow.dart）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -245,37 +245,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         showReminderDueSheet(context, reminderId: pending);
       }
     });
-  }
-
-  @override
-  void dispose() {
-    _syncTimer?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  /// 回到前台：**无条件同步一次**。
-  ///
-  /// 与定时器不同，这里不能只看 pending —— 应用在后台期间别的设备
-  /// 可能改了数据，本地 pending 是 0 也需要拉下来。
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-    final container = ProviderScope.containerOf(context, listen: false);
-    container.read(syncControllerProvider.notifier).runSync();
-  }
-
-  Future<void> _syncIfDirty() async {
-    if (!mounted) return;
-    final container = ProviderScope.containerOf(context, listen: false);
-    try {
-      final pending = await container.read(syncEngineProvider).pendingCount();
-      if (pending > 0) {
-        await container.read(syncControllerProvider.notifier).runSync();
-      }
-    } catch (_) {
-      // 后台同步失败不打扰用户：错误会显示在「我的」页的同步卡片里。
-    }
   }
 
   @override
