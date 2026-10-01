@@ -16,6 +16,19 @@ import '../domain/immunization.dart';
 // 这里再导出一次，免得所有界面文件都要多 import 一个。
 export '../core/reminder_text.dart' show kManualReminderTypes, reminderTypeLabel;
 
+// 类型 → 文案的纯映射搬去了 domain/labels.dart（那边不引 Flutter，
+// 纯逻辑层如「导出报告」的内容组装也能用）。这里转发一次，界面文件不必改 import。
+export '../domain/labels.dart'
+    show
+        careKindLabel,
+        feedKindLabel,
+        medRouteLabel,
+        planTypeLabel,
+        petAgeLabel,
+        recordPayloadSummary,
+        recordTypeLabel,
+        recordValueLine;
+
 /// 统计格之间那道竖线。今日页的主卡、本周概览、遛狗结果都在用它。
 class StatDivider extends StatelessWidget {
   const StatDivider({super.key});
@@ -423,19 +436,6 @@ class PetAvatar extends StatelessWidget {
 
 // ------------------------------------------------------------------ 文案工具
 
-String recordTypeLabel(RecordType type) => switch (type) {
-      RecordType.weight => L.t('addRecord.type.weight'),
-      RecordType.vaccine => L.t('plan.vaccine.core'),
-      RecordType.dewormInternal => L.t('plan.deworm.internal'),
-      RecordType.dewormExternal => L.t('plan.deworm.external'),
-      RecordType.medication => L.t('addRecord.type.medication'),
-      RecordType.medical => L.t('addRecord.type.medical'),
-      RecordType.grooming => L.t('addRecord.type.grooming'),
-      RecordType.feeding => L.t('addRecord.type.feeding'),
-      RecordType.toilet => L.t('addRecord.type.toilet'),
-      RecordType.note => L.t('addRecord.type.note'),
-    };
-
 IconData recordTypeIcon(RecordType type) => switch (type) {
       RecordType.weight => Icons.monitor_weight_outlined,
       RecordType.vaccine => Icons.vaccines_outlined,
@@ -477,67 +477,6 @@ String walkMoodLabel(String code) => switch (code) {
       _ => L.t('walk.mood.great'),
     };
 
-/// 给药方式 code → 展示名。库里存 code，展示时才翻。
-String medRouteLabel(String code) => switch (code) {
-      'topical' => L.t('addRecord.med.route.topical'),
-      'injection' => L.t('addRecord.med.route.injection'),
-      _ => L.t('addRecord.med.route.oral'),
-    };
-
-/// 喂食类型 code → 展示名。
-String feedKindLabel(String code) => switch (code) {
-      'wet' => L.t('addRecord.feed.kind.wet'),
-      'treat' => L.t('addRecord.feed.kind.treat'),
-      _ => L.t('addRecord.feed.kind.dry'),
-    };
-
-/// 记录行的数值文本。
-///
-/// 体重走单位换算；喂食带自己存的 unit（g）；都没有就落回 valueText。
-/// 算不出来返回 null，调用方不显示这一行 —— 不拿占位符糊弄。
-String? recordValueLine(PetRecord r, WeightUnit unit) {
-  final v = r.valueNum;
-  if (v != null) {
-    if (r.type == RecordType.weight) return Units.formatWeight(v, unit);
-    final u = r.unit;
-    if (u == null) return v.toStringAsFixed(1);
-    return '${v.toStringAsFixed(u == 'g' ? 0 : 1)} $u';
-  }
-  final t = (r.valueText ?? '').trim();
-  return t.isEmpty ? null : t;
-}
-
-/// payload 里的结构化字段拼成一行副文本（「1 片 · 口服」）。
-///
-/// 单个数值塞进 value_num 就够，但剂量、给药方式、品牌这类字段没有专属列，
-/// 统一走 payload。空字符串表示「没有可补充的」，调用方别渲染。
-String recordPayloadSummary(PetRecord r) {
-  final p = r.payload;
-  final parts = <String>[];
-  switch (r.type) {
-    case RecordType.medication:
-      final dose = (p['dose'] as String?)?.trim() ?? '';
-      final route = (p['route'] as String?) ?? '';
-      if (dose.isNotEmpty) parts.add(dose);
-      if (route.isNotEmpty) parts.add(medRouteLabel(route));
-      break;
-    case RecordType.feeding:
-      final kind = (p['kind'] as String?) ?? '';
-      if (kind.isNotEmpty) parts.add(feedKindLabel(kind));
-      final brand = (p['brand'] as String?)?.trim() ?? '';
-      if (brand.isNotEmpty) parts.add(brand);
-      break;
-    case RecordType.note:
-      // 从「回忆」相册加的照片，库里是一条 note + payload.kind=photo。
-      // 翻译在展示层做 —— 库里存 i18n 文本，切区或改文案就成历史脏数据。
-      if ((p['kind'] as String?) == 'photo') parts.add(L.t('record.kind.photo'));
-      break;
-    default:
-      break;
-  }
-  return parts.join(' · ');
-}
-
 /// 提醒标题：库里存的是 i18n key，展示时才翻。
 /// 提醒标题。解析规则见 core/reminder_text.dart —— 通知服务也要用同一套，
 /// 所以那边才是实现，这里是给界面用的薄封装。
@@ -574,28 +513,6 @@ String _p(int v) => v.toString().padLeft(2, '0');
 /// 日期时间紧凑格式。
 String compactDateTime(DateTime dt) =>
     '${_p(dt.month)}-${_p(dt.day)} ${_p(dt.hour)}:${_p(dt.minute)}';
-
-/// 计划项类型 → 展示名。
-String planTypeLabel(PlanItemType type) => switch (type) {
-      PlanItemType.vaccine => L.t('plan.vaccine.core'),
-      PlanItemType.dewormInternal => L.t('plan.deworm.internal'),
-      PlanItemType.dewormExternal => L.t('plan.deworm.external'),
-      PlanItemType.checkup => L.t('plan.checkup.annual'),
-      PlanItemType.grooming => L.t('plan.grooming'),
-    };
-
-/// 台账分类 → 展示名。
-///
-/// 与 [planTypeLabel] 刻意分开：那一套是规则集里的**细分名**
-/// （「核心疫苗」「年度体检」），而台账把同类合并成一行 ——
-/// 疫苗那行同时含联苗和狂犬，还叫「核心疫苗」会让人以为狂犬不在里面。
-String careKindLabel(PlanItemType kind) => switch (kind) {
-      PlanItemType.vaccine => L.t('profile.care.vaccine'),
-      PlanItemType.dewormInternal => L.t('profile.care.dewormInternal'),
-      PlanItemType.dewormExternal => L.t('profile.care.dewormExternal'),
-      PlanItemType.checkup => L.t('profile.care.checkup'),
-      PlanItemType.grooming => L.t('profile.care.grooming'),
-    };
 
 /// 台账分类 → 图标。转发给 [reminderTypeIcon]，同一件事在两处不能长两个样。
 IconData careKindIcon(PlanItemType kind) => reminderTypeIcon(kind.wireName);

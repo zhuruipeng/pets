@@ -18,6 +18,7 @@
 /// **不给健康评分、不给诊断**。这与首页删掉「状态：良好」是同一条纪律。
 library;
 
+import '../data/models.dart' show PetRecord, Reminder;
 import 'immunization.dart' show PlanItemType;
 
 // 分类就是 PlanItemType，调用方（含测试）不该为了写台账再去 import 一遍免疫模块。
@@ -128,6 +129,44 @@ PlanItemType? careKindFromReminderType(String type) => switch (type) {
       'grooming' => PlanItemType.grooming,
       _ => null,
     };
+
+/// 把记录与提醒映射成台账的输入（纯函数）。
+///
+/// 页面与「导出报告」共用同一份映射。各写一份的话，台账口径一变
+/// （比如新增了某个类型）两边就不一致了，而且这种不一致很难被发现 ——
+/// 报告上少一行，没人会注意到。
+///
+/// [summaryOf] 由调用方给：档案页要显示「3 个月前的狂犬」，报告的台账只摆日期。
+({List<CareFact> facts, List<CareSchedule> schedules}) ledgerInputs({
+  required List<PetRecord> records,
+  required List<Reminder> reminders,
+  String? Function(PetRecord record)? summaryOf,
+}) {
+  final facts = <CareFact>[];
+  for (final r in records) {
+    final kind = careKindFromRecordWire(r.type.wireName);
+    if (kind == null) continue;
+    facts.add(CareFact(
+      kind: kind,
+      at: r.recordedAt,
+      summary: summaryOf?.call(r),
+    ));
+  }
+
+  final schedules = <CareSchedule>[];
+  for (final r in reminders) {
+    final kind = careKindFromReminderType(r.type);
+    if (kind == null) continue;
+    schedules.add(CareSchedule(
+      kind: kind,
+      nextAt: r.nextAt,
+      enabled: r.enabled,
+      title: r.title,
+    ));
+  }
+
+  return (facts: facts, schedules: schedules);
+}
 
 /// 合并事实与排期，产出台账。
 ///

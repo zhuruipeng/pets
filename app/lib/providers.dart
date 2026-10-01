@@ -4,10 +4,15 @@
 /// UI 只读 provider，不直接摸仓储。
 library;
 
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import 'core/region.dart';
+import 'core/units.dart';
 import 'data/db/app_database.dart';
 import 'data/models.dart';
 import 'data/repositories/attachment_repository.dart';
@@ -21,8 +26,11 @@ import 'data/sync/secure_token_store.dart';
 import 'data/sync/sync_api.dart';
 import 'data/sync/sync_engine.dart';
 import 'data/sync/unified_api.dart';
+import 'domain/health_ledger.dart';
 import 'domain/immunization.dart';
+import 'domain/pet_report.dart';
 import 'services/app_update_service.dart';
+import 'services/report_renderer.dart';
 import 'services/avatar_store.dart';
 import 'services/notification_service.dart';
 
@@ -747,6 +755,47 @@ class AppActions {
           token: token,
           password: password,
         );
+  }
+
+  /// 导出健康报告：组装内容 → 画成彩色长图 → 唤起系统分享。
+  ///
+  /// 数据源与档案页**完全一致**（同一批 provider + 同一份 [ledgerInputs]），
+  /// 所以报告上的台账不会和页面上看到的对不上 —— 那是最让人困惑的一种错。
+  /// 返回成图字节数，供调用方给「已生成」反馈。
+  Future<int> exportPetReport(Pet pet) async {
+    final records = await ref.read(petRecordsProvider(pet.id).future);
+    final reminders = await ref.read(petRemindersProvider(pet.id).future);
+    final weights = await ref.read(weightSeriesProvider(pet.id).future);
+
+    final inputs = ledgerInputs(records: records, reminders: reminders);
+    final ledger = buildCareLedger(
+      facts: inputs.facts,
+      schedules: inputs.schedules,
+    );
+
+    const region = AppRegion.current;
+    final report = buildPetReport(
+      pet: pet,
+      ledger: ledger,
+      weightSeries: weights,
+      records: records,
+      now: DateTime.now(),
+      weightUnit: Units.defaultWeightUnit(region, region.name),
+    );
+
+    final png = await renderPetReportPng(report);
+
+    // 落在临时目录：分享出去之后就是对方的文件了，我们这边不必长期保留。
+    // 文件名带上 petId，家里两只宠物各导一份时不会互相覆盖。
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/health-report-${pet.id}.png');
+    await file.writeAsBytes(png, flush: true);
+
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'image/png')],
+      subject: pet.name,
+    );
+    return png.length;
   }
 
   Future<void> logout() async {

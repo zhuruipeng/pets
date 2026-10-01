@@ -330,18 +330,9 @@ class _PetHeroCard extends ConsumerWidget {
     return breed.isEmpty ? age : '$breed · $age';
   }
 
-  static String _ageText(DateTime? birthday) {
-    if (birthday == null) return L.t('profile.ageUnknown');
-    final now = DateTime.now();
-    var months = (now.year - birthday.year) * 12 + (now.month - birthday.month);
-    if (now.day < birthday.day) months -= 1;
-    if (months < 0) months = 0;
-    final y = months ~/ 12;
-    final m = months % 12;
-    if (y == 0) return L.isZh ? '$m个月' : '${m}mo';
-    if (m == 0) return L.isZh ? '$y岁' : '${y}y';
-    return L.isZh ? '$y岁$m个月' : '${y}y ${m}mo';
-  }
+  // 与 profile_screen 统一到 domain/labels.dart（原先两处逐字重复）。
+  static String _ageText(DateTime? birthday) =>
+      petAgeLabel(birthday, DateTime.now()) ?? L.t('profile.ageUnknown');
 
   /// 最近一条体重记录。没有体重记录时返回 null，界面显示「--」。
   ///

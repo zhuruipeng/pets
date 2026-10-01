@@ -289,18 +289,10 @@ class _HeroHeader extends ConsumerWidget {
     return parts.join(' · ');
   }
 
-  static String _ageText(DateTime? birthday) {
-    if (birthday == null) return L.t('profile.ageUnknown');
-    final now = DateTime.now();
-    var months = (now.year - birthday.year) * 12 + (now.month - birthday.month);
-    if (now.day < birthday.day) months -= 1;
-    if (months < 0) months = 0;
-    final y = months ~/ 12;
-    final m = months % 12;
-    if (y == 0) return L.isZh ? '$m个月' : '${m}mo';
-    if (m == 0) return L.isZh ? '$y岁' : '${y}y';
-    return L.isZh ? '$y岁$m个月' : '${y}y ${m}mo';
-  }
+  // 统一到 domain/labels.dart：原先这里和 today_screen 各抄了一份完全相同的
+  // 实现，导出报告还要用第三份。now 从外面传 ⇒ 可测。
+  static String _ageText(DateTime? birthday) =>
+      petAgeLabel(birthday, DateTime.now()) ?? L.t('profile.ageUnknown');
 
   static String _speciesLabel(Species s) => switch (s) {
         Species.dog => L.t('addPet.species.dog'),
@@ -484,6 +476,29 @@ class _InfoTab extends ConsumerWidget {
           _WalksCard(petId: pet.id, petName: pet.name),
           const SizedBox(height: AppSpace.gapXl),
         ],
+        // 导出健康报告：档案 + 台账 + 体重 + 最近记录画成一张彩色长图，
+        // 分享给兽医。放在这一组是因为它同样是「低频但重要」的动作。
+        Center(
+          child: OutlinedButton.icon(
+            onPressed: () => _exportReport(context, ref, pet),
+            icon: const Icon(Icons.share_outlined, size: 17),
+            label: Text(L.t('report.action')),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: const BorderSide(color: AppColors.border),
+              minimumSize: const Size(0, 42),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.tile),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpace.gapS),
+
         // 走失协查卡片和归档放在最后一组：都是低频、且需要确认的动作，
         // 不放在页面显眼处 —— 平时用不到，真要用时一眼能找到就行。
         Center(
@@ -520,6 +535,23 @@ class _InfoTab extends ConsumerWidget {
     );
   }
 
+  /// 导出报告并发起分享。
+  ///
+  /// 成功不需要额外提示 —— 系统分享面板弹出来本身就是反馈。但**失败必须说**：
+  /// 登录页刚踩过「错误提示被弹窗挡住、用户以为点了没反应」的坑，别再来一次。
+  static Future<void> _exportReport(
+    BuildContext context,
+    WidgetRef ref,
+    Pet pet,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(appActionsProvider).exportPetReport(pet);
+    } catch (_) {
+      messenger.showSnackBar(SnackBar(content: Text(L.t('report.failed'))));
+    }
+  }
+
   /// 基本信息行：没填的字段直接跳过，不摆「--」。
   ///
   /// breed 是用户自填的自由文本（录入「疫苗」就是「疫苗」），这里不做
@@ -552,15 +584,10 @@ class _InfoTab extends ConsumerWidget {
     return L.isZh ? '$base（估算）' : '$base (est.)';
   }
 
-  static String _ageValue(Pet pet) {
-    final m = pet.ageInMonths;
-    if (m == null) return '--';
-    final y = m ~/ 12;
-    final mo = m % 12;
-    if (y == 0) return L.isZh ? '$mo 个月' : '$mo mo';
-    if (mo == 0) return L.isZh ? '$y 岁' : '$y yr';
-    return L.isZh ? '$y 岁 $mo 个月' : '$y yr $mo mo';
-  }
+  // 也走统一的 petAgeLabel：原先用 Pet.ageInMonths，那个属性只看年月不看日，
+  // 月末会多算一个月，和同屏头部显示的年龄可能差一岁。
+  static String _ageValue(Pet pet) =>
+      petAgeLabel(pet.birthday, DateTime.now()) ?? '--';
 
   static String _genderValue(Pet pet) {
     final g = (pet.gender ?? '').trim().toLowerCase();
@@ -769,30 +796,16 @@ class _CareLedgerCard extends ConsumerWidget {
     final reminders = ref.watch(petRemindersProvider(pet.id)).valueOrNull ??
         const <Reminder>[];
 
-    final facts = <CareFact>[];
-    for (final r in records) {
-      final kind = careKindFromRecordWire(r.type.wireName);
-      if (kind == null) continue;
-      facts.add(CareFact(
-        kind: kind,
-        at: r.recordedAt,
-        summary: _factSummary(r),
-      ));
-    }
-
-    final schedules = <CareSchedule>[];
-    for (final r in reminders) {
-      final kind = careKindFromReminderType(r.type);
-      if (kind == null) continue;
-      schedules.add(CareSchedule(
-        kind: kind,
-        nextAt: r.nextAt,
-        enabled: r.enabled,
-        title: r.title,
-      ));
-    }
-
-    final rows = buildCareLedger(facts: facts, schedules: schedules);
+    // 映射与合并都走 domain —— 导出报告用的是同一份，别在这里再写一遍。
+    final inputs = ledgerInputs(
+      records: records,
+      reminders: reminders,
+      summaryOf: _factSummary,
+    );
+    final rows = buildCareLedger(
+      facts: inputs.facts,
+      schedules: inputs.schedules,
+    );
 
     // 疫苗和体检对所有物种都成立，永远给一行；驱虫两行只在有内容时出现 ——
     // 一只从没驱过虫、也没排期的宠物，摆两行「还没有记录」纯属噪音。
