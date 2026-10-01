@@ -583,6 +583,10 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
   /// null = 还没拖过，此时回落到「上次体重」或默认值。
   double? _weightDisplay;
 
+  /// 点大数字进入的「直接输入」态。见 _weightField 的注释。
+  bool _weightEditing = false;
+  final _weightText = TextEditingController();
+
   /// recordedAt 默认「现在」，但用户可改 —— 补录上个月的疫苗是高频操作。
   late DateTime _recordedAt = DateTime.now();
   bool _submitting = false;
@@ -596,6 +600,7 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     _medDose.dispose();
     _feedGrams.dispose();
     _feedBrand.dispose();
+    _weightText.dispose();
     super.dispose();
   }
 
@@ -756,10 +761,12 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
         ),
       );
 
-  /// 体重：大数字 + 滑块。
+  /// 体重：大数字（可点按直接输入）+ −/＋ 步进 + 滑块。
   ///
-  /// 用滑块而不是输入框，是因为体重每次只变一点，拖两下比敲键盘快，
-  /// 而且天然避免了「输错小数点」。数字仍然可以直接读，不是黑箱。
+  /// 三种输入各有分工：滑块负责「拖两下就完」的高频微调；−/＋ 按 0.1 步进，
+  /// 适合「比上次重一点」的场景；点大数字直接敲键盘，负责精确值
+  /// （宠物医院称出来是 4.35，就得能敲 4.35）。滑块不再是很久以前那种
+  /// 「唯一输入方式」—— 只能拖不能敲，用户就只能记个约数。
   Widget _weightField(WeightUnit unit, double? lastKg) {
     final minW = unit == WeightUnit.kg ? 0.5 : 1.0;
     final maxW = unit == WeightUnit.kg ? 80.0 : 176.0;
@@ -770,31 +777,71 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                value.toStringAsFixed(1),
-                style: const TextStyle(
-                  fontSize: 38,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                  height: 1,
-                ),
-              ),
-              const SizedBox(width: 5),
-              Text(
-                Units.weightSymbol(unit),
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _weightStepButton(Icons.remove_rounded, -0.1, value, minW, maxW),
+            const SizedBox(width: 14),
+            GestureDetector(
+              onTap: () => setState(() {
+                _weightEditing = true;
+                _weightText.text = value.toStringAsFixed(1);
+              }),
+              child: _weightEditing
+                  ? SizedBox(
+                      width: 150,
+                      child: TextField(
+                        controller: _weightText,
+                        autofocus: true,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          height: 1.1,
+                        ),
+                        decoration: const InputDecoration.collapsed(
+                          hintText: '0.0',
+                        ),
+                        onSubmitted: (_) =>
+                            _commitWeightEdit(unit, minW, maxW),
+                        // 点输入框外面 = 确认。不写这个，键盘收起后
+                        // 还停在编辑态，滑块就一直是旧值。
+                        onTapOutside: (_) =>
+                            _commitWeightEdit(unit, minW, maxW),
+                      ),
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          value.toStringAsFixed(1),
+                          style: const TextStyle(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          Units.weightSymbol(unit),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+            const SizedBox(width: 14),
+            _weightStepButton(Icons.add_rounded, 0.1, value, minW, maxW),
+          ],
         ),
         Slider(
           value: value,
@@ -818,6 +865,49 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
           ),
       ],
     );
+  }
+
+  /// −/＋ 步进钮。步长 0.1，钳制在滑块的量程内 —— 负数和离谱值
+  /// 从构造上就进不来，不需要保存时再拦一遍。
+  Widget _weightStepButton(
+    IconData icon,
+    double step,
+    double value,
+    double minW,
+    double maxW,
+  ) {
+    return SizedBox(
+      width: 42,
+      height: 42,
+      child: OutlinedButton(
+        onPressed: () => setState(() {
+          _weightDisplay = (value + step).clamp(minW, maxW).toDouble();
+          _error = null;
+        }),
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          shape: const CircleBorder(),
+          side: const BorderSide(color: AppColors.border),
+        ),
+        child: Icon(icon, size: 20, color: AppColors.primary),
+      ),
+    );
+  }
+
+  /// 提交键盘输入。合法才生效并退出编辑；非法（空、负数、乱码）静默
+  /// 回退到原值 —— 这里的体重永远有值（默认值兜底），不存在「空值
+  /// 要不要保存」的问题，也就不必为非法输入弹错误打断用户。
+  void _commitWeightEdit(WeightUnit unit, double minW, double maxW) {
+    if (!_weightEditing) return;
+    final raw = _weightText.text.replaceAll(',', '.').trim();
+    final v = double.tryParse(raw);
+    setState(() {
+      if (v != null && v > 0) {
+        _weightDisplay = v.clamp(minW, maxW).toDouble();
+        _error = null;
+      }
+      _weightEditing = false;
+    });
   }
 
   static double _fallbackWeight(WeightUnit unit, double? lastKg) {

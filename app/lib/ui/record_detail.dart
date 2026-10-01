@@ -61,6 +61,13 @@ class _RecordDetailSheetState extends ConsumerState<_RecordDetailSheet> {
     final summary = recordPayloadSummary(r);
     final backfilled =
         r.createdAt.difference(r.recordedAt).abs() > const Duration(hours: 1);
+    // 录入时间与发生时间同一分钟时不再重复展示：刚记完的那条，
+    // 两个时间一模一样，摆两行只会让人找「哪行才是事情发生的」。
+    final sameMinute = r.createdAt.year == r.recordedAt.year &&
+        r.createdAt.month == r.recordedAt.month &&
+        r.createdAt.day == r.recordedAt.day &&
+        r.createdAt.hour == r.recordedAt.hour &&
+        r.createdAt.minute == r.recordedAt.minute;
 
     // 体重差值：序列升序，取严格早于本记录的最后一条。
     // 时间相等视为自己（差值 0 没有意义），所以用 isBefore 而不是 <=。
@@ -169,22 +176,30 @@ class _RecordDetailSheetState extends ConsumerState<_RecordDetailSheet> {
               ),
             ],
 
+            // 备注属于「内容」，紧跟数值，不让它沉到时间行下面。
+            if ((r.note ?? '').isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                r.note!,
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  height: 1.55,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+
             const SizedBox(height: 20),
             _DetailRow(
               label: L.t('detail.recordedAt'),
               value: compactDateTime(r.recordedAt),
               hint: backfilled ? L.t('detail.backfilledHint') : null,
             ),
-            const SizedBox(height: 10),
-            _DetailRow(
-              label: L.t('detail.createdAt'),
-              value: compactDateTime(r.createdAt),
-            ),
-            if ((r.note ?? '').isNotEmpty) ...[
+            if (!sameMinute) ...[
               const SizedBox(height: 10),
               _DetailRow(
-                label: L.t('detail.note'),
-                value: r.note!,
+                label: L.t('detail.createdAt'),
+                value: compactDateTime(r.createdAt),
               ),
             ],
 
