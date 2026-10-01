@@ -179,7 +179,24 @@ ThemeData buildAppTheme() {
       backgroundColor: AppColors.surface,
       selectedColor: AppColors.primaryLight,
       side: const BorderSide(color: AppColors.border),
-      labelStyle: const TextStyle(fontSize: 12.5),
+      // 两处 color 都必须显式给，否则选中态的文字会看不清。
+      //
+      // ChoiceChip 选中的文字取的是 `secondaryLabelStyle`，不是 `labelStyle`
+      // （见 SDK choice_chip.dart：`labelStyle ?? (selected ? chipTheme.
+      // secondaryLabelStyle : null)`）。原来只写了 `TextStyle(fontSize: 12.5)`
+      // —— 既漏了 `secondaryLabelStyle`，`labelStyle` 也没给颜色，于是选中态
+      // 的文字颜色由 ColorScheme 推导，落到浅色上；白字压 `primaryLight`
+      // (#EDE9FE) 的浅紫底，基本看不见（实测：记一笔弹窗里选中的「用药」
+      // 「口服」看不清）。
+      labelStyle: const TextStyle(
+        fontSize: 12.5,
+        color: AppColors.textSecondary,
+      ),
+      secondaryLabelStyle: const TextStyle(
+        fontSize: 12.5,
+        color: AppColors.primary,
+        fontWeight: FontWeight.w500,
+      ),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadius.chip),
       ),
