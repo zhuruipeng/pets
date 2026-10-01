@@ -605,6 +605,7 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     RecordType.dewormExternal,
     RecordType.medication,
     RecordType.medical,
+    RecordType.grooming,
     RecordType.feeding,
     RecordType.toilet,
     RecordType.note,

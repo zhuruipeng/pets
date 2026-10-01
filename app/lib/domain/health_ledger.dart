@@ -111,6 +111,7 @@ PlanItemType? careKindFromRecordWire(String wire) => switch (wire) {
       // 体检的实际发生就是一次就诊记录。规则集里的 checkup 排期
       // 和这里的 medical 记录是同一件事的两面。
       'medical' => PlanItemType.checkup,
+      'grooming' => PlanItemType.grooming,
       _ => null,
     };
 
@@ -124,6 +125,7 @@ PlanItemType? careKindFromReminderType(String type) => switch (type) {
       'deworm_internal' || 'dewormInternal' => PlanItemType.dewormInternal,
       'deworm_external' || 'dewormExternal' => PlanItemType.dewormExternal,
       'checkup' => PlanItemType.checkup,
+      'grooming' => PlanItemType.grooming,
       _ => null,
     };
 

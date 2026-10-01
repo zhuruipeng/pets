@@ -430,6 +430,7 @@ String recordTypeLabel(RecordType type) => switch (type) {
       RecordType.dewormExternal => L.t('plan.deworm.external'),
       RecordType.medication => L.t('addRecord.type.medication'),
       RecordType.medical => L.t('addRecord.type.medical'),
+      RecordType.grooming => L.t('addRecord.type.grooming'),
       RecordType.feeding => L.t('addRecord.type.feeding'),
       RecordType.toilet => L.t('addRecord.type.toilet'),
       RecordType.note => L.t('addRecord.type.note'),
@@ -442,6 +443,7 @@ IconData recordTypeIcon(RecordType type) => switch (type) {
       RecordType.dewormExternal => Icons.bug_report_outlined,
       RecordType.medication => Icons.medication_liquid_outlined,
       RecordType.medical => Icons.local_hospital_outlined,
+      RecordType.grooming => Icons.shower_outlined,
       RecordType.feeding => Icons.restaurant_outlined,
       RecordType.toilet => Icons.water_drop_outlined,
       RecordType.note => Icons.sticky_note_2_outlined,
@@ -579,6 +581,7 @@ String planTypeLabel(PlanItemType type) => switch (type) {
       PlanItemType.dewormInternal => L.t('plan.deworm.internal'),
       PlanItemType.dewormExternal => L.t('plan.deworm.external'),
       PlanItemType.checkup => L.t('plan.checkup.annual'),
+      PlanItemType.grooming => L.t('plan.grooming'),
     };
 
 /// 台账分类 → 展示名。
@@ -591,6 +594,7 @@ String careKindLabel(PlanItemType kind) => switch (kind) {
       PlanItemType.dewormInternal => L.t('profile.care.dewormInternal'),
       PlanItemType.dewormExternal => L.t('profile.care.dewormExternal'),
       PlanItemType.checkup => L.t('profile.care.checkup'),
+      PlanItemType.grooming => L.t('profile.care.grooming'),
     };
 
 /// 台账分类 → 图标。转发给 [reminderTypeIcon]，同一件事在两处不能长两个样。
@@ -610,6 +614,7 @@ IconData reminderTypeIcon(String type) => switch (type) {
       'dewormInternal' || 'deworm_internal' => Icons.medication_outlined,
       'dewormExternal' || 'deworm_external' => Icons.bug_report_outlined,
       'checkup' => Icons.health_and_safety_outlined,
+      'grooming' => Icons.shower_outlined,
       'medication' => Icons.medication_liquid_outlined,
       'medical' => Icons.local_hospital_outlined,
       'feeding' => Icons.restaurant_outlined,

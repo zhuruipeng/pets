@@ -171,6 +171,7 @@ class L {
     'profile.care.dewormInternal': '体内驱虫',
     'profile.care.dewormExternal': '体外驱虫',
     'profile.care.checkup': '体检与就诊',
+    'profile.care.grooming': '洗澡美容',
     'profile.care.last': '上次 {v}',
     'profile.care.lastNone': '还没有记录',
     'profile.care.next': '下次 {v}',
@@ -253,6 +254,7 @@ class L {
     'addRecord.type.vaccine': '疫苗',
     'addRecord.type.medication': '用药',
     'addRecord.type.medical': '就诊',
+    'addRecord.type.grooming': '洗澡美容',
     'addRecord.type.feeding': '喂食',
     'addRecord.type.toilet': '排便',
     'addRecord.type.note': '笔记',
@@ -309,6 +311,7 @@ class L {
     'plan.deworm.internal': '体内驱虫',
     'plan.deworm.external': '体外驱虫',
     'plan.checkup.annual': '年度体检',
+    'plan.grooming': '洗澡美容',
     'plan.checkup.senior': '老年体检',
 
     // ---- M2.2 编辑档案 ----
@@ -390,6 +393,8 @@ class L {
 
     // ---- M4 手动新建提醒 ----
     'reminder.add': '添加提醒',
+    'reminder.fillPlan': '补全建议排期（{n} 项）',
+    'reminder.fillPlanDone': '已补全 {n} 项',
     'reminder.new': '新建提醒',
     'reminder.edit': '编辑提醒',
     'reminder.type': '类型',
@@ -668,6 +673,7 @@ class L {
     'profile.care.dewormInternal': 'Deworming (internal)',
     'profile.care.dewormExternal': 'Deworming (external)',
     'profile.care.checkup': 'Checkups & visits',
+    'profile.care.grooming': 'Bath & grooming',
     'profile.care.last': 'Last {v}',
     'profile.care.lastNone': 'No record yet',
     'profile.care.next': 'Next {v}',
@@ -751,6 +757,7 @@ class L {
     'addRecord.type.vaccine': 'Vaccine',
     'addRecord.type.medication': 'Medication',
     'addRecord.type.medical': 'Vet visit',
+    'addRecord.type.grooming': 'Grooming',
     'addRecord.type.feeding': 'Feeding',
     'addRecord.type.toilet': 'Toilet',
     'addRecord.type.note': 'Note',
@@ -806,6 +813,7 @@ class L {
     'plan.deworm.internal': 'Deworming (internal)',
     'plan.deworm.external': 'Deworming (external)',
     'plan.checkup.annual': 'Annual checkup',
+    'plan.grooming': 'Bath & grooming',
     'plan.checkup.senior': 'Senior checkup',
 
     // ---- M2.2 edit profile ----
@@ -887,6 +895,8 @@ class L {
 
     // ---- M4 manual reminders ----
     'reminder.add': 'Add reminder',
+    'reminder.fillPlan': 'Add missing schedule ({n})',
+    'reminder.fillPlanDone': 'Added {n} item(s)',
     'reminder.new': 'New reminder',
     'reminder.edit': 'Edit reminder',
     'reminder.type': 'Type',

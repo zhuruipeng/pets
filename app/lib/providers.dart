@@ -407,6 +407,9 @@ class AppActions {
         PlanItemType.dewormInternal => 90,
         PlanItemType.checkup => 365,
         PlanItemType.vaccine => 365,
+        // 洗澡/美容：一个月一次。比疫苗密得多，所以「完成即排下次」在这里
+        // 才是真正有用的那条路径（用户洗一次点一下，下次自动排出来）。
+        PlanItemType.grooming => 30,
       };
 
   /// 写一条记录。

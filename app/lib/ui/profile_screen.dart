@@ -27,7 +27,9 @@ import '../core/units.dart';
 import '../data/models.dart';
 import '../data/repositories/member_repository.dart';
 import '../domain/health_ledger.dart';
-import '../domain/immunization.dart' show Species;
+// PlanItemTypeX 是 wireName 所在的扩展，`show` 列表里漏了它就用不了 wireName。
+import '../domain/immunization.dart'
+    show Species, ruleSetFor, PlanItemTypeX;
 import '../providers.dart';
 import 'avatar_sheet.dart';
 import 'edit_pet_sheet.dart';
@@ -864,6 +866,7 @@ RecordType _recordTypeForCare(PlanItemType kind) => switch (kind) {
       PlanItemType.dewormInternal => RecordType.dewormInternal,
       PlanItemType.dewormExternal => RecordType.dewormExternal,
       PlanItemType.checkup => RecordType.medical,
+      PlanItemType.grooming => RecordType.grooming,
     };
 
 /// 台账一行：图标 + 分类名 + 「上次」+ 「下次」+ 记一笔。
@@ -1256,6 +1259,24 @@ class _FamilyCard extends ConsumerWidget {
 
 // ------------------------------------------------------------------ 提醒计划
 
+/// 规则集排了、但这只宠物还没有的排期类型（wire 名）。
+///
+/// 纯计算，不写库。用途：装新版本后**存量宠物不会自动获得新增的排期项**
+/// （排期只在建档 / 首次补生日时生成），比如这次的「洗澡美容」。
+/// 界面据此提示「可以补全 N 项」，由用户主动点 —— 不做静默重建，
+/// 因为静默重建会把他手动删掉的提醒又变回来。
+Set<String> _missingPlanTypes(Pet pet, List<Reminder> existing) {
+  final birthday = pet.birthday;
+  if (birthday == null) return const <String>{};
+  final plan = ruleSetFor(AppRegion.current).buildPlan(
+    species: pet.species,
+    birthday: birthday,
+    now: DateTime.now(),
+  );
+  final have = existing.map((r) => r.type).toSet();
+  return plan.map((e) => e.type.wireName).toSet().difference(have);
+}
+
 class _RemindersCard extends ConsumerWidget {
   const _RemindersCard({required this.pet});
 
@@ -1293,6 +1314,35 @@ class _RemindersCard extends ConsumerWidget {
       loading: () => const SizedBox.shrink(),
       error: (e, _) => Text('$e'),
       data: (list) {
+        // 规则集排了、但这条宠物还没有的项（例如这次新增的洗澡美容）。
+        // 存量宠物不会自动拥有，给一个**显式**的补全入口 —— 不做静默重建，
+        // 那会把他手动删掉的提醒又变回来。
+        final missing = _missingPlanTypes(pet, list);
+        final fillButton = missing.isEmpty
+            ? null
+            : Padding(
+                padding: const EdgeInsets.only(top: AppSpace.gapS),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: TextButton.icon(
+                    // await 之前先抓住 messenger，别在 await 之后碰 context。
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final n = await ref
+                          .read(appActionsProvider)
+                          .generatePlanFor(pet);
+                      messenger.showSnackBar(SnackBar(
+                        content:
+                            Text(L.tp('reminder.fillPlanDone', {'n': n})),
+                      ));
+                    },
+                    icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                    label:
+                        Text(L.tp('reminder.fillPlan', {'n': missing.length})),
+                  ),
+                ),
+              );
+
         if (list.isEmpty) {
           return Column(
             children: [
@@ -1302,6 +1352,7 @@ class _RemindersCard extends ConsumerWidget {
                     ? '还没有提醒。填了生日会自动生成疫苗和驱虫计划，也可以自己加一条。'
                     : 'No reminders yet. A birthday generates a plan, or add your own.',
               ),
+              if (fillButton != null) fillButton,
               addButton,
             ],
           );
@@ -1335,6 +1386,7 @@ class _RemindersCard extends ConsumerWidget {
                 ],
               ),
             ),
+            if (fillButton != null) fillButton,
             addButton,
           ],
         );

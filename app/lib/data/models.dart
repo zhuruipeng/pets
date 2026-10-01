@@ -38,6 +38,8 @@ enum RecordType {
   dewormExternal,
   medication,
   medical,
+  /// 洗澡 / 剪指甲 / 梳毛等日常护理。
+  grooming,
   feeding,
   toilet,
   note;
@@ -49,6 +51,7 @@ enum RecordType {
         RecordType.dewormExternal => 'deworm_external',
         RecordType.medication => 'medication',
         RecordType.medical => 'medical',
+        RecordType.grooming => 'grooming',
         RecordType.feeding => 'feeding',
         RecordType.toilet => 'toilet',
         RecordType.note => 'note',
@@ -62,6 +65,7 @@ RecordType recordTypeFromWire(String? v) => switch (v) {
       'deworm_external' => RecordType.dewormExternal,
       'medication' => RecordType.medication,
       'medical' => RecordType.medical,
+      'grooming' => RecordType.grooming,
       'feeding' => RecordType.feeding,
       'toilet' => RecordType.toilet,
       _ => RecordType.note,

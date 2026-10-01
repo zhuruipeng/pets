@@ -148,6 +148,7 @@ void main() {
         'profile.care.dewormInternal',
         'profile.care.dewormExternal',
         'profile.care.checkup',
+        'profile.care.grooming',
         'profile.care.last',
         'profile.care.lastNone',
         'profile.care.next',

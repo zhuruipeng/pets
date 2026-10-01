@@ -14,7 +14,7 @@ import '../core/species.dart';
 export '../core/species.dart' show Species;
 
 /// 计划项的类型，与 records.type 对齐。
-enum PlanItemType { vaccine, dewormInternal, dewormExternal, checkup }
+enum PlanItemType { vaccine, dewormInternal, dewormExternal, checkup, grooming }
 
 extension PlanItemTypeX on PlanItemType {
   String get wireName => switch (this) {
@@ -22,6 +22,7 @@ extension PlanItemTypeX on PlanItemType {
         PlanItemType.dewormInternal => 'deworm_internal',
         PlanItemType.dewormExternal => 'deworm_external',
         PlanItemType.checkup => 'checkup',
+        PlanItemType.grooming => 'grooming',
       };
 }
 
@@ -220,6 +221,17 @@ class CnRuleSet extends ImmunizationRuleSet {
               annualAfterWeeks: 364,
               annualIntervalDays: 182,
             ),
+            // 洗澡美容。成年犬一般 4~8 周一次，这里取 30 天。
+            // firstAtWeeks 与 annualAfterWeeks 都填 8：幼犬 8 周龄后才开始排，
+            // 已经成年的宠物 buildPlan 会把起点夹到今天再按 30 天递推。
+            RuleSpec(
+              code: 'grooming_bath',
+              type: PlanItemType.grooming,
+              titleKey: 'plan.grooming',
+              firstAtWeeks: 8,
+              annualAfterWeeks: 8,
+              annualIntervalDays: 30,
+            ),
           ],
         Species.cat => const [
             RuleSpec(
@@ -270,6 +282,15 @@ class CnRuleSet extends ImmunizationRuleSet {
               firstAtWeeks: 364,
               annualAfterWeeks: 364,
               annualIntervalDays: 182,
+            ),
+            // 猫自己会梳理，洗澡频率比狗低得多，取 60 天。
+            RuleSpec(
+              code: 'grooming_bath',
+              type: PlanItemType.grooming,
+              titleKey: 'plan.grooming',
+              firstAtWeeks: 8,
+              annualAfterWeeks: 8,
+              annualIntervalDays: 60,
             ),
           ],
         Species.other => const [
@@ -349,6 +370,17 @@ class IntlRuleSet extends ImmunizationRuleSet {
               annualAfterWeeks: 364,
               annualIntervalDays: 182,
             ),
+            // 洗澡美容。成年犬一般 4~8 周一次，这里取 30 天。
+            // firstAtWeeks 与 annualAfterWeeks 都填 8：幼犬 8 周龄后才开始排，
+            // 已经成年的宠物 buildPlan 会把起点夹到今天再按 30 天递推。
+            RuleSpec(
+              code: 'grooming_bath',
+              type: PlanItemType.grooming,
+              titleKey: 'plan.grooming',
+              firstAtWeeks: 8,
+              annualAfterWeeks: 8,
+              annualIntervalDays: 30,
+            ),
           ],
         Species.cat => const [
             RuleSpec(
@@ -391,6 +423,14 @@ class IntlRuleSet extends ImmunizationRuleSet {
               titleKey: 'plan.checkup.annual',
               firstAtWeeks: 52,
               annualAfterWeeks: 52,
+            ),
+            RuleSpec(
+              code: 'grooming_bath',
+              type: PlanItemType.grooming,
+              titleKey: 'plan.grooming',
+              firstAtWeeks: 8,
+              annualAfterWeeks: 8,
+              annualIntervalDays: 60,
             ),
           ],
         Species.other => const [

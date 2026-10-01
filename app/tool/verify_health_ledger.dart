@@ -43,7 +43,9 @@ void main() {
 
   // ---- 空输入 ----
   final empty = buildCareLedger(facts: const [], schedules: const []);
-  check(empty.length == 4, '空输入应产出 4 行，实际 ${empty.length}');
+  // 5 行 = 疫苗 / 体内驱虫 / 体外驱虫 / 体检 / 洗澡美容（kinds 默认取
+  // PlanItemType.values，所以每加一个排期类型这里就要跟着 +1）。
+  check(empty.length == 5, '空输入应产出 5 行，实际 ${empty.length}');
   check(empty.every((r) => r.isEmpty), '空输入每行都该是 isEmpty');
   check(empty.every((r) => r.nextDueAt == null), '空输入没有排期');
   check(empty.every((r) => !r.isOverdue(now)), '空输入不该说逾期');
