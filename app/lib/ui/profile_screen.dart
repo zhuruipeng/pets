@@ -115,7 +115,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
               ),
-              unselectedLabelStyle: const TextStyle(fontSize: 13.5),
+              // 未选中与选中**同字重**：只靠颜色和指示条区分。
+              // 字重不同（w600 vs 默认 w400）时，拉丁字母宽度会变，
+              // 切换页签时文字会左右微跳 —— 中文看不出，英文版很明显。
+              unselectedLabelStyle: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
               tabs: [for (final k in _tabKeys) Tab(text: L.t(k))],
             ),
           ),
@@ -184,13 +190,15 @@ class _HeroHeader extends ConsumerWidget {
       ),
       padding: const EdgeInsets.fromLTRB(
         AppSpace.page,
-        AppSpace.gapS,
+        4,
         AppSpace.page,
-        AppSpace.gapL,
+        AppSpace.gapM,
       ),
       child: Column(
         children: [
-          // 顶栏：返回位 + 编辑
+          // 顶栏：返回位 + 编辑。
+          // 「返回位」那格 38px 是给以后真返回键留的对称位；现在只为
+          // 让「编辑」不贴左，顺手平衡视觉重量。
           Row(
             children: [
               const SizedBox(width: 38),
@@ -199,8 +207,9 @@ class _HeroHeader extends ConsumerWidget {
                 onPressed: () => showEditPetSheet(context, pet: pet),
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
-                  minimumSize: const Size(0, 34),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  minimumSize: const Size(0, 30),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppRadius.chip),
                   ),
@@ -215,7 +224,7 @@ class _HeroHeader extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpace.gapS),
+          const SizedBox(height: 2),
 
           // 圆照片 + 相机角标
           Stack(
@@ -242,7 +251,7 @@ class _HeroHeader extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpace.gapS),
+          const SizedBox(height: AppSpace.gapXs),
 
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -252,6 +261,7 @@ class _HeroHeader extends ConsumerWidget {
                   pet.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  // Header 上最大的文字就是它 —— 名字是身份页的视觉中心。
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
@@ -272,7 +282,7 @@ class _HeroHeader extends ConsumerWidget {
               color: AppColors.textSecondary,
             ),
           ),
-          const SizedBox(height: AppSpace.gapS),
+          const SizedBox(height: AppSpace.gapXs),
           SoftTag(
             hasOverdue ? L.t('profile.healthAlert') : L.t('profile.healthGood'),
             color: hasOverdue ? AppColors.warning : AppColors.success,
