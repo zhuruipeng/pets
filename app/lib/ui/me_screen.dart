@@ -21,6 +21,7 @@ import '../providers.dart';
 import 'auth_sheet.dart';
 import 'contact_sheet.dart';
 import 'legal_page.dart';
+import 'sheets.dart';
 import 'update_flow.dart';
 import 'widgets.dart';
 
@@ -62,6 +63,31 @@ class MeScreen extends ConsumerWidget {
             InfoRow(
               L.t('me.section.pets'),
               L.isZh ? '共 ${pets.length} 只' : '${pets.length}',
+            ),
+            const RowDivider(),
+            // 「添加宠物」的**常驻入口**。
+            //
+            // 为什么必须放在这：这个按钮原先只在「今天」页底部出现，且带
+            // `pets.length > 1` 的条件；另外三个入口全在**空态**里（没有
+            // 宠物时才渲染）。于是「只有一只宠物」的用户在全 App 都找不到
+            // 加第二只的地方 —— 两处条件把唯一的状态给漏了。
+            // 放在这里与「共 N 只」同屏，语义最直接，且不随数量变化。
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => showAddPetSheet(context, ref),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: Text(L.t('addPet.title')),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
             ),
           ],
         ),
