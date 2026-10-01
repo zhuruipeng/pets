@@ -72,28 +72,33 @@ String? petAgeLabel(DateTime? birthday, DateTime now) {
   return L.isZh ? '$y岁$m个月' : '${y}y ${m}mo';
 }
 
-/// 扩展名 → MIME。只覆盖允许上传的那十来种，其余落 octet-stream。
+/// 扩展名或文件名 → MIME。只覆盖允许上传的那十来种，其余落 octet-stream。
 ///
-/// 手写而不用 mime 包：那个包目前只是传递依赖，直接 import 属于
-/// 「用了没声明的依赖」，上游改依赖树就会突然编译不过。为十来个
-/// 常量引一个包也不划算。
-String mimeOfExt(String? ext) =>
-    switch ((ext ?? '').toLowerCase().replaceFirst('.', '')) {
-      'pdf' => 'application/pdf',
-      'doc' => 'application/msword',
-      'docx' =>
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'xls' => 'application/vnd.ms-excel',
-      'xlsx' =>
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'txt' => 'text/plain',
-      'jpg' || 'jpeg' => 'image/jpeg',
-      'png' => 'image/png',
-      'heic' => 'image/heic',
-      'heif' => 'image/heif',
-      'webp' => 'image/webp',
-      _ => 'application/octet-stream',
-    };
+/// 传完整文件名也行（取最后一个点之后的部分）—— file_selector 只给文件名，
+/// 调用方不必自己再切一遍。手写而不用 mime 包：那个包目前只是传递依赖，
+/// 直接 import 属于「用了没声明的依赖」，上游改依赖树就会突然编译不过。
+/// 为十来个常量引一个包也不划算。
+String mimeOfExt(String? nameOrExt) {
+  final s = (nameOrExt ?? '').toLowerCase();
+  final dot = s.lastIndexOf('.');
+  final ext = dot < 0 ? s : s.substring(dot + 1);
+  return switch (ext) {
+    'pdf' => 'application/pdf',
+    'doc' => 'application/msword',
+    'docx' =>
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls' => 'application/vnd.ms-excel',
+    'xlsx' =>
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'txt' => 'text/plain',
+    'jpg' || 'jpeg' => 'image/jpeg',
+    'png' => 'image/png',
+    'heic' => 'image/heic',
+    'heif' => 'image/heif',
+    'webp' => 'image/webp',
+    _ => 'application/octet-stream',
+  };
+}
 
 /// 文档原件的展示名。
 ///

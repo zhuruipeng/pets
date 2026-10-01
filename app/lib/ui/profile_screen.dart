@@ -16,7 +16,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
@@ -2627,16 +2627,22 @@ class _DocumentsCard extends ConsumerWidget {
   }
 
   Future<void> _pick(BuildContext context, WidgetRef ref) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: kDocumentExtensions,
-      withData: false,
+    // 与记录详情页同款（file_selector 官方插件，理由见那边注释）。
+    final picked = await openFile(
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: L.t('detail.documents'),
+          extensions: kDocumentExtensions,
+        ),
+      ],
     );
-    final file = result?.files.singleOrNull;
-    final path = file?.path;
-    if (file == null || path == null) return;
+    if (picked == null) return;
 
-    if (file.size > kMaxDocumentBytes) {
+    final path = picked.path;
+    if (path.isEmpty) return;
+
+    final size = await File(path).length();
+    if (size > kMaxDocumentBytes) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2653,9 +2659,9 @@ class _DocumentsCard extends ConsumerWidget {
       await ref.read(appActionsProvider).addDocument(
             petId: pet.id,
             sourcePath: path,
-            fileName: file.name,
-            mime: mimeOfExt(file.extension),
-            sizeBytes: file.size,
+            fileName: picked.name,
+            mime: mimeOfExt(picked.name),
+            sizeBytes: size,
           );
       ref.invalidate(petRecordsProvider(pet.id));
       if (!context.mounted) return;

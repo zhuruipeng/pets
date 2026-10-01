@@ -11,7 +11,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -645,19 +645,22 @@ class _DocumentsSection extends ConsumerWidget {
   }
 
   Future<void> _pickAndSave(BuildContext context, WidgetRef ref) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: kDocumentExtensions,
-      // 不要 withData：那会把整个文件读进内存，20 MB 的 PDF 在
-      // 低端机上就是一次 OOM。我们只要路径，自己拷。
-      withData: false,
+    // file_selector（Flutter 官方）而不是 file_picker：后者全系列 8.x 把
+    // compileSdk 34 写死、11.x 在 AGP 9 下编不出代码，两次构建失败都栽在它。
+    // openFile 只回一个路径，不会把文件读进内存 —— 20 MB 的 PDF 在
+    // 低端机上就是一次 OOM，我们要路径自己拷。
+    final picked = await openFile(
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: L.t('detail.documents'),
+          extensions: kDocumentExtensions,
+        ),
+      ],
     );
+    if (picked == null) return;
 
-    final file = result?.files.singleOrNull;
-    if (file == null) return;
-
-    final path = file.path;
-    if (path == null) {
+    final path = picked.path;
+    if (path.isEmpty) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(L.t('doc.pickFailed'))),
@@ -665,7 +668,8 @@ class _DocumentsSection extends ConsumerWidget {
       return;
     }
 
-    if (file.size > kMaxDocumentBytes) {
+    final size = await File(path).length();
+    if (size > kMaxDocumentBytes) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -682,10 +686,10 @@ class _DocumentsSection extends ConsumerWidget {
             petId: petId,
             recordId: recordId,
             sourcePath: path,
-            fileName: file.name,
-            // file_picker 只给扩展名不给 MIME，这里按扩展名推（见 mimeOfExt）。
-            mime: mimeOfExt(file.extension),
-            sizeBytes: file.size,
+            fileName: picked.name,
+            // file_selector 只给文件名不给 MIME，这里按扩展名推（见 mimeOfExt）。
+            mime: mimeOfExt(picked.name),
+            sizeBytes: size,
           );
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

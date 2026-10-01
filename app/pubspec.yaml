@@ -1,7 +1,7 @@
 name: pet_app
 description: 我的宠物 — 宠物健康管理与提醒（中国 + 海外双市场）
 publish_to: 'none'
-version: 0.1.4+6
+version: 0.1.5+7
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -72,25 +72,26 @@ dependencies:
   # （encryptedSharedPreferences）换成自实现 RSA-OAEP + AES-GCM 的那一版，
   # 11.x 新增的是生物识别增强，本 App 用不到。
   flutter_secure_storage: ^10.3.4
-  # ⚠️ **锁在 8.x，别升 11.x**（2026-10-01 实测，构建失败 4m37s）：
-  #   11.0.3 的 android/build.gradle 判断「AGP ≥ 9 就不套 kotlin-android 插件」，
-  #   指望 AGP 9 内置 Kotlin 接管 —— 本机这套（AGP 9.1.0 + Gradle 9.3.1）下
-  #   它的 Kotlin 源码被静默跳过，编译产物只剩 R.class，
-  #   GeneratedPluginRegistrant 找不到 FilePickerPlugin 直接构建失败。
-  #   8.3.7 和其它插件一样无条件套 Kotlin 插件，实测正常。
-  #   11 的入口是 FilePicker.pickFiles(...)（静态），8.x 仍是
-  #   FilePicker.platform.pickFiles(...) —— 升级时两处调用要一起改。
-  file_picker: ^8.3.7
 
   # 文档原件（M8）：给记录挂 PDF / Word / 图片等原件。
   # image_picker 只认系统相册与相机，取不到「下载目录里的化验单 PDF」，
-  # 所以文档走这个包；照片仍然走 image_picker，两条路不合并 ——
-  # 合并后相册那套（权限、裁剪、EXIF）会被文件选择器带偏。
+  # 所以文档走 file_selector（**Flutter 官方**插件，与 image_picker 一家人）。
+  # 入口：openFile(acceptedTypeGroups: [XTypeGroup(extensions: [...])])。
   #
-  # ⚠️ **只存本机**：选到的文件拷进应用文档目录，不上传服务端
+  # ⚠️ **别换回 file_picker**（2026-10-01 两次构建失败都栽在它）：
+  #   - 11.x 的 android/build.gradle 在 AGP ≥ 9 时不套 kotlin-android 插件，
+  #     本机（AGP 9.1.0 + Gradle 9.3.1）下 Kotlin 源码被静默跳过，编译产物
+  #     只剩 R.class → GeneratedPluginRegistrant 找不到类 → 构建失败 4m37s。
+  #   - 8.x 全系列把 compileSdk 34 写死，低于其它插件要求的 36，
+  #     checkReleaseAarMetadata 直接拒绝（FAILED in 1m17s）。
+  #   file_selector 的 android 模块写的是 `compileSdk = flutter.compileSdkVersion`，
+  #   跟着 Flutter 走，没有这两类坑。
+  #
+  # **只存本机**：选到的文件拷进应用文档目录，不上传服务端
   # （见 schema 里 attachments.local_only 与同步触发器的 WHEN 条件）。
   # 打开方式走 share_plus 起系统分享页，不引 PDF 渲染库 —— 那类库动辄
   # +5MB 且要 embed 字体，为一个「能看」的入口不值。
+  file_selector: ^1.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
