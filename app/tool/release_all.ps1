@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   一条命令出包：git pull → flutter test → release.ps1。
 
