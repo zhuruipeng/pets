@@ -8,6 +8,28 @@
 
 ---
 
+## 协作硬约定
+
+### 一、开发完成 = 已推 GitHub
+
+**任何一个功能块改完，代码必须在同一轮里 push 到 `origin/main`，不许留在本地。**
+
+- 不许说「改好了，等你确认再推」—— 推送不等确认，是开发的最后一步
+- 一次交付对应一个提交（或一组语义完整的提交），message 写清 `feat` / `fix` / `docs` / `chore`
+- 推完用 `git ls-remote origin refs/heads/main` **核对 SHA**，别只信 `git push` 的回显
+  （SSH 走最后一步时可能不回显就被 SIGTERM，看着像失败其实已落地）
+- `release.ps1` 抬完版本号**要手动 commit + push** —— 脚本不自动提交，
+  所以 GitHub 上的版本号必须和已出包的 APK 对得上
+- 汇报时说清楚：commit SHA、推没推、还有没有未入库的本地改动
+
+### 二、收尾自检三问
+
+1. `git status --short` 干净吗？（`app/pubspec.yaml` 的版本号最容易漏）
+2. `git log --oneline origin/main..HEAD` 空吗？（本地有提交没推）
+3. README 的进度清单和「待办」跟真实状态对得上吗？
+
+---
+
 ## 快速验证
 
 ```bash

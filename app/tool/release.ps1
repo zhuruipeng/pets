@@ -67,6 +67,10 @@ param(
     # 默认会自动 patch +1，所以「一直是 0.1.0」不会再发生。
     [switch]$NoBumpName,
 
+    # 出包后不自动 commit + push pubspec 的版本号（默认会自动入库并核对远端 SHA）。
+    # 只在「想让版本号改动跟别的改动分开单独提交」时才用。
+    [switch]$NoPush,
+
     # 只算一遍「会变成什么版本」，不写 pubspec、不构建。
     # 想确认抬号逻辑对不对、或只想拿那几行环境变量时用。
     [switch]$DryRun,
@@ -363,3 +367,56 @@ Record "APP_APK_URL=$url"
 Record "APP_NOTES=$notes"
 Record 'APP_MIN_BUILD=0'
 Record '=========================================='
+
+# ---- 6. 版本号入库（提交 + 推送）----
+# 为什么放在最后：抬号写 pubspec 是这个脚本做的事，但**提交与推送不做**，
+# 于是 GitHub 上的版本号会一直停在出包前 —— 2026-10-02 实测踩到：
+# APK 已经是 0.1.7+9，pubspec 改了却没 commit，README 与远端全对不上实际产物。
+# 老板的硬约定是「开发完成 = 已推 GitHub」，那这一步就没有理由不自动做。
+if ($NoPush) {
+    Write-Host ''
+    Write-Host '== 版本号未入库 ==' -ForegroundColor Yellow
+    Write-Host "   pubspec 已是 $newRaw，但没有 commit（-NoPush）。" -ForegroundColor Yellow
+    Write-Host '   记得手动：git add app/pubspec.yaml && git commit -m "chore(release): 版本号抬到 <新号>" && git push' -ForegroundColor DarkGray
+} else {
+    Write-Host ''
+    Write-Host '== 版本号入库 ==' -ForegroundColor Cyan
+
+    $repoRoot = Split-Path -Parent $appDir
+    Push-Location $repoRoot
+    try {
+        $msg = "chore(release): 版本号抬到 $newRaw`n`nrelease.ps1 抬号后自动入库，保证 GitHub 上的版本号与已出包的 APK 一致。`n`n产物：$artifactPath"
+        & git add -- 'app/pubspec.yaml'
+        & git commit -m $msg -- 'app/pubspec.yaml'
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host '   commit 失败（可能没有实际改动），跳过推送。' -ForegroundColor Yellow
+        } else {
+            & git push origin HEAD:refs/heads/main
+            # SSH 走最后一步时可能不回显就被 SIGTERM，看着像失败其实已落地，
+            # 所以一律用 ls-remote 回读远端真值来判断成败（别信 push 的回显）。
+            $remote = (& git ls-remote origin refs/heads/main)
+            $localSha = (& git rev-parse HEAD)
+            if ($remote -match "^([0-9a-f]{40})" -and $Matches[1] -eq $localSha) {
+                Write-Host "   已推送并核对：$($localSha.Substring(0,7))" -ForegroundColor Green
+                Record "入库      : $localSha（已推送 origin/main）"
+            } else {
+                Write-Host '   ⚠️ 推送未确认落地！远端 SHA 与本地不一致。' -ForegroundColor Red
+                Write-Host "      本地 $localSha" -ForegroundColor Red
+                Write-Host "      远端 $($remote -replace '\s+refs/heads/main','')" -ForegroundColor Red
+                Write-Host '      手动重试：git push origin HEAD:refs/heads/main' -ForegroundColor Red
+                Record '入库      : [!] 推送未确认落地，需手动重试'
+            }
+        }
+
+        # 顺手报一下工作区还有没有别的东西没入库 —— 收尾自检第①问。
+        $dirty = & git status --short
+        if ($dirty) {
+            Write-Host ''
+            Write-Host '   工作区还有未入库的改动：' -ForegroundColor Yellow
+            $dirty | ForEach-Object { Write-Host "     $_" -ForegroundColor DarkGray }
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
