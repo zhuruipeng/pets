@@ -1,7 +1,7 @@
 name: pet_app
 description: 我的宠物 — 宠物健康管理与提醒（中国 + 海外双市场）
 publish_to: 'none'
-version: 0.1.7+9
+version: 0.1.8+10
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
