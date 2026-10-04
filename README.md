@@ -292,5 +292,8 @@ App 备案四件套（包名、证书 MD5/SHA-256、域名）见 `docs/store/上
 - [ ] 公安联网备案（ICP 通过后 30 天内，beian.mps.gov.cn）
 - [ ] 软著登记提交（等实名认证通过，程序鉴别材料 + 操作说明书 + 申请表信息三件套已备齐）
 - [ ] ICP 备案号回填进「我的」页展示位（`region.dart` 的 `requiresIcpDisplay` 已预留，拿到号改一行字符串）
-- [ ] 统一官网与 App 的联系方式邮箱（官网 `19663083@qq.com` vs App `zhuruipeng@weiyuantool.com`）
+- [ ] 企业邮箱补 SPF / DMARC（DNSPod 加两条 TXT，审核期间回信别进垃圾箱）
 - [ ] 商店截图按各平台尺寸裁切 + 渠道文案提交
+
+> 联系方式已统一（2026-10-04）：`zhuruipeng@weiyuantool.com` / `17590392859`，
+> 官网页脚与 App 法律页均为这一套，商店审核不会挑出不一致。

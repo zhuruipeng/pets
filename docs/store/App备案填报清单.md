@@ -141,19 +141,25 @@ DN      CN=Weiyuan Tool, OU=Pet App, O=Weiyuan Tool, L=Linyi, ST=Shandong, C=CN
 备案也得重新报。所以 keystore + 密码务必离线备份（`app/android/key.properties` 与
 `upload-keystore.jks`，两者都不进版本库）。
 
-### ⚠️ 联系方式不一致（建议提交前统一）
+### 联系方式（2026-10-04 已统一，官网与 App 一致）
 
-| 位置 | 现在写的 |
+| 项 | 值 |
 |---|---|
-| 官网页脚数据（`/api/site-content`） | `19663083@qq.com` · 电话 `sob8928` |
-| App 隐私政策/ 用户协议 | `zhuruipeng@weiyuantool.com` |
+| 邮箱 | `zhuruipeng@weiyuantool.com`（**企业域名邮箱**，已同时用于官网与 App 法律页） |
+| 电话 | `17590392859`（真实可接听手机号，**不要填短信号码/虚拟号**） |
+| 地址 | 山东省临沂市罗庄区 |
+| 营业时间 | 周一至周六 9:00–18:00 |
 
-商店审核会**实际点开**隐私政策与用户协议看联系方式。两个邮箱不一致容易被问，
-建议**提交前统一成一个**（企业邮箱更规范，且域名邮箱送达率更高）。
+✅ 官网原为 `19663083@qq.com` + 短信号码 `sob8928`，**已全部改成上面这个**。
+商店审核会实际点开隐私政策与用户协议核对联系方式，两边不一致容易被问。
 
-⚠️ 另外 `sob8928` 这个电话看着像**短信号码**（虚拟号），管局要求
-「联系方式需保持能接通状态」且**会电话核实**，虚拟号容易打不通导致驳回。
-建议填真实可接听的手机号。
+⚠️ 企业邮箱 `zhuruipeng@weiyuantool.com` **尚未配置 SPF/DMARC**（DNSPod 里缺这两条 TXT）。
+审核期间审核方回信很可能进垃圾箱 —— 建议在 DNSPod 补上：
+
+| 类型 | 主机 | 值 |
+|---|---|---|
+| TXT | `@` | `v=spf1 include:spf.mail.qq.com ~all` |
+| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:zhuruipeng@weiyuantool.com` |
 
 
 ### 附件材料清单
