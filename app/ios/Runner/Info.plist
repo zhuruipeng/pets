@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Pet App</string>
+	<string>My Pet</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -24,8 +24,23 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>给宠物拍头像与记录照片，照片只保存在本机。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于连接你自己的服务器同步宠物数据，可随时在设置中关闭。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>把导出的健康报告长图保存回相册。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>从相册选照片作为宠物头像或记录附件，照片只保存在本机。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

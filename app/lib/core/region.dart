@@ -28,7 +28,17 @@ class AppRegion {
 
 /// 各区域的行为差异，集中在这里。
 extension RegionBehavior on Region {
-  /// 后端基址。两个区域独立部署，数据不出境。
+  /// 后端基址。两个区域**独立部署、独立数据库**，数据不出境。
+  ///
+  /// 隔离不是靠这一行地址不同实现的 —— 那只是表面。真正的保证是服务端：
+  /// 中国区 `api.pet.weiyuantool.com` 连 `pet` 库（REGION=cn），
+  /// 海外区 `api-intl.weiyuantool.com` 连 `pet_intl` 库
+  /// （REGION=intl），两个数据库在 PostgreSQL 层面就是分开的。
+  /// 见 `server/deploy/07-app-setup-intl.sh`。
+  ///
+  /// ⚠️ **海外区不要改回中国区地址。** 两个区共用一个库的话，
+  /// 海外用户数据就落在境内，与隐私政策「海外用户数据不会回流境内」
+  /// 的承诺直接矛盾 —— 那是 PIPL 要避免的事，且混在一起之后无法审计。
   String get apiBaseUrl => switch (this) {
         Region.cn => const String.fromEnvironment(
             'API_BASE_CN',
@@ -36,7 +46,7 @@ extension RegionBehavior on Region {
           ),
         Region.intl => const String.fromEnvironment(
             'API_BASE_INTL',
-            defaultValue: 'https://api.pet.example.com',
+            defaultValue: 'https://api-intl.weiyuantool.com',
           ),
       };
 

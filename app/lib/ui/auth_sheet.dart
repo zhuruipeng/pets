@@ -645,6 +645,20 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
     if (raw.contains('too many') || raw.contains('429')) {
       return L.isZh ? '请求太频繁，等一会儿再试' : 'Too many requests';
     }
+    // 通道未配置（服务端 503）。这条必须单独翻译 —— 透传英文 detail
+    // 对用户等于「报了个不认识的错」，而它的真实含义是「这个功能现在
+    // 上不了」，需要告诉他下一步做什么而不是发牢骚。
+    if (raw.contains('verification channel is not configured')) {
+      return L.isZh
+          ? '登录服务暂时不可用。短信通道尚未开通，请稍后再试。'
+          : 'Sign-in is temporarily unavailable. The verification channel is '
+              'not set up yet — please try again later.';
+    }
+    if (raw.contains('503') || raw.contains('service unavailable')) {
+      return L.isZh
+          ? '服务器暂时不可用，请稍后再试'
+          : 'Server temporarily unavailable — please try again later';
+    }
     if (raw.contains('invalid phone/email or password') ||
         raw.contains('401')) {
       return L.t('auth.passwordFailed');

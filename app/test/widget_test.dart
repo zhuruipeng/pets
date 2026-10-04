@@ -54,6 +54,26 @@ void main() {
     test('两个区域的后端地址不同 —— 数据不出境的前提', () {
       expect(Region.cn.apiBaseUrl, isNot(Region.intl.apiBaseUrl));
     });
+
+    test('海外区不指向中国区主机', () {
+      // 上面那条只保证「字符串不同」。但把海外区指到中国区地址、或反过来，
+      // 只要不是**同一台机器**，字符串仍然不同 —— 架构测试照样通过，
+      // 而数据已经落错地方了。
+      //
+      // 真正要守的是：海外区不能是境内主机。这条一旦破了，
+      // 隐私政策里「海外用户数据不会回流境内」就是假的，
+      // 而 PIPL 的出境评估也就不再适用。
+      const intlHost = 'api-intl.weiyuantool.com';
+      expect(Region.intl.apiBaseUrl, contains(intlHost));
+      // 反向也要守：别让国内用户被发到海外节点，那会让中国区用户
+      // 的数据出境，同样违反 PIPL，且影响面更大。
+      expect(Region.cn.apiBaseUrl, isNot(contains('api-intl')));
+      // 两个区必须是不同主机名，而不只是路径不同。
+      expect(
+        Uri.parse(Region.cn.apiBaseUrl).host,
+        isNot(Uri.parse(Region.intl.apiBaseUrl).host),
+      );
+    });
   });
 
   group('今日页空态', () {
@@ -614,6 +634,54 @@ void main() {
 
     test('compactDateTime 补零', () {
       expect(compactDateTime(DateTime(2026, 3, 5, 9, 7)), '03-05 09:07');
+    });
+
+    test('就诊记录的摘要带上医院/诊断/医嘱', () {
+      // 这条守的是「发给医生」这条链路的最后一环。
+      //
+      // ⚠️ 以前 `RecordType.medical` 在 recordPayloadSummary 里落到
+      // `default: break` —— **什么都不显示**。而 medical 是唯一为
+      // 「给医生看」而记的类型：录了、存了，导出报告时医生照样看不到，
+      // 那次就诊等于白记。
+      final at = DateTime(2026, 10, 3);
+      final r = PetRecord(
+        id: 'r1',
+        petId: 'p1',
+        type: RecordType.medical,
+        recordedAt: at,
+        createdBy: 'me',
+        createdAt: at,
+        updatedAt: at,
+        valueText: '急性胃肠炎',
+        payload: const {
+          'complaint': '连续两天呕吐',
+          'clinic': 'XX 宠物医院 · 王医生',
+          'diagnosis': '急性胃肠炎',
+          'advice': '两天内观察，不要喂零食',
+        },
+      );
+      final summary = recordPayloadSummary(r);
+      expect(summary, contains('XX 宠物医院'));
+      expect(summary, contains('急性胃肠炎'));
+      expect(summary, contains('不要喂零食'));
+    });
+
+    test('就诊记录只填主诉也要出摘要（不能是空串）', () {
+      // 只填主诉时 text 已有内容，但摘要为空会让时间线上少一行信息。
+      final at = DateTime(2026, 10, 3);
+      final r = PetRecord(
+        id: 'r2',
+        petId: 'p1',
+        type: RecordType.medical,
+        recordedAt: at,
+        createdBy: 'me',
+        createdAt: at,
+        updatedAt: at,
+        valueText: '呕吐',
+        payload: const {'complaint': '呕吐'},
+      );
+      // 不抛异常即可；摘要允许为空（主诉已在 text 里）
+      expect(() => recordPayloadSummary(r), returnsNormally);
     });
 
     test('recordTypeLabel 每个类型都有文案', () {

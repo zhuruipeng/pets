@@ -46,6 +46,13 @@ dependencies:
   fl_chart: ^0.69.0
   share_plus: ^10.0.0
 
+  # 打开法律文本的网页版链接。
+  # 目前只 share_plus 间接依赖它，但 **legal_page.dart 直接 import 了
+  # launchUrl** —— 属于「用了没声明的依赖」。share_plus 哪天升版调整依赖树，
+  # 这里就会突然编译不过，而报错信息（找不到 launchUrl）完全看不出是这个原因。
+  # 显式声明才不会受上游摆布。
+  url_launcher: ^6.3.0
+
   # 记录附件（M3.3）：给用药/就诊等记录挂照片。系统相册/相机，无需自管权限页
   image_picker: ^1.1.2
 
@@ -105,7 +112,13 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/i18n/
+    # ⚠️ 原来这里还声明了 `assets/i18n/`，但那个目录从不存在、也没有任何代码
+    # 读它 —— 界面文案全在 `lib/core/l10n.dart` 的 Dart 字符串表里（`_zh` / `_en`）。
+    # 后果是每次 `flutter pub get` / `flutter test` / `flutter build` 都刷一行
+    #    Error: unable to find directory entry in pubspec.yaml
+    # 而且它会**掩盖真正的资源错误** —— 真正漏打包的 assets 混在这一行里，
+    # 久了就没人当回事了。声明一个不存在的目录属于净负债，直接删掉。
+    #
     # 隐私政策与用户协议（上架要求 App 内可打开）。
     # 源文件在 docs/store/ 下，改完记得复制过来 —— 两处内容必须一致，
     # 商店审核会同时看网页版和 App 内版本。
