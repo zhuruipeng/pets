@@ -237,7 +237,7 @@ class _PetHeroCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region, region.name);
+    final unit = Units.defaultWeightUnit(region);
     final records = ref.watch(petRecordsProvider(pet.id)).valueOrNull;
     final latest = _latestWeight(records);
 
@@ -394,7 +394,7 @@ class _WeekOverview extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region, region.name);
+    final unit = Units.defaultWeightUnit(region);
 
     final walks = ref.watch(petWalksProvider(pet.id)).valueOrNull;
     final records = ref.watch(petRecordsProvider(pet.id)).valueOrNull;
@@ -573,7 +573,7 @@ class _TodayLog extends ConsumerWidget {
     if (today.isEmpty) return const SizedBox.shrink();
 
     const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region, region.name);
+    final unit = Units.defaultWeightUnit(region);
     final rows = today.take(_maxRows).toList();
 
     return Column(

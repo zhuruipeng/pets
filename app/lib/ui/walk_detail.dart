@@ -13,7 +13,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // 路径容器），它和 dart:ui 的 `Path` 同名。不挡掉的话，下面 CustomPaint 里
 // 的 `Path()` 会被解析成 latlong2 那个，`moveTo`/`lineTo` 全部找不到。
 import 'package:latlong2/latlong.dart' hide Path;
-import 'package:share_plus/share_plus.dart';
 
 import '../core/l10n.dart';
 import '../core/region.dart';
@@ -21,6 +20,7 @@ import '../core/theme.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import '../services/share_helper.dart';
 import 'widgets.dart';
 
 Future<void> showWalkDetailSheet(
@@ -46,7 +46,7 @@ class _WalkDetailSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final points = ref.watch(walkPointsProvider(session.id));
     const region = AppRegion.current;
-    final distUnit = Units.defaultDistanceUnit(region, region.name);
+    final distUnit = Units.defaultDistanceUnit(region);
 
     return FractionallySizedBox(
       heightFactor: 0.88,
@@ -145,12 +145,13 @@ class _WalkDetailSheet extends ConsumerWidget {
 
   Future<void> _share(BuildContext context, DistanceUnit unit) async {
     final duration = durationLabel(session.durationS);
-    await Share.share(
-      L.tp('walk.shareText', {
+    await shareText(
+      text: L.tp('walk.shareText', {
         'name': petName ?? '',
         'distance': Units.formatDistance(session.distanceM, unit),
         'duration': duration,
       }),
+      context: context,
     );
   }
 }

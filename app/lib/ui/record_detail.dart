@@ -13,7 +13,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../core/l10n.dart';
 import '../core/region.dart';
@@ -21,6 +20,7 @@ import '../core/theme.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import '../services/share_helper.dart';
 import 'widgets.dart';
 
 /// 从列表进详情。返回被删/改后需要刷新哪些 provider 由列表自己处理，
@@ -54,7 +54,7 @@ class _RecordDetailSheetState extends ConsumerState<_RecordDetailSheet> {
   @override
   Widget build(BuildContext context) {
     const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region, region.name);
+    final unit = Units.defaultWeightUnit(region);
     final r = _record;
 
     final valueLine = recordValueLine(r, unit);
@@ -461,6 +461,7 @@ class _PhotosSection extends ConsumerWidget {
   }
 
   /// 选图来源：拍照 / 相册。选完立刻拷贝落库，失败给 snackbar。
+
   Future<void> _pickAndSave(BuildContext context, WidgetRef ref) async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -659,31 +660,84 @@ class _DocumentsSection extends ConsumerWidget {
     );
   }
 
+  /// 判断异常是不是「用户主动取消选文件」。
+  ///
+  /// iOS 上 file_selector 的取消行为**跨版本不一致**：
+  /// 有的版本返回 `null`，有的抛 `PlatformException(code: 'already_active')`
+  /// 或 `NSInternalInconsistencyException`。不区分的话，用户点「取消」
+  /// 会被显示成「出错了」—— 一次无害的操作被报成故障，下次他就不敢点了。
+  static bool _isPickerCancelled(Object e) {
+    final text = e.toString().toLowerCase();
+    return text.contains('cancel') ||
+        text.contains('already_active') ||
+        text.contains('user_canceled') ||
+        text.contains('inconsistency');
+  }
+
   Future<void> _pickAndSave(BuildContext context, WidgetRef ref) async {
+    // ⚠️ `openFile` 必须在 try 里。
+    //
+    // 踩过的坑：它原先在 try 之外。iOS 上它会抛两类异常 ——
+    // 一是用户取消时插件在部分版本里抛 `NSInternalInconsistencyException`
+    //（而不是返回 null），二是文件选择器本身起不来（无可用 App、
+    // 沙箱路径拿不到）时也抛。原代码这两条路径**静默失败**，
+    // 用户点「添加文档」**什么都不会发生** —— 连报错都没有，
+    // 看起来像按钮坏了。
+    //
     // file_selector（Flutter 官方）而不是 file_picker：后者全系列 8.x 把
     // compileSdk 34 写死、11.x 在 AGP 9 下编不出代码，两次构建失败都栽在它。
     // openFile 只回一个路径，不会把文件读进内存 —— 20 MB 的 PDF 在
     // 低端机上就是一次 OOM，我们要路径自己拷。
-    final picked = await openFile(
-      acceptedTypeGroups: [
-        XTypeGroup(
-          label: L.t('detail.documents'),
-          extensions: kDocumentExtensions,
-        ),
-      ],
-    );
-    if (picked == null) return;
+    String path;
+    String name;
+    try {
+      final picked = await openFile(
+        acceptedTypeGroups: [
+          XTypeGroup(
+            label: L.t('detail.documents'),
+            // ⚠️ 这个扩展名列表在 iOS 上是**硬过滤**：不在列表里的文件
+            // 在选择器里直接不显示。iOS 的「文件」App 里从 iCloud 下来的
+            // 化验单常常是 .heic / .webp，加白名单时要一起考虑。
+            extensions: kDocumentExtensions,
+          ),
+        ],
+      );
+      // null = 用户主动取消，这是正常路径，静默返回。
+      if (picked == null) return;
+      if (picked.path.isEmpty) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(L.t('doc.pickFailed'))),
+        );
+        return;
+      }
+      path = picked.path;
+      name = picked.name;
+    } catch (e) {
+      // 取消在某些版本里是抛异常而不是返回 null，单独识别，
+      // 别把「用户主动取消」显示成「出错了」。
+      final msg = _isPickerCancelled(e)
+          ? L.t('doc.pickCancelled')
+          : L.tp('doc.pickError', {'e': '$e'});
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      return;
+    }
 
-    final path = picked.path;
-    if (path.isEmpty) {
+    // ⚠️ iOS 上 openFile 返回的 path 常常在**临时沙箱目录**里，
+    // 用户选完文件、系统回收前必须拷走。下面任何一步失败都要给用户看，
+    // 不能静默 —— 静默的话表现同样是「点了没反应」。
+    int size;
+    try {
+      size = await File(path).length();
+    } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(L.t('doc.pickFailed'))),
+        SnackBar(content: Text(L.tp('doc.readError', {'e': '$e'}))),
       );
       return;
     }
 
-    final size = await File(path).length();
     if (size > kMaxDocumentBytes) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -701,9 +755,9 @@ class _DocumentsSection extends ConsumerWidget {
             petId: petId,
             recordId: recordId,
             sourcePath: path,
-            fileName: picked.name,
+            fileName: name,
             // file_selector 只给文件名不给 MIME，这里按扩展名推（见 mimeOfExt）。
-            mime: mimeOfExt(picked.name),
+            mime: mimeOfExt(name),
             sizeBytes: size,
           );
       if (!context.mounted) return;
@@ -772,7 +826,11 @@ class _DocumentTile extends ConsumerWidget {
   Future<void> _open(BuildContext context) async {
     final path = attachment.localPath;
     if (path == null) return;
-    await Share.shareXFiles([XFile(path)], subject: attachmentTitle(attachment));
+    await shareFiles(
+      files: [XFile(path)],
+      subject: attachmentTitle(attachment),
+      context: context,
+    );
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {

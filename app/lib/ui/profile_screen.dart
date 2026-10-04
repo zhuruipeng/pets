@@ -15,11 +15,14 @@ library;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+// Clipboard：导出失败时把异常详情复制出来。侧载包在真机上跑，
+// 开发者不一定连着 Xcode，拿不到控制台日志 —— 这是唯一的捞异常办法。
+// ignore: unused_import
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../core/feature_flags.dart';
 import '../core/l10n.dart';
@@ -35,6 +38,7 @@ import '../domain/health_ledger.dart';
 import '../domain/immunization.dart'
     show Species, ruleSetFor, PlanItemTypeX;
 import '../providers.dart';
+import '../services/share_helper.dart';
 import 'avatar_sheet.dart';
 import 'edit_pet_sheet.dart';
 import 'lost_card.dart';
@@ -349,7 +353,7 @@ class _InfoTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region, region.name);
+    final unit = Units.defaultWeightUnit(region);
     final series = ref.watch(weightSeriesProvider(pet.id)).valueOrNull;
     final latestWeight =
         (series == null || series.isEmpty) ? null : series.last.kg;
@@ -508,20 +512,33 @@ class _InfoTab extends ConsumerWidget {
         // 导出健康报告：档案 + 台账 + 体重 + 最近记录画成一张彩色长图，
         // 分享给兽医。放在这一组是因为它同样是「低频但重要」的动作。
         Center(
-          child: OutlinedButton.icon(
-            onPressed: () => _exportReport(context, ref, pet),
-            icon: const Icon(Icons.share_outlined, size: 17),
-            label: Text(L.t('report.action')),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              side: const BorderSide(color: AppColors.border),
-              minimumSize: const Size(0, 42),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.tile),
+          child: Builder(
+            // ⚠️ 这个 Builder 不是多余的：iPad 上唤起分享面板必须锚定一个
+            // **可见的源视图**，share_plus 缺 `sharePositionOrigin` 会直接抛
+            // `PlatformException: sharePositionOrigin: argument must be set`
+            // （手机上也抛，UIActivityViewController 的通用要求）。
+            // 传外层的 page context 也能跑，但面板会从页面左上角弹出；
+            // 传按钮自己的 context 才符合「从这个按钮弹出来」的直觉。
+            builder: (buttonContext) => OutlinedButton.icon(
+              onPressed: () => _exportReport(
+                buttonContext,
+                ref,
+                pet,
+                shareOrigin: originOf(buttonContext),
               ),
-              textStyle: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+              icon: const Icon(Icons.share_outlined, size: 17),
+              label: Text(L.t('report.action')),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.border),
+                minimumSize: const Size(0, 42),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.tile),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -568,17 +585,49 @@ class _InfoTab extends ConsumerWidget {
   ///
   /// 成功不需要额外提示 —— 系统分享面板弹出来本身就是反馈。但**失败必须说**：
   /// 登录页刚踩过「错误提示被弹窗挡住、用户以为点了没反应」的坑，别再来一次。
+  ///
+  /// ⚠️ 原来这里是 `catch (_)`，把真实异常整个丢掉了 —— 界面上只弹一句
+  /// "导出失败，请重试"，开发者在真机上没有任何线索可查。**iOS 上导出失败过一次，
+  /// 就是因为这个裸捕获**。现在把异常和栈一起打出来，失败原因在日志里一目了然。
   static Future<void> _exportReport(
     BuildContext context,
     WidgetRef ref,
-    Pet pet,
-  ) async {
+    Pet pet, {
+    Rect? shareOrigin,
+  }) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await ref.read(appActionsProvider).exportPetReport(pet);
-    } catch (_) {
-      messenger.showSnackBar(SnackBar(content: Text(L.t('report.failed'))));
+      await ref
+          .read(appActionsProvider)
+          .exportPetReport(pet, shareOrigin: shareOrigin ?? originOf(context));
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('❌ [exportPetReport] 失败：$e\n$st');
+      debugPrint('❌ [exportPetReport] 失败：$e');
+      debugPrintStack(stackTrace: st, label: '[exportPetReport]');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(L.t('report.failed')),
+          // 真机排查时能直接把详情复制出来，不用截屏。
+          action: SnackBarAction(
+            label: L.t('common.copyDetail'),
+            onPressed: () => _copyDetail(context, e, st),
+          ),
+        ),
+      );
     }
+  }
+
+  /// 把异常与栈复制到剪贴板。
+  ///
+  /// 侧载包在真机上跑，开发者不一定连着 Xcode —— 拿不到控制台日志。
+  /// 让用户能自己把详情捞出来，这是唯一在没有 Xcode 的情况下拿到异常的办法。
+  static Future<void> _copyDetail(BuildContext context, Object e, StackTrace st) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await Clipboard.setData(
+      ClipboardData(text: '[exportPetReport] $e\n\n$st'),
+    );
+    messenger.showSnackBar(SnackBar(content: Text(L.t('common.detailCopied'))));
   }
 
   /// 基本信息行：没填的字段直接跳过，不摆「--」。
@@ -1569,7 +1618,7 @@ class _WalksCard extends ConsumerWidget {
     final walks = ref.watch(petWalksProvider(petId)).valueOrNull ??
         const <WalkSession>[];
     const region = AppRegion.current;
-    final unit = Units.defaultDistanceUnit(region, region.name);
+    final unit = Units.defaultDistanceUnit(region);
 
     if (walks.isEmpty) {
       return _PlainHint(
@@ -2703,7 +2752,11 @@ class _DocumentLine extends StatelessWidget {
       onTap: () async {
         final p = attachment.localPath;
         if (p == null) return;
-        await Share.shareXFiles([XFile(p)], subject: name);
+        await shareFiles(
+        files: [XFile(p)],
+        subject: name,
+        context: context,
+      );
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpace.gapS),

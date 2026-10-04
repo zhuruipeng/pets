@@ -12,6 +12,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
+// 文档打不开时的兜底：打开网页版。只用到两个符号，所以用 show 收窄。
+import 'package:url_launcher/url_launcher.dart' show launchUrl, LaunchMode;
 
 import '../core/l10n.dart';
 import '../core/theme.dart';
@@ -29,11 +31,32 @@ class _LegalPage extends StatelessWidget {
 
   final LegalDoc doc;
 
-  /// 中文区用中文文本；海外版暂时也用它（英文译文未定稿前，
-  /// 打开一个空白页比显示中文更糟 —— 商店审核会当成「未提供」）。
-  String get _asset => switch (doc) {
-        LegalDoc.privacy => 'assets/legal/privacy.zh.md',
-        LegalDoc.terms => 'assets/legal/terms.zh.md',
+  /// 按当前语言选文本：中文区中文，海外区英文。
+  ///
+  /// 以前这里海外版也用中文，注释的理由是「英文译文未定稿前，打开空白页
+  /// 比显示中文更糟」。现在 `privacy.en.md` / `terms.en.md` 已定稿，
+  /// 那条理由不再成立 —— 继续给海外用户看中文，商店审核会判为
+  /// 「未提供本地化隐私政策」而拒审。
+  ///
+  /// 落回中文的兜底：万一打包时漏了 .en 文件（资源被打进包是编译期的事，
+  /// 漏了运行期才发现），至少还能显示中文而不是崩在空白页。
+  String get _asset {
+    final suffix = L.isZh ? 'zh' : 'en';
+    return switch (doc) {
+      LegalDoc.privacy => 'assets/legal/privacy.$suffix.md',
+      LegalDoc.terms => 'assets/legal/terms.$suffix.md',
+    };
+  }
+
+  /// 文档打不开时的兜底链接。
+  ///
+  /// **必须带 `?lang=en`**：不带的话海外用户点过去看到的是中文页，
+  /// 跟他刚才在 App 里看的英文对不上，反而更困惑。
+  String get _webFallback => switch (doc) {
+        LegalDoc.privacy =>
+          'https://api.pet.weiyuantool.com/legal/privacy${L.isZh ? '' : '?lang=en'}',
+        LegalDoc.terms =>
+          'https://api.pet.weiyuantool.com/legal/terms${L.isZh ? '' : '?lang=en'}',
       };
 
   String get _title => switch (doc) {
@@ -52,16 +75,26 @@ class _LegalPage extends StatelessWidget {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
-                child: Text(
-                  L.isZh
-                      ? '文档暂时打不开，请稍后重试。\n也可以到 weiyuantool.com 查看。'
-                      : 'Document unavailable. Please try again later.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    height: 1.7,
-                    color: AppColors.textSecondary,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      L.isZh ? '文档暂时打不开，请稍后重试。' : 'The document could not be opened.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.7,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // 网址做成可点的：写「请到某某网站查看」而没有链接，
+                    // 用户得自己抄进浏览器 —— 兜底提示的价值折半。
+                    TextButton(
+                      onPressed: () => _openWebFallback(context),
+                      child: const Text('weiyuantool.com'),
+                    ),
+                  ],
                 ),
               ),
             );
@@ -73,6 +106,21 @@ class _LegalPage extends StatelessWidget {
         },
       ),
     );
+  }
+
+  /// 打开网页版的对应文档。
+  ///
+  /// 用 `launchUrl` 而不是让用户复制：兜底提示的价值就在于「一键看到」。
+  /// 失败（没装 url_launcher 之外的东西 / 系统拒绝）时**静默**：
+  /// 这已经在错误兜底路径上了，再弹一个错误只会套娃。
+  Future<void> _openWebFallback(BuildContext context) async {
+    final uri = Uri.tryParse(_webFallback);
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // 兜底路径里再报错只会让用户更困惑，静默即可。
+    }
   }
 }
 

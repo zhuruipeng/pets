@@ -6,10 +6,12 @@ library;
 
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart' show XFile;
 import 'package:uuid/uuid.dart';
+import '../services/share_helper.dart';
 
 import 'core/region.dart';
 import 'core/units.dart';
@@ -919,7 +921,12 @@ class AppActions {
   /// 数据源与档案页**完全一致**（同一批 provider + 同一份 [ledgerInputs]），
   /// 所以报告上的台账不会和页面上看到的对不上 —— 那是最让人困惑的一种错。
   /// 返回成图字节数，供调用方给「已生成」反馈。
-  Future<int> exportPetReport(Pet pet) async {
+  ///
+  /// ⚠️ [shareOrigin] 是 iPad 必需项：share_plus 在 iPad 上没有它会直接抛
+  /// `PlatformException: sharePositionOrigin: argument must be set`。
+  /// iPhone 上同样会抛（UIActivityViewController 的通用要求）。
+  /// 传**触发分享的那个按钮**的 Rect，别传 `Rect.zero`（也抛，报 must be non-zero）。
+  Future<int> exportPetReport(Pet pet, {Rect? shareOrigin}) async {
     final records = await ref.read(petRecordsProvider(pet.id).future);
     final reminders = await ref.read(petRemindersProvider(pet.id).future);
     final weights = await ref.read(weightSeriesProvider(pet.id).future);
@@ -937,7 +944,7 @@ class AppActions {
       weightSeries: weights,
       records: records,
       now: DateTime.now(),
-      weightUnit: Units.defaultWeightUnit(region, region.name),
+      weightUnit: Units.defaultWeightUnit(region),
     );
 
     final png = await renderPetReportPng(report);
@@ -948,9 +955,10 @@ class AppActions {
     final file = File('${dir.path}/health-report-${pet.id}.png');
     await file.writeAsBytes(png, flush: true);
 
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'image/png')],
+    await shareFiles(
+      files: [XFile(file.path, mimeType: 'image/png')],
       subject: pet.name,
+      origin: shareOrigin,
     );
     return png.length;
   }

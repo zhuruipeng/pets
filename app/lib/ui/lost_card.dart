@@ -26,6 +26,7 @@ import '../core/traits.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import '../services/share_helper.dart';
 import 'widgets.dart';
 
 Future<void> showLostCardSheet(BuildContext context, Pet pet) {
@@ -134,7 +135,7 @@ class _LostCardSheetState extends ConsumerState<_LostCardSheet> {
                       ? null
                       : Units.formatWeight(
                           latestWeight,
-                          Units.defaultWeightUnit(AppRegion.current, AppRegion.current.name),
+                          Units.defaultWeightUnit(AppRegion.current),
                         ),
                   user: user,
                 ),
@@ -266,9 +267,14 @@ class _LostCardSheetState extends ConsumerState<_LostCardSheet> {
       final file = File(p.join(dir.path, 'lost_${widget.pet.id}.png'));
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
 
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'image/png')],
+      // ⚠️ 上面的 await 之后页面可能已被 pop，此时再用 context 取锚点会抛。
+      // 分享面板本身不需要活着 —— origin 只用来定位弹窗起点，拿不到就跳过。
+      final anchor = mounted ? originOf(context) : null;
+      await shareFiles(
+        files: [XFile(file.path, mimeType: 'image/png')],
         subject: L.tp('lost.shareSubject', {'name': widget.pet.name}),
+        // iPad 必须有源视图锚点，缺了会抛 sharePositionOrigin 异常。
+        origin: anchor,
       );
     } catch (_) {
       if (mounted) {

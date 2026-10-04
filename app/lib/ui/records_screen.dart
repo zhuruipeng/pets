@@ -355,7 +355,7 @@ class WeightChartCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final series = ref.watch(weightSeriesProvider(petId));
     const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region, region.name);
+    final unit = Units.defaultWeightUnit(region);
 
     return series.when(
       loading: () => const SizedBox.shrink(),
@@ -635,7 +635,7 @@ class RecordRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     const region = AppRegion.current;
-    final wUnit = Units.defaultWeightUnit(region, region.name);
+    final wUnit = Units.defaultWeightUnit(region);
     final r = record;
 
     // 补录判定：事件时间与入库时间差超过 1 小时。
