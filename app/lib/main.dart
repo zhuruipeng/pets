@@ -10,13 +10,18 @@
 /// 授权率会高得多。见 ui/sheets.dart 的 _AddPetSheetState._submit。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'core/l10n.dart';
+import 'core/region.dart';
 import 'core/theme.dart';
 import 'data/db/app_database.dart';
 import 'providers.dart';
+import 'services/crash_log.dart';
 import 'services/notification_service.dart';
 import 'ui/me_screen.dart';
 import 'ui/profile_screen.dart';
@@ -32,9 +37,68 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 /// 首帧之前来的通知点击先暂存，等 UI 起来再弹。
 String? _pendingReminderId;
 
+/// 入口。
+///
+/// ⚠️ **整个流程包在 `runZonedGuarded` 里，不是只包 runApp。**
+///
+/// 未 await 的 Future 里抛出的异常，`FlutterError.onError` 与
+/// `PlatformDispatcher.onError` **都抓不到** —— 只有 zone 能接。
+/// 而「用户点了没反应」这类问题恰好几乎全是这一类：
+/// 按钮 `onPressed` 里 `await` 了一个会抛的操作、没人 catch，
+/// 于是错误消失得干干净净，日志里什么都没有。
+///
+/// 我在排查「documents 没反应」时踩过这个：两个 onError 都装上了，
+/// 异常仍然静默，因为 `openFile()` 抛在 await 链里、没被 try 覆盖。
+/// 所以这条边界必须在这里守住，**不是**在每个按钮上补 try。
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 崩溃捕获要在任何业务代码之前装好：数据库打开、通知初始化都可能抛，
+  // 晚一步这些异常就漏了。
+  CrashLog.instance.installGlobalHandlers();
+  await CrashLog.instance.init();
+  // 版本**运行时读**，不在编译期写死：侧载包会重装同一版本号下的新构建，
+  // 硬编码值会和用户实际装的包对不上，排查时「我这边是最新版」就废了。
+  unawaited(_stampVersion());
+
+  // 第三道防线：zone 兜底。
+  runZonedGuarded(
+    () async => _bootstrap(),
+    (error, stack) {
+      debugPrint('[zone] 未捕获异常：$error\n$stack');
+      unawaited(
+        CrashLog.instance.record(
+          CrashEntry(
+            at: DateTime.now(),
+            kind: 'zone',
+            message: error.toString(),
+            stack: stack.toString(),
+            context: const {},
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// 读取真实版本号补进崩溃日志。
+///
+/// 失败就算了 —— 版本信息缺失不该影响启动，且包内一定能读到，
+/// 读不到说明环境异常，记一条日志就够了。
+Future<void> _stampVersion() async {
+  try {
+    final info = await PackageInfo.fromPlatform();
+    CrashLog.instance.setAppInfo(
+      version: '${info.version}+${info.buildNumber}',
+      region: AppRegion.current.name,
+    );
+  } catch (e) {
+    debugPrint('[crash_log] 读版本失败：$e');
+  }
+}
+
+/// 启动流程。与 [main] 分开是因为要整段被 zone 包住。
+Future<void> _bootstrap() async {
   // 数据库先就位，避免首帧闪一下空态。
   await AppDatabase.instance.open();
   await NotificationService.instance.init();

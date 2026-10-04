@@ -239,6 +239,33 @@ class SyncApi {
     );
   }
 
+  /// 提交一条反馈。
+  ///
+  /// **只在用户主动点「提交」时调用**，不做自动上报 ——
+  /// 自动上报会在用户毫不知情时把崩溃数据传出去，
+  /// 那与隐私政策里「不做数据上报」的承诺冲突。
+  ///
+  /// 失败时抛 [SyncApiException]，由调用方决定怎么提示。
+  /// 提交内容**不含任何账号信息**（没有手机号、没有宠物名），
+  /// 崩溃上下文里只有 App 版本、区域、平台。
+  Future<void> submitFeedback({
+    required String message,
+    String kind = 'manual',
+    String? appVersion,
+    String? region,
+    String? platform,
+    String? stack,
+  }) async {
+    await _post('/feedback', {
+      'message': message,
+      'kind': kind,
+      if (appVersion != null) 'app_version': appVersion,
+      if (region != null) 'region': region,
+      if (platform != null) 'platform': platform,
+      if (stack != null) 'stack': stack,
+    });
+  }
+
   Future<AuthSession> verifyCode({
     required String channel,
     required String target,

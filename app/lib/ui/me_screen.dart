@@ -20,6 +20,7 @@ import '../data/sync/sync_api.dart';
 import '../providers.dart';
 import 'auth_sheet.dart';
 import 'contact_sheet.dart';
+import 'feedback_page.dart';
 import 'legal_page.dart';
 import 'sheets.dart';
 import 'update_flow.dart';
@@ -125,8 +126,8 @@ class MeScreen extends ConsumerWidget {
               ),
               InfoRow(
                 L.t('me.build.units'),
-                '${Units.defaultWeightUnit(region, region.name).name} / '
-                    '${Units.defaultDistanceUnit(region, region.name).name}',
+                '${Units.defaultWeightUnit(region).name} / '
+                    '${Units.defaultDistanceUnit(region).name}',
               ),
             ],
           ),
@@ -228,6 +229,12 @@ class MeScreen extends ConsumerWidget {
                         : 'v${info.version}';
                 return InfoRow(L.t('me.version'), text);
               },
+            ),
+            const RowDivider(),
+            _LinkRow(
+              icon: Icons.feedback_outlined,
+              label: L.t('me.feedback'),
+              onTap: () => showFeedbackSheet(context),
             ),
             const RowDivider(),
             _LinkRow(
