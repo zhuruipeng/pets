@@ -164,13 +164,46 @@ App 备案和网站备案是**两件事**，但好消息是**可以复用**。
 
 | 字段 | 填什么 |
 |---|---|
-| 应用运行平台 | **安卓**（iOS 版尚未构建，暂不填） |
+| 应用运行平台 | **安卓**（iOS 版尚未构建，且 iOS 公钥必须苹果证书才能出，**先不勾**） |
 | 域名 | `api.pet.weiyuantool.com`（实名须与备案主体一致） |
 | APP 包名 | `com.weiyuantool.pet_app` |
-| 公钥 | 留空（安卓不需要） |
+| **公钥** | 见下方「公钥怎么填」 |
 | 签名 MD5 值 | `a19d5c2af3bb7387047a89ec54a49158` |
 
 填完点**「验证」**——系统会拿这个包名 + MD5 反查市场已有包，验证通过才继续。
+
+### 公钥怎么填（2026-10-04 实测踩坑）
+
+⚠️ **输入框只接受「字母大小写 + 数字 + `+` `-` `=` `/` `,`」，不支持中文。**
+**所以绝对不能填 Base64** —— Base64 含 `+` `/` `=` 与换行，会被拒（实测报红）。
+
+**填「十六进制」格式**（我已从 `upload-keystore.jks` 的 `upload` 别名提取，512 字符 =2048 位 RSA 模数）：
+
+```
+C7338140AFD58D780DE8AD4CC36D77813C964906CBB52062A072CEB4917E276DBB4A6AE80A0C4C2A86DF8B57D5919E458D108853E0EABFD647CC836ED8DADF007BF852CBA740D8893232887046E8782E11578293CA667AB86B8FB09CD8A200F0103F3286313F3D9EFC16F25E957DE72B49A05BCBB940FC532E950B7298EDE1AE76E4F8EE2BD674563F0F8EF5F3E4109412907D5DF9D2F732C0D60A3EB76086AA24A8E77D711565381F31D98D12F76AB617F342D807E51859B21052E398DB662EB2ACF87222A922879AA273CE8D9B805116DFF232A3FF010FC850126545B7208D66D2E85F74A36963011D4B3F61D2A4876F2B38A5C395BAEB3B88181504EEA063
+```
+
+⚠️ **公钥是公钥，不是私钥。** 腾讯云要的是签名证书里的 RSA 公钥（用于校验签名），
+这是公开信息，填进备案系统安全。**任何情况下都不能给私钥。**
+
+**换签名后这三个数（公钥 / SHA-1 / MD5）全部会变**，备案信息也要跟着做变更。
+
+自己重取的方法（换机器/换证书后）：
+
+```bash
+KS="app/android/app/upload-keystore.jks"      # 注意：不是 key.properties 里的相对路径基准
+PROPS="app/android/key.properties"
+ALIAS=$(grep '^keyAlias=' "$PROPS" | cut -d= -f2-)   # ⚠️ 字段名是 keyAlias，不是 storeAlias
+PASS=$(grep '^storePassword=' "$PROPS" | cut -d= -f2-)
+keytool -export -rfc -keystore "$KS" -alias "$ALIAS" -storepass "$PASS" -file cert.pem
+openssl x509 -in cert.pem -noout -modulus | sed 's/^Modulus=//' | tr 'a-f' 'A-F'
+```
+
+⚠️ 顺带核一遍指纹，确认 keystore 找对了（应与 `apksigner` 从 APK 读出的一致）：
+
+```bash
+keytool -list -v -keystore "$KS" -alias "$ALIAS" -storepass "$PASS" | grep -iE "SHA1:|SHA256:"
+```
 
 ### 服务补充材料（第 3 步最后一段）
 
