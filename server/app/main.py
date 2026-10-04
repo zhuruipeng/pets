@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import auth, members, sync, unified
+from . import auth, feedback, members, sync, unified
 from .config import Settings, get_settings
 from .db import get_session, init_db
 from .models import Pet
@@ -52,6 +52,8 @@ app = FastAPI(
 # 已经上线的客户端调的就是这些无前缀路径，改了等于强制所有人升级。
 API_V1 = "/api/v1"
 app.include_router(auth.router, prefix=API_V1)
+# 用户反馈。**不存库**，只转发到开发者邮箱 —— 理由见 feedback.py 头部。
+app.include_router(feedback.router, prefix=API_V1)
 app.include_router(unified.router, prefix=API_V1)
 app.include_router(sync.router, prefix=API_V1)
 app.include_router(members.router, prefix=API_V1)
@@ -70,10 +72,16 @@ LEGAL_DIR = Path(__file__).resolve().parent.parent / "legal"
 # URL 段 → 文件名。**必须是白名单**：这段路径来自用户输入，
 # 直接拼进 file path 就是目录穿越（`/legal/../app/config.py` 一类）。
 # 用字典查表顺带把「URL 里出现 .html 后缀」换成干净的短链接。
+#
+# key 是「页面 + 语言」，语言默认 zh —— 不带 `?lang=en` 的请求行为与以前完全一致，
+# 商店后台里原来填的中文链接不会因为这次改动而 404。
 LEGAL_PAGES = {
     "privacy": "privacy-policy.html",
     "terms": "terms-of-use.html",
     "account-deletion": "account-deletion.html",
+    "privacy:en": "privacy-policy.en.html",
+    "terms:en": "terms-of-use.en.html",
+    "account-deletion:en": "account-deletion.en.html",
 }
 
 # 常见写法都收进来，省得商店后台填错一个后缀就 404。
@@ -87,30 +95,68 @@ LEGAL_ALIASES = {
     "account_deletion": "account-deletion",
 }
 
+# 英文文件没生成出来时**回落到中文，而不是 404**。
+#
+# 为什么不用 404：商店审核开着英文链接拿不到页面，会判定「未提供」，
+# 直接拒审。而这里回落至少还有一份可读的文本（语言不对，但内容在），
+# 是个明显更好看的失败。
+LEGAL_EN_FALLBACK = {
+    "privacy:en": "privacy",
+    "terms:en": "terms",
+    "account-deletion:en": "account-deletion",
+}
 
-def resolve_legal_slug(slug: str) -> str | None:
+
+def resolve_legal_slug(slug: str, lang: str = "zh") -> str | None:
     """把 URL 段规整成白名单里的键；不认就返回 None（调用方回 404）。
 
     容忍大小写、`.html` 后缀与连字符/下划线两种写法，因为这几个变体
     在不同的商店后台输入框里都出现过。规整完仍然必须在白名单里。
+
+    `lang` 只认 `en` 与 `zh`（大小写不敏感），其它值按 zh 处理 ——
+    用它拼文件名之前必须落到这两个值之一，否则 `?lang=../../etc/passwd`
+    就能拼出穿越路径。
     """
     s = (slug or "").strip().lower()
     if s.endswith(".html"):
         s = s[: -len(".html")]
     s = LEGAL_ALIASES.get(s, s)
-    return s if s in LEGAL_PAGES else None
+    if s not in LEGAL_PAGES and f"{s}:zh" in LEGAL_PAGES:
+        s = f"{s}:zh"
+    if s not in LEGAL_PAGES:
+        return None
+
+    want_en = (lang or "zh").strip().lower() == "en"
+    if want_en and ":" not in s:
+        en_key = f"{s}:en"
+        if en_key in LEGAL_PAGES:
+            return en_key
+        return s  # 英文版缺失 → 回落中文
+    return s
 
 
 @app.get("/legal/{slug}", response_class=HTMLResponse, tags=["meta"])
-def legal_page(slug: str) -> HTMLResponse:
-    """隐私政策 / 用户协议 / 注销说明。纯静态，不读数据库、不涉用户数据。"""
-    key = resolve_legal_slug(slug)
+def legal_page(slug: str, lang: str = "zh") -> HTMLResponse:
+    """隐私政策 / 用户协议 / 注销说明。纯静态，不读数据库、不涉用户数据。
+
+    `?lang=en` 出英文版（给海外版 App 与商店后台填英文链接用）；
+    不带或传其它值一律中文 —— `lang` 只在 resolve_legal_slug 里归一化到
+    `zh` / `en` 两个值之后才参与拼路径。
+    """
+    key = resolve_legal_slug(slug, lang)
     if key is None:
         raise HTTPException(status_code=404, detail="page not found")
 
     path = LEGAL_DIR / LEGAL_PAGES[key]
     if not path.is_file():
-        # 文件没被打进镜像（比如 Dockerfile 只 COPY 了 app/）时，
+        # 英文文件没进镜像时回落中文（商店审核宁可看到语言不对的内容，
+        # 也不要 404 —— 404 会被判成「未提供隐私政策」）。
+        fb = LEGAL_EN_FALLBACK.get(key)
+        if fb and fb != key and (LEGAL_DIR / LEGAL_PAGES[fb]).is_file():
+            return HTMLResponse(
+                (LEGAL_DIR / LEGAL_PAGES[fb]).read_text(encoding="utf-8")
+            )
+        # 文件根本没被打进镜像（比如 Dockerfile 只 COPY 了 app/）时，
         # 503 比 404 准确：不是「这个页面不存在」，是「这个部署缺文件」。
         # 商店审核遇到 404 会认为你没提供，遇到 503 至少知道是临时故障。
         raise HTTPException(status_code=503, detail="legal page unavailable")

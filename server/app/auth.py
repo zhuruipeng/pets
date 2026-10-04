@@ -11,6 +11,12 @@
 
 from __future__ import annotations
 
+import logging
+import smtplib
+from email.header import Header
+from email.mime.text import MIMEText
+from email.utils import formataddr, parseaddr
+
 import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -31,6 +37,30 @@ from .sync_logic import (
 )
 
 router = APIRouter(tags=["auth"])
+
+# 邮件发送的日志。
+#
+# ⚠️ **必须显式设 level，否则成功日志会被静默丢弃。**
+#
+# 踩过的坑：gunicorn worker 里没有给应用配 logging handler，
+# root logger 的默认级别是 **WARNING**，于是 `log.info("code email sent")`
+# **被直接丢掉** —— 表现是「发成功了但日志里什么都没有」。
+#
+# 那个 bug 比「完全没日志」更坏：发失败时 log.error() 仍会输出（root 有
+# lastResort handler），于是日志里只有失败、没有成功。你看到一片空白时
+# 无法判断是「没发」还是「发了但没记」—— 而这两者的排查方向完全相反。
+#
+# `propagate=False` 是为了不让这条日志重复出现在 root 的 handler 里
+# （gunicorn 的 errorlog 已占用 stdout/stderr）。
+log = logging.getLogger("auth.sms")
+log.setLevel(logging.INFO)
+log.propagate = False
+if not log.handlers:
+    # 用 basicConfig 会去配置 root，那会污染整个应用的日志策略；
+    # 这里只给自己挂一个 StreamHandler，范围最小。
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(_h)
 
 # 同一 IP 每小时的验证码请求上限。用数据库计数（不是内存字典）：
 # 服务重启、多 worker、多实例都挡得住；内存计数一重启就清零，等于没限。
@@ -177,17 +207,174 @@ def current_user(
     return user
 
 
-def _dispatch_code(channel: str, target: str, code: str, purpose: str) -> None:
-    """把验证码真正发出去（短信/邮件）。**目前是占位实现，什么也不发。**
+def _dispatch_code(
+    channel: str,
+    target: str,
+    code: str,
+    purpose: str,
+    settings: Settings,
+) -> None:
+    """把验证码真正发出去。**邮件（SMTP）已实现，短信仍是占位。**
 
-    TODO(M5)：按 settings.sms_provider / settings.email_provider 分发：
-    - 中国区短信必须先做模板报备，未报备的内容会被运营商拦截；
-    - 海外区可先用邮件兜底（成本低、无模板限制）；
-    - 发送失败**不能让验证码行回滚**：用户没收到可以重发，
-      但如果因为发送失败把码也丢了，重发逻辑会因为「查不到刚发的码」而异常。
-      所以这里不抛异常，失败只记日志（日志接入在 v2）。
+    ## 为什么失败只记日志、不抛异常
+
+    调用方在**发码之前**已经把验证码行写库并 commit 了。如果这里抛异常，
+    整条记录会随事务回滚 —— 于是「发送失败」变成「这行记录不存在」，
+    用户点重发时 `_recent_code` 查不到刚发的码，走不到限流分支，
+    于是无限重发；而用户那边永远收不到码。**失败要留在「码已生成」这个状态**
+    （用户可以重发），只把「发不出去」这件事记下来。
+
+    ## 邮件为什么用 SMTP
+
+    腾讯企业邮箱原生支持 SMTP，Python 的 `smtplib` 是标准库 ——
+    零新增依赖。选 Resend/SendGrid 这类 HTTP API 的话要引 requests/httpx、
+    多一份服务商密钥管理，收益仅是投递率略好；先把链路跑通更重要。
+
+    ## 投递失败的常见原因（排查时按这个顺序看）
+
+    1. **用了登录密码而不是授权码** —— 企业邮箱的 SMTP 密码在后台单独生成，
+       用登录密码会 535 认证失败；
+    2. **From 地址不是已验证的发件人** —— 服务端认为发出去了，邮件进垃圾箱，
+       表现为「用户说没收到」但日志一切正常；
+    3. **端口与 TLS 方式不匹配** —— 465 配隐式 TLS，587 配 STARTTLS，
+       配错会在握手阶段就失败。
     """
-    return None
+    if channel == "email":
+        _send_email_code(target, code, purpose, settings)
+        return
+
+    # 短信：仍未实现。理由写在 config.sms_provider 的注释里 ——
+    # 中国区短信要先做模板报备，未报备的内容会被运营商拦截。
+    log.warning(
+        "sms channel configured but not implemented; code=%s target=%s purpose=%s",
+        code[:2] + "****",  # 日志里不要留完整验证码
+        _mask(target),
+        purpose,
+    )
+
+
+def _mask(target: str) -> str:
+    """日志里脱敏：手机号留前 3 后 4，邮箱留域名。
+
+    完整验证码和完整手机号都不该进日志 —— 日志会被复制到工单、看板、
+    第三方监控里，等于把「能登录这个账号」的信息散出去。
+    """
+    if "@" in target:
+        local, _, domain = target.partition("@")
+        return f"{local[:2]}***@{domain}"
+    return target[:3] + "****" + target[-4:] if len(target) > 7 else "***"
+
+
+def _send_email_code(
+    to_addr: str, code: str, purpose: str, settings: Settings
+) -> None:
+    """通过 SMTP 发验证码邮件。**任何失败都只记日志。**"""
+    if not settings.smtp_host or not settings.smtp_user:
+        log.error(
+            "smtp not configured (host=%r user=%r); cannot send code to %s",
+            settings.smtp_host, settings.smtp_user, _mask(to_addr),
+        )
+        return
+
+    from_addr = settings.smtp_from_email or settings.smtp_user
+    subject = _email_subject(purpose, code)
+    body = _email_body(purpose, code)
+
+    msg = MIMEText(body, "plain", "utf-8")
+    # ⚠️ **必须 str() 包一层。**
+    #
+    # 踩过的坑，而且是**本地测不出来的那种**：
+    # 直接 `msg["Subject"] = Header(subject)` 在 Python 3.13 上能过，
+    # 在 **3.11（服务器）上抛 `AttributeError: 'Header' object has no
+    # attribute 'encode'`**。
+    #
+    # 当时的情况是：同一份代码在 Mac 上用真授权码发信，**确实收到了**，
+    # 于是以为没问题 —— 结果一上服务器就挂。
+    #
+    # 为什么本地测不出来：`send_message` 内部用 `BytesGenerator` 渲染邮件头，
+    # 那一步才碰 Header 对象。3.13 容忍它，3.11 严格拒绝。
+    #
+    # 两条教训：
+    # 1. **「邮件收到了」不等于「发信代码正确」** —— 成功的假象掩盖了
+    #    3.13 特有的容忍；
+    # 2. **本地与服务器的 Python 版本必须一致**，否则「本地通过」这个
+    #    前提本身就不成立。Mac 3.13 / 服务器 3.11 的组合是隐蔽的坑。
+    msg["Subject"] = str(Header(subject))
+    # formataddr 带显示名，且用 Header 编码中文名 —— 直接塞中文会报
+    # UnicodeEncodeError，或者在部分客户端里显示成乱码。
+    msg["From"] = formataddr(
+        (str(Header(settings.smtp_from_name)), from_addr)
+    )
+    msg["To"] = to_addr
+
+    try:
+        if settings.smtp_secure:
+            # 465：连接即 TLS。context 不传则用 smtplib 默认的严格校验。
+            with smtplib.SMTP_SSL(
+                settings.smtp_host, settings.smtp_port, timeout=20
+            ) as srv:
+                srv.login(settings.smtp_user, settings.smtp_password)
+                srv.send_message(msg)
+        else:
+            # 587：先明文连上再 STARTTLS 升级。
+            with smtplib.SMTP(
+                settings.smtp_host, settings.smtp_port, timeout=20
+            ) as srv:
+                srv.starttls()
+                srv.login(settings.smtp_user, settings.smtp_password)
+                srv.send_message(msg)
+    except smtplib.SMTPAuthenticationError:
+        # 最常见的一种：把登录密码当成了授权码。错误信息里说清楚。
+        log.error(
+            "smtp auth failed for %s — check that smtp_password is the "
+            "AUTHORIZATION CODE, not the account login password "
+            "(host=%s port=%s)",
+            settings.smtp_user, settings.smtp_host, settings.smtp_port,
+        )
+    except Exception:
+        # 网络超时 / 证书问题 / 端口不通 / 被限流。全部记栈，别只记 str(e) ——
+        # 握手失败时 str(e) 往往只有一句「Connection refused」，没有栈很难定位。
+        log.exception(
+            "smtp send failed (host=%s port=%s secure=%s) to %s",
+            settings.smtp_host, settings.smtp_port, settings.smtp_secure,
+            _mask(to_addr),
+        )
+    else:
+        log.info("code email sent to %s (purpose=%s)", _mask(to_addr), purpose)
+
+
+def _email_subject(purpose: str, code: str) -> str:
+    """邮件标题里带验证码。
+
+    理由：验证码邮件常被归到「其他邮件」或收在通知栏里，标题不写验证码
+    用户得点开去找 —— 而验证码有 5 分钟有效期。
+    """
+    label = {
+        "login": "Your My Pet sign-in code",
+        "invite": "Your My Pet invite code",
+    }.get(purpose, "Your My Pet verification code")
+    return f"{label}: {code}"
+
+
+def _email_body(purpose: str, code: str) -> str:
+    """正文：纯文本、无 HTML。
+
+    HTML 邮件在 Outlook / Gmail 上各有各的渲染坑（默认字体、间距失效），
+    而验证码邮件的唯一任务是让人看清那 6 位数字 —— 纯文本反而最可靠。
+    """
+    ttl = 5
+    if purpose == "invite":
+        head = "You have been invited to co-care for a pet on My Pet."
+    else:
+        head = "Use this code to sign in to My Pet."
+    return (
+        f"{head}\n\n"
+        f"{code}\n\n"
+        f"The code expires in {ttl} minutes and can only be used once.\n"
+        f"If you did not request it, you can ignore this email — "
+        f"no one can sign in without this code.\n\n"
+        f"-- My Pet"
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -254,7 +441,35 @@ def request_code(
     )
     session.commit()
 
-    _dispatch_code(payload.channel, target, code, "login")
+    # ⚠️ **没有真实通道时不能返回 `sent: true`。**
+    #
+    # 实测过的坑：`_dispatch_code` 至今是 `return None`（占位实现，什么也不发），
+    # 而接口照样 200 + `{"sent": true}`。客户端于是显示「验证码已发送」，
+    # 用户盯着手机等一分钟什么都没有 —— **界面在撒谎，比报错难查十倍**。
+    #
+    # 更隐蔽的是：生产环境正确地把 `dev_echo_code` 关了（必须关，回显等于
+    # 把验证码送给任何人），于是「靠 dev_code 兜底」这条路也没了，
+    # 结果是**登录彻底不可用却没有任何一处报错**。
+    #
+    # 所以这里前置判断：既没有服务商、又不开回显，就明确告诉调用方
+    # 「通道没配」，让它去报错，而不是假装发出去。
+    # 邮件通道是否真的可用：**看 SMTP 有没有配齐**，而不是看 email_provider
+    # 这个标志位。后者只是一个「打算用邮件」的意图标记，为空不代表发不出去。
+    has_provider = (
+        bool(settings.smtp_host and settings.smtp_user and settings.smtp_password)
+        if payload.channel == "email"
+        else bool(settings.sms_provider)
+    )
+    if not has_provider and not settings.dev_echo_code:
+        # 通道没配且不能回显 → 登录不可能成功。
+        # 503 而不是 400：这是**服务端配置缺失**，不是用户请求有问题，
+        # 客户端重试多少次都一样，区别对待才能在监控里看出问题。
+        raise HTTPException(
+            status_code=503,
+            detail="verification channel is not configured on this server",
+        )
+
+    _dispatch_code(payload.channel, target, code, "login", settings)
 
     body = {"sent": True, "expires_in": settings.code_ttl_seconds}
     if settings.dev_echo_code:

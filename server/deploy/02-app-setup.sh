@@ -79,10 +79,30 @@ DEV_ECHO_CODE=false
 # 不跟随非 GET 的 301），表现是「发验证码失败」而手工 GET 探测一切正常。
 UNIFIED_ACCOUNT_BASE_URL=https://www.weiyuantool.com
 
-# 短信/邮件通道留空：cn 区已不需要（验证码走官网），
-# 这两项只在海外部署或本地联调时才有值。
+# 短信通道：cn 区已不需要（验证码走官网），海外区也建议走邮件。
 SMS_PROVIDER=
 EMAIL_PROVIDER=
+
+# ---- 邮件通道（SMTP）----
+# 海外区发验证码用。腾讯企业邮箱的 SMTP 参数就是下面这一组，
+# 零第三方依赖（Python 标准库 smtplib）。
+#
+# ⚠️ SMTP_PASSWORD 填**授权码**，不是登录密码。
+# 企业邮箱后台「设置 → 客户端设置」里单独生成，形如 16 位随机串。
+# 写成登录密码会在发信时 535 认证失败，而报错完全看不出这个原因。
+#
+# ⚠️ 这三项属于密钥。.env 权限是 600，**不要提交进仓库**。
+SMTP_HOST=smtp.exmail.qq.com
+SMTP_PORT=465
+# 465 = 隐式 TLS（腾讯企业版就是它）。改 587 必须同时把这里改 false，
+# 端口与 TLS 方式配错会在握手阶段就失败，报错看不出是端口问题。
+SMTP_SECURE=true
+SMTP_USER=noreply@weiyuantool.com
+SMTP_PASSWORD=
+# 发件地址必须与后台已验证的发件人一致，否则邮件进垃圾箱 ——
+# 表现是「服务端说发出去了、用户说没收到」，日志一切正常。
+SMTP_FROM_NAME=My Pet
+SMTP_FROM_EMAIL=noreply@weiyuantool.com
 EOF
     chmod 600 "$APP_DIR/.env"
     echo "[+] 已生成 /opt/pet-api/.env（600）"

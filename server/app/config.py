@@ -85,6 +85,46 @@ class Settings(BaseSettings):
     sms_provider: str = ""
     email_provider: str = ""
 
+    # ---- 邮件通道（SMTP）----
+    #
+    # 海外区用邮件发验证码。选 SMTP 而不是 Resend/SendGrid 这类 HTTP API
+    # 的理由：**零依赖** —— smtplib 是标准库，而 HTTP 方案要引 requests/httpx
+    # 并多一份服务商密钥管理。腾讯企业邮箱本来就支持 SMTP，
+    # 用现成的企业邮箱发验证码是最短路径。
+    #
+    # ⚠️ 从主机与端口能判断服务商，**不要把授权码写进仓库**：
+    # 腾讯企业邮箱的 SMTP 授权码等同于发信权限，泄露 = 任何人都能用你的
+    # 域名发信（进垃圾箱、损害域名信誉）。一律走环境变量注入。
+    smtp_host: str = ""
+    smtp_port: int = 465
+    # 465 = 隐式 TLS（腾讯/QQ 邮箱企业版都是这个）；587 = STARTTLS。
+    # 混用会直接握手失败，报错信息很难看出是端口不对。
+    smtp_secure: bool = True
+    smtp_user: str = ""
+    # ⚠️ 必须是**授权码**不是登录密码。企业邮箱的 SMTP 密码在后台单独生成，
+    # 用登录密码会认证失败。
+    smtp_password: str = ""
+    # 发件人显示名与地址。腾讯企业版要求 From 与已验证的发件地址一致，
+    # 否则进垃圾箱 —— 表现为「服务端说发出去了，用户收不到」。
+    smtp_from_name: str = "My Pet"
+
+    # 用户反馈转发到哪个邮箱。
+    #
+    # ## 两条已经踩过的坑
+    #
+    # 1. **别填 noreply@ 那个地址** —— 那是发信用的公共邮箱，
+    #    填它会变成「自己给自己发信」，反馈直接进黑洞。
+    #
+    # 2. **别填 Gmail** —— 实测过：发信源在腾讯企业邮箱、SPF 带
+    #    `~all`（SoftFail），Gmail 对「国内 IP + softfail + 陌生发件人」
+    #    组合的过滤很严，**实测直接进垃圾箱**。
+    #    换成 `19663083@qq.com`（腾讯自家）后正常送达。
+    #
+    # 换收件方时**先手工发一封验证**，别等到用户反馈「没收到」才发现 ——
+    # 那时候你已经在等另一条路径的邮件了。
+    feedback_to: str = ""
+    smtp_from_email: str = ""
+
     # ---- 统一账号（仅中国区，A 方案）----
     # 官网账号域地址，建议写规范主机：https://www.weiyuantool.com
     #
