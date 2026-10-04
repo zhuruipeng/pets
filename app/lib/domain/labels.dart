@@ -193,6 +193,22 @@ String recordPayloadSummary(PetRecord r) {
       final brand = (p['brand'] as String?)?.trim() ?? '';
       if (brand.isNotEmpty) parts.add(brand);
       break;
+    // 就诊：把「医院 / 诊断 / 医嘱」列出来。
+    //
+    // ⚠️ 以前 medical 落到 `default: break`，**什么都不显示** ——
+    // 而 medical 是唯一为「给医生看」而记的类型。等于录了、存了，
+    // 导出报告时医生一样看不到，那次就诊等于白记。
+    //
+    // 主诉不放这里：它已经被写进 `text` 了（提交时优先用主诉/诊断当摘要），
+    // 再列一遍就是重复。留 clinic / diagnosis / advice 三个补充信息。
+    case RecordType.medical:
+      final clinic = (p['clinic'] as String?)?.trim() ?? '';
+      final diagnosis = (p['diagnosis'] as String?)?.trim() ?? '';
+      final advice = (p['advice'] as String?)?.trim() ?? '';
+      if (clinic.isNotEmpty) parts.add(clinic);
+      if (diagnosis.isNotEmpty) parts.add(diagnosis);
+      if (advice.isNotEmpty) parts.add(advice);
+      break;
     case RecordType.note:
       // 从「回忆」相册加的照片，库里是一条 note + payload.kind=photo。
       // 翻译在展示层做 —— 库里存 i18n 文本，切区或改文案就成历史脏数据。

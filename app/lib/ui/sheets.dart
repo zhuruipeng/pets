@@ -573,6 +573,20 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
   final _medDose = TextEditingController();
   String _medRoute = 'oral';
 
+  /// 就诊记录的四个字段。
+  ///
+  /// 为什么加这些：`RecordType.medical`（就诊）以前**在提交时根本没有 case**，
+  /// 走 default 只存一句自由文本 —— 也就是说「带去看医生」这件事在 App 里
+  /// 完全没留下可复用的信息。而下次复诊时，医生问「上次怎么处理的」，
+  /// 用户根本答不上来。
+  ///
+  /// 这四个字段对应就诊时医生真正会问的顺序：
+  /// 主诉（为什么来）→ 医院/医生（在哪看的）→ 诊断（结论是什么）→ 医嘱（怎么办）。
+  final _visitComplaint = TextEditingController();
+  final _visitClinic = TextEditingController();
+  final _visitDiagnosis = TextEditingController();
+  final _visitAdvice = TextEditingController();
+
   // 喂食
   final _feedGrams = TextEditingController();
   final _feedBrand = TextEditingController();
@@ -598,6 +612,10 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     _note.dispose();
     _medName.dispose();
     _medDose.dispose();
+    _visitComplaint.dispose();
+    _visitClinic.dispose();
+    _visitDiagnosis.dispose();
+    _visitAdvice.dispose();
     _feedGrams.dispose();
     _feedBrand.dispose();
     _weightText.dispose();
@@ -626,7 +644,7 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region, region.name);
+    final unit = Units.defaultWeightUnit(region);
 
     // 体重滑块默认落在「上次体重」上，用户拖动的距离就是这次的变化量。
     final series = ref.watch(weightSeriesProvider(widget.petId)).valueOrNull;
@@ -727,13 +745,18 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     );
   }
 
-  /// 按类型切表单。体重 / 用药 / 喂食各有自己的字段，其余落回通用文本框。
+  /// 按类型切表单。体重 / 用药 / 喂食 / 就诊各有自己的字段，其余落回通用文本框。
   ///
   /// 为什么不每种类型开一屏：这只是个底部弹层，十种类型开十屏会把
-  /// 「记一笔」变成导航迷宫。高频三类给专用字段，剩下的够用就行。
+  /// 「记一笔」变成导航迷宫。高频四类给专用字段，剩下的够用就行。
+  ///
+  /// 就诊（medical）为什么值得专用字段：它是**唯一为「别人看」而记的类型** ——
+  /// 用户记完会导出报告给医生。通用文本框只能存一句话，而医生要看的是
+  /// 「为什么来 / 诊断是什么 / 怎么办」这三件事。
   Widget _typeFields(WeightUnit unit, double? lastKg) => switch (_type) {
         RecordType.weight => _weightField(unit, lastKg),
         RecordType.medication => _medicationFields(),
+        RecordType.medical => _medicalFields(),
         RecordType.feeding => _feedingFields(),
         // 饮水与睡眠填的是「数值 + 固定单位」。走通用文本框但要补单位后缀 ——
         // 否则用户不知道那个 200 是毫升还是口数，也没法参与「今天喝了多少」的统计。
@@ -967,6 +990,62 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     );
   }
 
+  /// 就诊：主诉 + 医院/医生 + 诊断 + 医嘱。
+  ///
+  /// 字段顺序按就诊时医生实际问诊的顺序排，不是按数据结构排 ——
+  /// 用户是照着医生问的顺序填的，照着「数据结构」排会让人跳来跳去。
+  ///
+  /// 全部可空，但**主诉建议填**：它是「为什么来」的答案，也是复诊时医生
+  /// 第一个要确认的事。诊断和医嘱很多人记不清，留空比乱填好。
+  Widget _medicalFields() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _visitComplaint,
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: L.t('addRecord.med.complaint'),
+            hintText: L.t('addRecord.med.complaintHint'),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _visitClinic,
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: L.t('addRecord.med.clinic'),
+            hintText: L.t('addRecord.med.clinicHint'),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _visitDiagnosis,
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: L.t('addRecord.med.diagnosis'),
+            hintText: L.t('addRecord.med.diagnosisHint'),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _visitAdvice,
+          maxLines: 3,
+          decoration: InputDecoration(
+            labelText: L.t('addRecord.med.advice'),
+            hintText: L.t('addRecord.med.adviceHint'),
+            alignLabelWithHint: true,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+      ],
+    );
+  }
+
+
   /// 喂食：类型 + 克数 + 品牌。
   Widget _feedingFields() {
     return Column(
@@ -1070,6 +1149,39 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
         }
         text = name;
         payload = {'dose': _medDose.text.trim(), 'route': _medRoute};
+        break;
+
+      // ⚠️ 这个 case 以前**不存在** —— medical 落到 switch 的 default 分支，
+      // 只存一句自由文本。而 medical 是**唯一为「给医生看」而记的类型**，
+      // 结果导出报告时医生看到的是一句没有结构的话，
+      // 「主诉 / 诊断 / 医嘱」这三件最关键的信息全都没留下。
+      case RecordType.medical:
+        // 四个字段都可不填：记不清就空着，比编一句强。
+        // 但**全空**时给一句话兜底，否则时间线上会出现一条完全空白的就诊记录，
+        // 让人以为「去了医院但什么都没记」。
+        final complaint = _visitComplaint.text.trim();
+        final clinic = _visitClinic.text.trim();
+        final diagnosis = _visitDiagnosis.text.trim();
+        final advice = _visitAdvice.text.trim();
+
+        if (complaint.isEmpty && clinic.isEmpty && diagnosis.isEmpty && advice.isEmpty) {
+          setState(() => _error = L.t('addRecord.med.oneRequired'));
+          return;
+        }
+
+        // text 用「诊断」优先，其次医院名 —— 这条会显示在时间线上，
+        // 是用户在列表里一眼扫过时看到的那句话，所以优先给信息量最大的。
+        text = diagnosis.isNotEmpty
+            ? diagnosis
+            : (complaint.isNotEmpty
+                ? complaint
+                : (clinic.isNotEmpty ? clinic : advice));
+        payload = {
+          if (complaint.isNotEmpty) 'complaint': complaint,
+          if (clinic.isNotEmpty) 'clinic': clinic,
+          if (diagnosis.isNotEmpty) 'diagnosis': diagnosis,
+          if (advice.isNotEmpty) 'advice': advice,
+        };
         break;
 
       case RecordType.feeding:
@@ -1197,7 +1309,7 @@ class _WalkResultSheetState extends ConsumerState<_WalkResultSheet> {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     const region = AppRegion.current;
-    final dUnit = Units.defaultDistanceUnit(region, region.name);
+    final dUnit = Units.defaultDistanceUnit(region);
 
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + bottom),

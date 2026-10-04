@@ -127,6 +127,9 @@ class L {
     'detail.documents.open': '打开',
     'profile.section.documents': '文档原件',
     'doc.pickFailed': '没选到文件',
+    'doc.pickCancelled': '已取消',
+    'doc.pickError': '打不开文件选择器：{e}',
+    'doc.readError': '读不到选中的文件：{e}',
     'doc.tooLarge': '文件超过 {n} MB，换一个小一点的吧',
     'doc.added': '已添加文档',
     'doc.unknownType': '文件',
@@ -339,6 +342,18 @@ class L {
     'addRecord.med.route.oral': '口服',
     'addRecord.med.route.topical': '外用',
     'addRecord.med.route.injection': '注射',
+    // 就诊记录：发给医生时用得上的四件事。
+    // 顺序按问诊顺序排（为什么来 → 在哪看 → 结论 → 怎么办），
+    // 用户照着医生问的填，不用在「数据结构」里跳来跳去。
+    'addRecord.med.complaint': '主诉（为什么来看）',
+    'addRecord.med.complaintHint': '例如：连续两天呕吐、不肯吃东西',
+    'addRecord.med.clinic': '医院 / 医生',
+    'addRecord.med.clinicHint': '例如：XX 宠物医院 · 王医生',
+    'addRecord.med.diagnosis': '诊断结论',
+    'addRecord.med.diagnosisHint': '例如：急性胃肠炎。先按医嘱观察两天',
+    'addRecord.med.advice': '医嘱',
+    'addRecord.med.adviceHint': '医生交代的注意事项、要不要复诊、饮食禁忌……',
+    'addRecord.med.oneRequired': '至少填一项，让以后的复诊有据可查',
     'addRecord.feed.kind': '类型',
     'addRecord.feed.kind.dry': '干粮',
     'addRecord.feed.kind.wet': '湿粮',
@@ -395,6 +410,10 @@ class L {
     // 通用的是 / 否。给「标签 + 值」这种布局用（如健康报告里的「绝育: 是」）。
     'common.yes': '是',
     'common.no': '否',
+    // 失败排查：侧载包在真机上跑，开发者不一定连着 Xcode，
+    // 拿不到控制台日志。让用户能自己把异常详情复制出来。
+    'common.copyDetail': '复制详情',
+    'common.detailCopied': '详情已复制，可直接发给我',
     'editPet.chipNo': '芯片号',
     'editPet.chipNoHint': '15 位数字，可留空',
     'editPet.color': '毛色',
@@ -445,6 +464,25 @@ class L {
     'update.noApk': '这个版本暂不支持应用内更新，请到官网下载',
     'me.version': '版本',
     'me.privacy': '隐私政策',
+    'me.feedback': '问题反馈',
+    'feedback.hint': '遇到问题？把下面的内容发给我就行 —— '
+        '里面已经自动带上了崩溃信息和 App 版本，不用你描述。',
+    'feedback.logs': '最近的异常记录',
+    'feedback.noLogs': '没有异常记录。如果是功能用不了也算，照样发给我。',
+    'feedback.clear': '清空',
+    'feedback.describe': '补充说明（可选）',
+    'feedback.describeHint': '比如：加了狗之后体重那一栏是空的',
+    'feedback.copy': '复制全部内容并发给我',
+    'feedback.copied': '已复制，粘贴到微信发给我就行',
+    'feedback.send': '直接发送给我',
+    'feedback.sending': '发送中…',
+    'feedback.sent': '已发送，谢谢！我会尽快看',
+    'feedback.sendFailed': '发送失败。可能是没网或服务器暂时有问题 —— '
+        '你可以改用下面的「复制」，发微信给我。',
+    'feedback.sendFailedAuth': '发送失败（登录状态异常）。请改用下面的「复制」发给我。',
+    'feedback.nothingToSend': '没有可发送的内容。写一句描述，或者勾选上面的异常记录。',
+    'feedback.autoSummary': '（用户未填写描述，仅提交了异常记录）',
+    'feedback.cleared': '已清空',
     'me.terms': '用户协议',
 
     // ---- 档案页的记录 / 回忆页签 ----
@@ -695,6 +733,9 @@ class L {
     'detail.documents.open': 'Open',
     'profile.section.documents': 'Documents',
     'doc.pickFailed': 'No file selected',
+    'doc.pickCancelled': 'Cancelled',
+    'doc.pickError': 'Could not open the file picker: {e}',
+    'doc.readError': 'Could not read the selected file: {e}',
     'doc.tooLarge': 'File is larger than {n} MB. Try a smaller one.',
     'doc.added': 'Document added',
     'doc.unknownType': 'File',
@@ -911,6 +952,19 @@ class L {
     'addRecord.med.route.oral': 'Oral',
     'addRecord.med.route.topical': 'Topical',
     'addRecord.med.route.injection': 'Injection',
+    'addRecord.med.complaint': 'Reason for the visit',
+    'addRecord.med.complaintHint':
+        'e.g. vomited twice in two days, refused all food',
+    'addRecord.med.clinic': 'Clinic / vet',
+    'addRecord.med.clinicHint': 'e.g. Green Animal Hospital - Dr. Patel',
+    'addRecord.med.diagnosis': 'Diagnosis',
+    'addRecord.med.diagnosisHint':
+        'e.g. mild gastroenteritis. Monitor for two days as advised',
+    'addRecord.med.advice': "Vet's advice",
+    'addRecord.med.adviceHint':
+        'Aftercare, whether a follow-up is needed, food restrictions...',
+    'addRecord.med.oneRequired':
+        'Fill in at least one field so a follow-up visit has something to go on',
     'addRecord.feed.kind': 'Type',
     'addRecord.feed.kind.dry': 'Dry food',
     'addRecord.feed.kind.wet': 'Wet food',
@@ -965,6 +1019,8 @@ class L {
     'editPet.neutered': 'Neutered',
     'common.yes': 'Yes',
     'common.no': 'No',
+    'common.copyDetail': 'Copy details',
+    'common.detailCopied': 'Details copied — paste them to me',
     'editPet.chipNo': 'Chip number',
     'editPet.chipNoHint': '15 digits, optional',
     'editPet.color': 'Coat',
@@ -1015,6 +1071,29 @@ class L {
     'update.noApk': 'In-app update is unavailable for this build, please download from the website',
     'me.version': 'Version',
     'me.privacy': 'Privacy Policy',
+    'me.feedback': 'Report a problem',
+    'feedback.hint': 'Hit a problem? Just send the text below - it already '
+        'includes the error details and your app version, so you do not have '
+        'to describe anything.',
+    'feedback.logs': 'Recent error logs',
+    'feedback.noLogs': 'No error logs recorded. If something just did not work, '
+        'send this anyway.',
+    'feedback.clear': 'Clear',
+    'feedback.describe': 'Anything else? (optional)',
+    'feedback.describeHint': 'e.g. the weight field is empty after I add a dog',
+    'feedback.copy': 'Copy and send to me',
+    'feedback.copied': 'Copied - just paste it in WeChat',
+    'feedback.send': 'Send to me',
+    'feedback.sending': 'Sending...',
+    'feedback.sent': 'Sent, thank you! I will take a look',
+    'feedback.sendFailed': 'Could not send. You may be offline or the server '
+        'is having trouble - use the Copy button below and message me instead.',
+    'feedback.sendFailedAuth': 'Could not send (sign-in state looks wrong). '
+        'Please use the Copy button below.',
+    'feedback.nothingToSend': 'Nothing to send. Write a short note, or tick '
+        'an error record above.',
+    'feedback.autoSummary': '(User wrote no note; sending error records only)',
+    'feedback.cleared': 'Cleared',
     'me.terms': 'Terms of Service',
 
     // ---- profile records / memories tabs ----
