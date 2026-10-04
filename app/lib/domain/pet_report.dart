@@ -75,6 +75,7 @@ class PetReport {
     required this.weightPoints,
     required this.records,
     required this.generatedAt,
+    required this.weightUnit,
   });
 
   final String petName;
@@ -85,13 +86,22 @@ class PetReport {
   final List<ReportFact> facts;
   final List<ReportCareRow> careRows;
 
-  /// 体重趋势点，**按时间升序**（画折线用）。
+  /// 体重趋势点，**按时间升序**（画折线用）。单位是公制 kg ——
+  /// 换算由绘制层按 [weightUnit] 做，存储层不碰展示单位。
   final List<({DateTime at, double kg})> weightPoints;
 
   /// 最近的记录，**按时间倒序**（最新的在最上面）。
   final List<ReportRecord> records;
 
   final DateTime generatedAt;
+
+  /// 体重展示单位。
+  ///
+  /// ⚠️ 这个字段以前**根本不存在**，于是绘制层拿不到单位，只能拿 `weightPoints`
+  /// 里的 kg 直接画 —— 结果海外版报告出现「Y 轴标公斤、旁边数字标磅」的
+  /// 同一张图两种单位。给医生看时会被读错 2.2 倍。
+  /// 单位必须**跟着报告一起传下去**，绘制层才有得换算。
+  final WeightUnit weightUnit;
 
   /// 台账里真正有内容的行。
   List<ReportCareRow> get filledCareRows =>
@@ -190,6 +200,7 @@ PetReport buildPetReport({
     weightPoints: weights,
     records: reportRecords,
     generatedAt: now,
+    weightUnit: weightUnit,
   );
 }
 

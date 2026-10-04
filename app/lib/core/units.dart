@@ -90,18 +90,26 @@ class Units {
 
   // ---------------- 默认值（按区域） ----------------
 
-  /// 中国一律公制；海外按 locale，美国用磅。
-  static WeightUnit defaultWeightUnit(Region region, String localeName) {
-    if (region == Region.cn) return WeightUnit.kg;
-    return localeName.toLowerCase().startsWith('en_us')
-        ? WeightUnit.lb
-        : WeightUnit.kg;
-  }
+  /// 体重默认单位。
+  ///
+  /// **只按区域判定，不接 locale 参数。**
+  ///
+  /// ⚠️ 这里以前是 `defaultWeightUnit(Region region, String localeName)`，
+  /// 判断 `localeName.startsWith('en_us')`。而 15 处调用点传的是
+  /// `region.name` —— 那是 `'intl'`，不是 `'en_US'`。于是判断恒为 false，
+  /// **美国用户拿到的还是 kg，而界面不报任何错**。
+  /// 纯函数测试只测了 kgToLb/toDisplayWeight，没测这个默认值，bug 一路漏到真机。
+  ///
+  /// 去掉 locale 参数不是图省事，是**把易错的那一步从调用方手里拿走**：
+  /// 单位跟着市场走是本项目的既有约定（`region.dart` 的 `defaultUseImperial`
+  /// 早就把这件事定义好了），让每个调用点自己判断 locale 等于把同一个决定
+  /// 复制 15 遍 —— 第 16 遍一定会写错。
+  ///
+  /// 依据：`RegionBehavior.defaultUseImperial`（美式习惯用磅，其余海外地区用公斤）。
+  static WeightUnit defaultWeightUnit(Region region) =>
+      region.defaultUseImperial ? WeightUnit.lb : WeightUnit.kg;
 
-  static DistanceUnit defaultDistanceUnit(Region region, String localeName) {
-    if (region == Region.cn) return DistanceUnit.km;
-    return localeName.toLowerCase().startsWith('en_us')
-        ? DistanceUnit.mile
-        : DistanceUnit.km;
-  }
+  /// 距离默认单位。与 [defaultWeightUnit] 同理，跟随区域而不是 locale。
+  static DistanceUnit defaultDistanceUnit(Region region) =>
+      region.defaultUseImperial ? DistanceUnit.mile : DistanceUnit.km;
 }

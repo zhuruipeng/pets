@@ -67,20 +67,33 @@ void main() {
   });
 
   group('区域默认单位', () {
-    test('中国一律公制，与 locale 无关', () {
-      expect(Units.defaultWeightUnit(Region.cn, 'en_US'), WeightUnit.kg);
-      expect(Units.defaultWeightUnit(Region.cn, 'zh_CN'), WeightUnit.kg);
-      expect(Units.defaultDistanceUnit(Region.cn, 'en_US'), DistanceUnit.km);
+    test('中国一律公制', () {
+      expect(Units.defaultWeightUnit(Region.cn), WeightUnit.kg);
+      expect(Units.defaultDistanceUnit(Region.cn), DistanceUnit.km);
     });
 
-    test('海外按 locale：美制用磅/英里', () {
-      expect(Units.defaultWeightUnit(Region.intl, 'en_US'), WeightUnit.lb);
-      expect(Units.defaultDistanceUnit(Region.intl, 'en_US'), DistanceUnit.mile);
+    test('海外区域默认用美制（磅 / 英里）', () {
+      // ⚠️ 这两条以前是 `defaultWeightUnit(Region.intl, 'en_US')`，
+      // 断言是对的、编译也是过的，但**生产代码 15 处调用点传的是 `region.name`
+      // （即 'intl'）**，于是真机上美国用户拿到的还是 kg，界面不报任何错。
+      // 根因是签名多一个 locale 参数，把「按区域判定」变成了「按调用方传值判定」——
+      // 同一个决定复制 15 遍，第 16 遍一定会写错。现在参数已去掉，判断收敛到一处。
+      expect(Units.defaultWeightUnit(Region.intl), WeightUnit.lb);
+      expect(Units.defaultDistanceUnit(Region.intl), DistanceUnit.mile);
     });
 
-    test('海外非美制走公制', () {
-      expect(Units.defaultWeightUnit(Region.intl, 'de_DE'), WeightUnit.kg);
-      expect(Units.defaultDistanceUnit(Region.intl, 'en_GB'), DistanceUnit.km);
+    test('中国区一律公制', () {
+      expect(Units.defaultWeightUnit(Region.cn), WeightUnit.kg);
+      expect(Units.defaultDistanceUnit(Region.cn), DistanceUnit.km);
+    });
+
+    test('默认值跟着区域走，不受调用方影响', () {
+      // 回归防线：以后谁想再加 locale 参数、或传错值，这条会拦住。
+      // 同一个区域无论被问多少次、来自哪个调用点，答案必须一致。
+      for (var i = 0; i < 3; i++) {
+        expect(Units.defaultWeightUnit(Region.intl), WeightUnit.lb);
+        expect(Units.defaultWeightUnit(Region.cn), WeightUnit.kg);
+      }
     });
   });
 
