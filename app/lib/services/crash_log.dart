@@ -14,7 +14,7 @@
 ///
 /// ## 那怎么修 bug
 ///
-/// 靠**用户主动把详情发给你**，但要保证「不用他描述、他也传得过来」。
+/// 崩溃先保存在本机，下次启动时匿名补传；用户也可以主动提交详情。
 /// 之前排查导出失败就是这么做的：让用户点「复制详情」，
 /// 你拿到完整堆栈直接定位。这套流程有效，只是当时是临时加的。
 ///
@@ -23,7 +23,8 @@
 ///
 /// ## 保存在哪
 ///
-/// 纯本地文件，**不上传任何东西**。用户自己决定发不发。
+/// 本地文件保存待传记录。上传只包含错误与版本、区域、平台，
+/// 不包含账号或设备唯一标识；与隐私政策中的崩溃日志说明一致。
 /// 保留最近 [maxEntries] 条，避免无限增长。
 library;
 
@@ -48,6 +49,9 @@ typedef FeedbackFn = Future<void> Function({
   String? platform,
   String? stack,
 });
+
+String _feedbackText(String text) =>
+    text.length <= 8000 ? text : text.substring(0, 8000);
 
 /// 保留最近多少条。
 ///
@@ -122,6 +126,7 @@ class CrashLog {
 
   File? _file;
   final List<CrashEntry> _buffer = [];
+  Future<void> _writes = Future<void>.value();
 
   /// 内存里的最新记录，「我的」页直接读这个，不用等 IO。
   List<CrashEntry> get recent => List.unmodifiable(_buffer);
@@ -148,16 +153,17 @@ class CrashLog {
         lines.length > maxEntries ? lines.length - maxEntries : 0,
       )) {
         if (line.trim().isEmpty) continue;
-        _buffer.insert(
-          0,
-          CrashEntry.fromJson(
-            jsonDecode(line) as Map<String, dynamic>,
-          ),
-        );
+        try {
+          _buffer.insert(
+            0,
+            CrashEntry.fromJson(jsonDecode(line) as Map<String, dynamic>),
+          );
+        } catch (e) {
+          debugPrint('[crash_log] 跳过损坏记录：$e');
+        }
       }
     } catch (e) {
-      // 内容损坏就当空日志。**不能抛** —— 一行坏 JSON 让整个 App 打不开
-      // 是极不划算的取舍。
+      // 文件不可读时按空日志处理，不能影响启动。
       debugPrint('[crash_log] 读取失败，按空处理：$e');
       _buffer.clear();
     }
@@ -169,40 +175,29 @@ class CrashLog {
     while (_buffer.length > maxEntries) {
       _buffer.removeLast();
     }
-    final file = _file;
-    if (file == null) return;
-    try {
-      await file.writeAsString(
-        '${jsonEncode(entry.toJson())}\n',
-        mode: FileMode.append,
-        flush: true,
-      );
-      // 追加写会让文件无限增长。按需截断：超过 2 倍上限就重写一遍。
-      if (await file.length() > maxEntries * 300) {
-        await file.writeAsString(
-          _buffer.map((e) => '${jsonEncode(e.toJson())}\n').join(),
-        );
-      }
-    } catch (e) {
-      debugPrint('[crash_log] 写入失败：$e');
-    }
+    await _persist();
   }
 
   /// 把当前缓冲写回文件。
   ///
-  /// 为什么需要它：自动上报成功后要从缓冲里**删掉已送达的**，
-  /// 而文件是追加写的、不会自动收缩 —— 不重写一遍的话，
-  /// 下次启动又把旧的读回来了，等于没删。
-  Future<void> _persist() async {
+  /// 记录、清空与补传都保存同一份有界快照，避免已送达的日志在重启后复活。
+  Future<void> _persist() {
     final file = _file;
-    if (file == null) return;
-    try {
-      await file.writeAsString(
-        _buffer.map((e) => '${jsonEncode(e.toJson())}\n').join(),
-      );
-    } catch (e) {
-      debugPrint('[crash_log] 重写失败：$e');
-    }
+    if (file == null) return Future<void>.value();
+    // The loader reverses chronological lines into a newest-first buffer.
+    // Queue immutable snapshots so record/clear/upload cannot race on disk.
+    final contents =
+        _buffer.reversed.map((e) => '${jsonEncode(e.toJson())}\n').join();
+    _writes = _writes.then((_) async {
+      try {
+        final temporary = File('${file.path}.tmp');
+        await temporary.writeAsString(contents, flush: true);
+        await temporary.rename(file.path);
+      } catch (e) {
+        debugPrint('[crash_log] 重写失败：$e');
+      }
+    });
+    return _writes;
   }
 
   /// 把未上传的崩溃记录上传。
@@ -231,31 +226,35 @@ class CrashLog {
     if (_uploading) return;
     _uploading = true;
     try {
-      var sent = 0;
-      for (final e in _buffer) {
+      final sent = <CrashEntry>[];
+      // New errors and user clearing the log can occur while requests await.
+      // Upload a snapshot and remove only the exact entries acknowledged.
+      for (final e in List<CrashEntry>.of(_buffer)) {
         try {
           await feedbackSender(
-            message: '[自动上报] ${e.message.split('\n').first}',
+            // /feedback caps each text field at 8000 characters. A large stack
+            // must not permanently block this report and the rest of the queue.
+            message: _feedbackText('[自动上报] ${e.message.split('\n').first}'),
             kind: 'crash-${e.kind}',
             appVersion: e.context['appVersion'] ?? _appVersion,
             region: e.context['region'] ?? _region,
             platform: e.context['platform'] ?? Platform.operatingSystem,
-            stack: e.stack,
+            stack: _feedbackText(e.stack),
           );
-          sent++;
+          sent.add(e);
         } catch (_) {
           // 单条失败就停 —— 多半是网络问题，继续试也是白试，
           // 而且会把用户电量耗在重试上。
           break;
         }
       }
-      if (sent > 0) {
+      if (sent.isNotEmpty) {
         // 只清掉**已确认送达**的那些，剩下的留在本地等下次。
         // 为什么不全清：请求返回不代表对方真的收到了，
         // 而崩溃记录复现一次可能隔很久，丢一条就少一个样本。
-        _buffer.removeRange(0, sent);
+        _buffer.removeWhere(sent.contains);
         await _persist();
-        debugPrint('[crash_log] 已自动上报 $sent 条崩溃记录');
+        debugPrint('[crash_log] 已自动上报 ${sent.length} 条崩溃记录');
       }
     } catch (_) {
       // 上报本身绝不能影响 App 启动 —— 它失败就静默，
@@ -273,25 +272,27 @@ class CrashLog {
   /// 「提交反馈」这个动作，不是整个 API 客户端。返回 SyncApi 会让
   /// 类型不匹配，而且测试想替换时还得造一个真的 SyncApi。
   @visibleForTesting
-  static FeedbackFn feedbackSender = ({required String message, String kind = 'manual', String? appVersion, String? region, String? platform, String? stack}) {
-        return SyncApi().submitFeedback(
-          message: message,
-          kind: kind,
-          appVersion: appVersion,
-          region: region,
-          platform: platform,
-          stack: stack,
-        );
-      };
+  static FeedbackFn feedbackSender = (
+      {required String message,
+      String kind = 'manual',
+      String? appVersion,
+      String? region,
+      String? platform,
+      String? stack}) {
+    return SyncApi().submitFeedback(
+      message: message,
+      kind: kind,
+      appVersion: appVersion,
+      region: region,
+      platform: platform,
+      stack: stack,
+    );
+  };
 
   /// 一键清空。用户觉得「这些都修好了」时该能自己删。
   Future<void> clear() async {
     _buffer.clear();
-    try {
-      await _file?.delete();
-    } catch (_) {
-      // 文件本来就不在，清空内存已经达到了目的。
-    }
+    await _persist();
   }
 
   /// 装上全局捕获。
@@ -371,6 +372,8 @@ class CrashLog {
     _buffer.clear();
     _appVersion = null;
     _region = null;
+    _uploading = false;
+    _writes = Future<void>.value();
   }
 
   /// 由 main 启动时注入版本与区域，让每条记录都带上。

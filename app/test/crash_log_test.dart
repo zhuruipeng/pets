@@ -9,12 +9,16 @@
 /// 那套流程有效，但当时是临时加的；这里把它系统化并用测试钉住。
 library;
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pet_app/services/crash_log.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('CrashEntry', () {
     test('序列化成单行 JSON', () {
       // 「一个文件一个问题」的排查策略依赖单行 —— 多行会让 grep 失效。
@@ -135,13 +139,13 @@ void main() {
       /// 真的送到开发者的邮箱，而且依赖网络，结果不确定。
       setUp(() {
         sent = [];
-        CrashLog.feedbackSender =
-            ({required String message,
-              String kind = 'manual',
-              String? appVersion,
-              String? region,
-              String? platform,
-              String? stack}) async {
+        CrashLog.feedbackSender = (
+            {required String message,
+            String kind = 'manual',
+            String? appVersion,
+            String? region,
+            String? platform,
+            String? stack}) async {
           sent.add({
             'message': message,
             'kind': kind,
@@ -155,13 +159,13 @@ void main() {
 
       tearDown(() {
         // 恢复成真的，否则后续测试会用到假实现
-        CrashLog.feedbackSender =
-            ({required String message,
-              String kind = 'manual',
-              String? appVersion,
-              String? region,
-              String? platform,
-              String? stack}) async {};
+        CrashLog.feedbackSender = (
+            {required String message,
+            String kind = 'manual',
+            String? appVersion,
+            String? region,
+            String? platform,
+            String? stack}) async {};
       });
 
       test('启动后把待传的崩溃全部送出并清空', () async {
@@ -190,13 +194,13 @@ void main() {
         // 崩���样本可能隔很久才复现一次，丢一条就少一个样本。
         // 而「请求返回 200」也不保证对方真收到了。
         // 所以失败一律保留，等下次启动再试。
-        CrashLog.feedbackSender =
-            ({required String message,
-              String kind = 'manual',
-              String? appVersion,
-              String? region,
-              String? platform,
-              String? stack}) async {
+        CrashLog.feedbackSender = (
+            {required String message,
+            String kind = 'manual',
+            String? appVersion,
+            String? region,
+            String? platform,
+            String? stack}) async {
           throw Exception('network down');
         };
 
@@ -214,6 +218,83 @@ void main() {
       test('没有待传记录时不发请求', () async {
         await log.autoUpload();
         expect(sent, isEmpty);
+      });
+
+      test('超长错误与堆栈不超过反馈接口上限', () async {
+        await log.record(CrashEntry(
+          at: DateTime.now(), kind: 'zone',
+          message: 'm' * 9000, stack: 's' * 9000,
+        ));
+        await log.autoUpload();
+        expect(sent.single['message']!.length, 8000);
+        expect(sent.single['stack']!.length, 8000);
+        expect(log.recent, isEmpty);
+      });
+
+      test('补传中新增错误只删除已送达的原记录', () async {
+        final started = Completer<void>();
+        final finish = Completer<void>();
+        var calls = 0;
+        CrashLog.feedbackSender = (
+            {required String message,
+            String kind = 'manual',
+            String? appVersion,
+            String? region,
+            String? platform,
+            String? stack}) async {
+          calls++;
+          started.complete();
+          await finish.future;
+        };
+        await log.record(_entry('old'));
+        final upload = log.autoUpload();
+        await started.future;
+        await log.record(_entry('new'));
+        finish.complete();
+        await upload;
+
+        expect(calls, 1);
+        expect(log.recent.map((e) => e.message), ['new']);
+      });
+
+      test('部分成功后失败只保留未送达记录', () async {
+        var calls = 0;
+        CrashLog.feedbackSender = (
+            {required String message,
+            String kind = 'manual',
+            String? appVersion,
+            String? region,
+            String? platform,
+            String? stack}) async {
+          if (++calls == 2) throw Exception('smtp unavailable');
+        };
+        await log.record(_entry('old'));
+        await log.record(_entry('new'));
+        await log.autoUpload();
+        expect(log.recent.map((e) => e.message), ['old']);
+      });
+
+      test('补传中清空再记录不会删除新的错误', () async {
+        final started = Completer<void>();
+        final finish = Completer<void>();
+        CrashLog.feedbackSender = (
+            {required String message,
+            String kind = 'manual',
+            String? appVersion,
+            String? region,
+            String? platform,
+            String? stack}) async {
+          started.complete();
+          await finish.future;
+        };
+        await log.record(_entry('old'));
+        final upload = log.autoUpload();
+        await started.future;
+        await log.clear();
+        await log.record(_entry('new'));
+        finish.complete();
+        await upload;
+        expect(log.recent.map((e) => e.message), ['new']);
       });
 
       test('上报内容不含任何账号或设备标识', () async {
@@ -240,13 +321,13 @@ void main() {
 
       test('重复调用不会并发上传', () async {
         var inflight = 0;
-        CrashLog.feedbackSender =
-            ({required String message,
-              String kind = 'manual',
-              String? appVersion,
-              String? region,
-              String? platform,
-              String? stack}) async {
+        CrashLog.feedbackSender = (
+            {required String message,
+            String kind = 'manual',
+            String? appVersion,
+            String? region,
+            String? platform,
+            String? stack}) async {
           inflight++;
           await Future<void>.delayed(const Duration(milliseconds: 20));
           inflight--;
@@ -280,4 +361,67 @@ void main() {
       expect(log.recent, isEmpty);
     });
   });
+
+  group('CrashLog 持久化', () {
+    late Directory dir;
+    late CrashLog log;
+    const channel = MethodChannel('plugins.flutter.io/path_provider');
+
+    setUp(() async {
+      dir = await Directory.systemTemp.createTemp('pet_crash_test_');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => dir.path);
+      log = CrashLog.instance..resetForTest();
+      await log.init();
+    });
+
+    tearDown(() async {
+      await log.clear();
+      log.resetForTest();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      await dir.delete(recursive: true);
+    });
+
+    test('多次重启后仍保留最新的 maxEntries 条并按新到旧排序', () async {
+      for (var i = 0; i < maxEntries + 5; i++) {
+        await log.record(_entry('e$i'));
+      }
+      for (var restart = 0; restart < 2; restart++) {
+        final expected = log.recent.map((e) => e.message).toList();
+        log.resetForTest();
+        await log.init();
+        expect(log.recent.length, maxEntries);
+        expect(log.recent.map((e) => e.message), expected);
+        await log.record(_entry('next$restart'));
+      }
+    });
+
+    test('损坏的一行不会丢掉其他有效记录', () async {
+      final file = File('${dir.path}/crash_log.jsonl');
+      await file.writeAsString('${jsonEncode(_entry('old').toJson())}\n'
+          'broken json\n${jsonEncode(_entry('new').toJson())}\n');
+      log.resetForTest();
+      await log.init();
+      expect(log.recent.map((e) => e.message), ['new', 'old']);
+    });
+
+    test('并发写入与清空后重启不会复活旧记录', () async {
+      await Future.wait([
+        log.record(_entry('old')),
+        log.clear(),
+        log.record(_entry('new')),
+      ]);
+      log.resetForTest();
+      await log.init();
+      expect(log.recent.map((e) => e.message), ['new']);
+    });
+  });
 }
+
+CrashEntry _entry(String message) => CrashEntry(
+      at: DateTime(2026, 10, 6),
+      kind: 'zone',
+      message: message,
+      stack: 'stack',
+    );

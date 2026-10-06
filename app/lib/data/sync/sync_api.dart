@@ -256,7 +256,7 @@ class SyncApi {
     String? platform,
     String? stack,
   }) async {
-    await _post('/feedback', {
+    final result = await _post('/feedback', {
       'message': message,
       'kind': kind,
       if (appVersion != null) 'app_version': appVersion,
@@ -264,6 +264,12 @@ class SyncApi {
       if (platform != null) 'platform': platform,
       if (stack != null) 'stack': stack,
     });
+    // HTTP 200 also covers SMTP failures. Keep crash logs until delivery is
+    // acknowledged, including a duplicate of an already delivered report.
+    if (result['received'] != true ||
+        (result['delivered'] != true && result['deduped'] != true)) {
+      throw SyncApiException(200, 'feedback not delivered');
+    }
   }
 
   Future<AuthSession> verifyCode({

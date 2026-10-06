@@ -51,19 +51,16 @@ String? _pendingReminderId;
 /// 异常仍然静默，因为 `openFile()` 抛在 await 链里、没被 try 覆盖。
 /// 所以这条边界必须在这里守住，**不是**在每个按钮上补 try。
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // 崩溃捕获要在任何业务代码之前装好：数据库打开、通知初始化都可能抛，
-  // 晚一步这些异常就漏了。
-  CrashLog.instance.installGlobalHandlers();
-  await CrashLog.instance.init();
-  // 版本**运行时读**，不在编译期写死：侧载包会重装同一版本号下的新构建，
-  // 硬编码值会和用户实际装的包对不上，排查时「我这边是最新版」就废了。
-  unawaited(_stampVersion());
-
-  // 第三道防线：zone 兜底。
   runZonedGuarded(
-    () async => _bootstrap(),
+    () async {
+      // Binding initialization and runApp must share the same zone so Flutter
+      // callbacks retain the startup error handler.
+      WidgetsFlutterBinding.ensureInitialized();
+      CrashLog.instance.installGlobalHandlers();
+      await CrashLog.instance.init();
+      unawaited(_stampVersion());
+      await _bootstrap();
+    },
     (error, stack) {
       debugPrint('[zone] 未捕获异常：$error\n$stack');
       unawaited(
@@ -159,7 +156,8 @@ void _openReminderFromNotification(String reminderId) {
 /// 没有用户记录时共养功能的种子数据接不上。
 Future<void> _ensureLocalUser() async {
   final db = AppDatabase.instance.db;
-  final rows = await db.query('users', where: 'id = ?', whereArgs: [kCurrentUserId]);
+  final rows =
+      await db.query('users', where: 'id = ?', whereArgs: [kCurrentUserId]);
   if (rows.isNotEmpty) return;
 
   final now = DateTime.now().millisecondsSinceEpoch;
@@ -302,8 +300,10 @@ ThemeData buildAppTheme() {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
       ),
-      labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
-      floatingLabelStyle: const TextStyle(color: AppColors.primary, fontSize: 13),
+      labelStyle:
+          const TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
+      floatingLabelStyle:
+          const TextStyle(color: AppColors.primary, fontSize: 13),
     ),
     bottomSheetTheme: const BottomSheetThemeData(
       backgroundColor: AppColors.surface,
