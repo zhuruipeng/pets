@@ -192,12 +192,9 @@ def _send_to_dev(payload: FeedbackIn, settings: Settings) -> None:
     body = _body(payload)
 
     msg = MIMEText(body, "plain", "utf-8")
-    # ⚠️ **必须 str() 包 Header**。
-    # 裸 Header 在 Python 3.13 上能过、3.11（服务器）上抛
-    # `AttributeError: 'Header' object has no attribute 'encode'`。
-    # 踩过这个坑：Mac 上真的收到邮件了，于是以为代码没问题，一上服务器就挂。
-    msg["Subject"] = str(Header(subject, "utf-8"))
-    msg["From"] = formataddr((str(Header(settings.smtp_from_name, "utf-8")), from_addr))
+    # str(Header) returns raw Unicode, which Python 3.11 cannot always fold.
+    msg["Subject"] = Header(subject, "utf-8").encode()
+    msg["From"] = formataddr((settings.smtp_from_name, from_addr))
     msg["To"] = to_addr
 
     # Reply-To 留空：反馈是匿名的，没有可回复的地址。

@@ -74,7 +74,7 @@ def test_email_is_actually_sent_via_smtp():
     assert msg["To"] == "user@example.com"
     # 标题里必须带验证码：验证码邮件常被收进「其他邮件」，
     # 标题不写就得点开找，而它只有 5 分钟有效期。
-    assert "123456" in str(msg["Subject"])
+    assert str(msg["Subject"]) == _email_subject("login", "123456")
     assert "My Pet" in str(msg["From"])
 
 
@@ -305,18 +305,20 @@ def test_non_ascii_subject_survives_render():
     """中文标题也要能渲染 —— 真实邮件标题是英文，但发件显示名可能带中文。"""
     import io
     from email.generator import BytesGenerator
-    from email.header import Header
-    from email.mime.text import MIMEText
-    from email.policy import SMTP
-    from email.utils import formataddr
+    from email.parser import BytesParser
+    from email.policy import SMTP, default
 
-    msg = MIMEText("验证码正文", "plain", "utf-8")
-    msg["Subject"] = str(Header("你的验证码：123456"))
-    msg["From"] = formataddr(
-        (str(Header("我的宠物", "utf-8")), "noreply@weiyuantool.com")
-    )
+    with patch("app.auth._email_subject", return_value="你的验证码：123456"), \
+            patch("app.auth.smtplib.SMTP_SSL") as mock_ssl:
+        srv = mock_ssl.return_value.__enter__.return_value
+        _dispatch_code("email", "user@example.com", "123456", "login",
+                       _settings(smtp_from_name="我的宠物"))
+        msg = srv.send_message.call_args.args[0]
     buf = io.BytesIO()
     BytesGenerator(buf, policy=SMTP).flatten(msg)
+    parsed = BytesParser(policy=default).parsebytes(buf.getvalue())
+    assert str(parsed["Subject"]) == "你的验证码：123456"
+    assert parsed["From"].addresses[0].display_name == "我的宠物"
     raw = buf.getvalue()
     # 同上：中文标题会被编码成 base64，不能搜明文。
     # 断言「渲染没抛异常 + 头齐全」才是这条测试的意图。

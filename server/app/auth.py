@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
-from email.header import Header
+from email.header import Header as EmailHeader
 from email.mime.text import MIMEText
 from email.utils import formataddr, parseaddr
 
@@ -281,30 +281,10 @@ def _send_email_code(
     body = _email_body(purpose, code)
 
     msg = MIMEText(body, "plain", "utf-8")
-    # ⚠️ **必须 str() 包一层。**
-    #
-    # 踩过的坑，而且是**本地测不出来的那种**：
-    # 直接 `msg["Subject"] = Header(subject)` 在 Python 3.13 上能过，
-    # 在 **3.11（服务器）上抛 `AttributeError: 'Header' object has no
-    # attribute 'encode'`**。
-    #
-    # 当时的情况是：同一份代码在 Mac 上用真授权码发信，**确实收到了**，
-    # 于是以为没问题 —— 结果一上服务器就挂。
-    #
-    # 为什么本地测不出来：`send_message` 内部用 `BytesGenerator` 渲染邮件头，
-    # 那一步才碰 Header 对象。3.13 容忍它，3.11 严格拒绝。
-    #
-    # 两条教训：
-    # 1. **「邮件收到了」不等于「发信代码正确」** —— 成功的假象掩盖了
-    #    3.13 特有的容忍；
-    # 2. **本地与服务器的 Python 版本必须一致**，否则「本地通过」这个
-    #    前提本身就不成立。Mac 3.13 / 服务器 3.11 的组合是隐蔽的坑。
-    msg["Subject"] = str(Header(subject))
-    # formataddr 带显示名，且用 Header 编码中文名 —— 直接塞中文会报
-    # UnicodeEncodeError，或者在部分客户端里显示成乱码。
-    msg["From"] = formataddr(
-        (str(Header(settings.smtp_from_name)), from_addr)
-    )
+    # Encode the subject before Python 3.11's SMTP renderer folds headers.
+    # Keep the email Header distinct from FastAPI's request Header dependency.
+    msg["Subject"] = EmailHeader(subject).encode()
+    msg["From"] = formataddr((settings.smtp_from_name, from_addr))
     msg["To"] = to_addr
 
     try:

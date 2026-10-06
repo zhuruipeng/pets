@@ -95,22 +95,20 @@ def test_message_headers_render_on_old_python():
     auth.py 踩过一次这个坑，feedback.py 复用了同样的写法，
     所以必须测 —— 否则换个 Python 版本就静默炸在真机上。
     """
-    from email.header import Header
-    from email.mime.text import MIMEText
-    from email.utils import formataddr
+    from email.parser import BytesParser
+    from email.policy import default
+    from app.feedback import _send_to_dev
 
-    msg = MIMEText(_body(_payload()), "plain", "utf-8")
-    msg["Subject"] = str(Header(_subject(_payload()), "utf-8"))
-    msg["From"] = formataddr(
-        (str(Header("My Pet", "utf-8")), "noreply@weiyuantool.com")
-    )
-    msg["To"] = "dev@weiyuantool.com"
-
+    with patch("app.feedback.smtplib.SMTP_SSL") as mock_ssl:
+        srv = mock_ssl.return_value.__enter__.return_value
+        _send_to_dev(_payload(), _settings(smtp_from_name="我的宠物"))
+        msg = srv.send_message.call_args.args[0]
     buf = io.BytesIO()
-    # 3.11 上这里会抛 AttributeError
     BytesGenerator(buf, policy=SMTP).flatten(msg)
-    assert b"Subject:" in buf.getvalue()
-    assert b"To: dev@weiyuantool.com" in buf.getvalue()
+    parsed = BytesParser(policy=default).parsebytes(buf.getvalue())
+    assert str(parsed["Subject"]) == _subject(_payload())
+    assert parsed["From"].addresses[0].display_name == "我的宠物"
+    assert str(parsed["To"]) == "dev@weiyuantool.com"
 
 
 # ---------------------------------------------------------------- 失败处理
