@@ -534,6 +534,7 @@ class L {
     // ---- M5 联系方式 ----
     'contact.title': '联系方式',
     'contact.hint': '走失协查卡片会把它印在卡片上，方便拾到的人联系你',
+    'contact.loginLocked': '账号手机号和邮箱需要验证后才能换绑；其它联系方式可在下方填写',
     'contact.phone': '手机号',
     'contact.email': '邮箱',
     'contact.wechat': '微信号',
@@ -1145,6 +1146,7 @@ class L {
     // ---- M5 contact ----
     'contact.title': 'Contact info',
     'contact.hint': 'Printed on the lost-pet card so whoever finds them can reach you',
+    'contact.loginLocked': 'Changing your account phone or email requires verification. Add other contact details below.',
     'contact.phone': 'Phone',
     'contact.email': 'Email',
     'contact.wechat': 'WeChat',

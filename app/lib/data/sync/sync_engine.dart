@@ -115,8 +115,8 @@ class SyncEngine {
   // ---------------------------------------------------------------- 元数据
 
   Future<String?> _meta(String key) async {
-    final rows = await _db
-        .query('sync_meta', where: 'key = ?', whereArgs: [key], limit: 1);
+    final rows = await _db.query('sync_meta',
+        where: 'key = ?', whereArgs: [key], limit: 1);
     if (rows.isEmpty) return null;
     return rows.first['value'] as String?;
   }
@@ -218,7 +218,8 @@ class SyncEngine {
   /// （会抛 [TokenStoreException]），那时元数据要是已经写下去了，
   /// 库里就留下「有 account_id、没有可用令牌」的半截状态，
   /// 下次启动会以「未登录但有账号」的样子出现。
-  Future<void> saveSession(AuthSession session, {required String accountRegion}) async {
+  Future<void> saveSession(AuthSession session,
+      {required String accountRegion}) async {
     await _tokens.write(session.token);
     _cachedToken = session.token;
     _tokenLoaded = true;
@@ -267,15 +268,21 @@ class SyncEngine {
         // token 失效：清掉，让 UI 回到「未登录」。这不是错误，是正常状态。
         if (e.isUnauthorized) {
           await _clearToken();
-          return SyncReport(pushed: pushed, pulled: 0, rejected: rejected, error: e);
+          return SyncReport(
+              pushed: pushed, pulled: 0, rejected: rejected, error: e);
         }
         rethrow;
       }
 
       final pulled = await _pullAll(t);
-      await _setMeta('last_sync_at', '${DateTime.now().millisecondsSinceEpoch}');
+      await _setMeta(
+          'last_sync_at', '${DateTime.now().millisecondsSinceEpoch}');
 
       return SyncReport(pushed: pushed, pulled: pulled, rejected: rejected);
+    } on SyncApiException catch (e) {
+      // pull 也可能在令牌过期后返回 401，不能只在 push 阶段清登录态。
+      if (e.isUnauthorized) await _clearToken();
+      return SyncReport(pushed: 0, pulled: 0, rejected: 0, error: e);
     } catch (e) {
       return SyncReport(pushed: 0, pulled: 0, rejected: 0, error: e);
     } finally {
@@ -293,24 +300,26 @@ class SyncEngine {
 
     // 循环直到 outbox 空：推送过程中可能又有新写入（比如用户还在记东西）。
     for (var round = 0; round < 50; round++) {
-      final rows = await _db.query(
-        'sync_outbox',
-        orderBy: 'updated_at ASC',
-        limit: _pushBatch,
-      );
-      if (rows.isEmpty) break;
-
       final changes = <SyncChange>[];
-      for (final row in rows) {
-        final c = await _snapshot(row);
-        // 本地行已经不存在（被硬删或表对不上）：丢掉这条，别让它卡住队列。
-        if (c != null) changes.add(c);
-      }
-      // 取不到快照的行直接清掉，否则每轮都会捞到它们，死循环。
-      if (changes.isEmpty) {
-        await _db.delete('sync_outbox');
-        break;
-      }
+      // 队列和快照一起读取，避免二者之间的编辑产生时间戳/载荷不一致。
+      final batchSize = await _db.transaction((txn) async {
+        final rows = await txn.query('sync_outbox',
+            orderBy: 'updated_at ASC', limit: _pushBatch);
+        for (final row in rows) {
+          final c = await _snapshot(row, executor: txn);
+          if (c != null) {
+            changes.add(c);
+          } else {
+            // 只清当前失效条目，后面的批次可能仍有有效数据。
+            await txn.delete('sync_outbox',
+                where: 'table_name = ? AND row_id = ?',
+                whereArgs: [row['table_name'], row['row_id']]);
+          }
+        }
+        return rows.length;
+      });
+      if (batchSize == 0) break;
+      if (changes.isEmpty) continue;
 
       final result = await _api.push(
         token: token,
@@ -323,17 +332,30 @@ class SyncEngine {
       // **被拒的也要删**：`stale` 表示服务端已有更新版本，本地这条推不上去，
       // 留着只会每轮重推一次；`forbidden` 是权限问题，重推一万次也一样。
       // 都删掉，然后由随后的 pull 把服务端那份正确数据拉回来。
-      for (final c in [...result.applied, ...result.rejected.map((r) => r.change)]) {
-        await _db.delete(
-          'sync_outbox',
-          where: 'table_name = ? AND row_id = ?',
-          whereArgs: [c.table, c.rowId],
-        );
-      }
+      final acknowledged = [
+        ...result.applied,
+        ...result.rejected.map((r) => r.change)
+      ];
+      await _db.transaction((txn) async {
+        for (final c in acknowledged) {
+          final pending = await txn.query('sync_outbox',
+              where: 'table_name = ? AND row_id = ?',
+              whereArgs: [c.table, c.rowId]);
+          if (pending.isEmpty) continue;
+          final current = await _snapshot(pending.single, executor: txn);
+          // 上传时用户可能又改了同一行，甚至发生在同一毫秒。
+          // 只有队列仍对应刚发送的完整快照时，旧响应才能清掉它。
+          if (current == null ||
+              jsonEncode(current.toPushJson()) == jsonEncode(c.toPushJson())) {
+            await txn.delete('sync_outbox',
+                where: 'table_name = ? AND row_id = ?',
+                whereArgs: [c.table, c.rowId]);
+          }
+        }
+      });
 
-      // 服务端一条都没收（全被拒）且队列没变短，说明这批怎么推都推不动，
-      // 直接退出，避免空转。
-      if (result.applied.isEmpty) break;
+      // 拒绝也是已处理的响应，继续下一批；没有任何确认才停止空转。
+      if (acknowledged.isEmpty) break;
     }
     return (applied, rejected);
   }
@@ -342,18 +364,25 @@ class SyncEngine {
   ///
   /// 返回值需要 `pet_id` 与 `points`：前者服务端用来判可见性，后者是
   /// 轨迹点随 session 一起传的约定（见协议第三节）。
-  Future<SyncChange?> _snapshot(Map<String, dynamic> outboxRow) async {
+  Future<SyncChange?> _snapshot(Map<String, dynamic> outboxRow,
+      {required DatabaseExecutor executor}) async {
     final table = outboxRow['table_name'] as String;
     final rowId = outboxRow['row_id'] as String;
     if (!kSyncableTables.contains(table)) return null;
 
-    final rows =
-        await _db.query(table, where: 'id = ?', whereArgs: [rowId], limit: 1);
+    final rows = await executor.query(table,
+        where: 'id = ?', whereArgs: [rowId], limit: 1);
     if (rows.isEmpty) return null;
     final payload = Map<String, dynamic>.from(rows.first);
 
+    if (table == 'attachments') {
+      // 附件归属只在 outbox 中，本地表没有 pet_id；服务端需从载荷判权限。
+      if (payload['local_only'] == 1) return null;
+      payload['pet_id'] = outboxRow['pet_id'];
+    }
+
     if (table == 'walk_sessions') {
-      final points = await _db.query(
+      final points = await executor.query(
         'walk_points',
         where: 'session_id = ?',
         whereArgs: [rowId],
@@ -387,7 +416,8 @@ class SyncEngine {
     var appliedCount = 0;
 
     for (var round = 0; round < 200; round++) {
-      final result = await _api.pull(token: token, since: since, limit: _pullLimit);
+      final result =
+          await _api.pull(token: token, since: since, limit: _pullLimit);
       if (result.changes.isNotEmpty) {
         appliedCount += await _applyRemote(result.changes);
       }
@@ -427,6 +457,7 @@ class SyncEngine {
   Future<bool> _applyOne(DatabaseExecutor txn, SyncChange c) async {
     final payload = Map<String, dynamic>.from(c.payload);
     payload.remove('points'); // 轨迹点是子资源，单独处理
+    if (c.table == 'attachments') payload.remove('pet_id');
 
     // 本地现有的 updated_at，用来判新旧。
     final local = await txn.query(
@@ -438,9 +469,8 @@ class SyncEngine {
     );
     final localUpdatedAt =
         local.isEmpty ? null : (local.first['updated_at'] as num?)?.toInt();
-    final remoteUpdatedAt = c.updatedAt ??
-        (payload['updated_at'] as num?)?.toInt() ??
-        c.seq;
+    final remoteUpdatedAt =
+        c.updatedAt ?? (payload['updated_at'] as num?)?.toInt() ?? c.seq;
 
     // 远端不比本地新就跳过。**不抛异常、不记录**：这是正常情况
     // （同一行两处都改过，本地那份更新）。
@@ -454,15 +484,16 @@ class SyncEngine {
       payload['id'] = c.rowId;
       // 远端推来的行可能缺列（对面设备 schema 更旧）。用 REPLACE 补齐，
       // 缺的列会是 NULL —— 这些列在对面本来也是空的。
-      await txn.insert(c.table, payload, conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert(c.table, payload,
+          conflictAlgorithm: ConflictAlgorithm.replace);
     } else {
       // **用 update 而不是 REPLACE**：REPLACE 是「删了重插」，
       // payload 里没有的列会被清成 NULL。比如对面推 pets 时没带图片字段，
       // REPLACE 会把本地头像抹掉。
       payload.remove('id');
       if (payload.isNotEmpty) {
-        await txn.update(c.table, payload,
-            where: 'id = ?', whereArgs: [c.rowId]);
+        await txn
+            .update(c.table, payload, where: 'id = ?', whereArgs: [c.rowId]);
       }
     }
 
@@ -521,5 +552,6 @@ class SyncEngine {
   }
 
   /// 让调用方（测试）能拿到 JSON 编码后的快照大小，用于评估批大小。
-  static int snapshotBytes(SyncChange c) => utf8.encode(jsonEncode(c.payload)).length;
+  static int snapshotBytes(SyncChange c) =>
+      utf8.encode(jsonEncode(c.payload)).length;
 }

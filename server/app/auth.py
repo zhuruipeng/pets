@@ -640,6 +640,13 @@ def patch_me(
     if "email" in updates and updates["email"] is not None:
         updates["email"] = normalize_target("email", updates["email"])
 
+    # phone/email 同时是已验证的登录标识。普通资料编辑不能完成换绑，
+    # 否则任意账号可冒用别人号码并劫持后续登录/共养邀请。
+    for key in ("phone", "email"):
+        if key in updates and updates[key] != getattr(user, key):
+            raise HTTPException(status_code=400,
+                                detail="login identifier changes require verification")
+
     for key, value in updates.items():
         setattr(user, key, value)
     user.updated_at = now

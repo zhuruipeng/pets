@@ -20,3 +20,4 @@ gunicorn>=23.0
 
 # ---- dev：开发/测试用，生产镜像里可以不装（sync_logic 的测试不碰数据库）----
 pytest>=8.0
+httpx>=0.27

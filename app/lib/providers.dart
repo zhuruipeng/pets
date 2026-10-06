@@ -773,8 +773,6 @@ class AppActions {
     if (await ref.read(syncEngineProvider).isLoggedIn()) {
       try {
         await ref.read(syncEngineProvider).pushContact(
-              phone: updated.phone,
-              email: updated.email,
               wechat: updated.wechat,
               contactNote: updated.contactNote,
             );

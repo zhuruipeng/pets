@@ -72,7 +72,7 @@ def visible_to(
         pet_id = change.get("pet_id")
         if pet_id is not None and pet_id in member_pet_ids:
             visible.append(change)
-        elif change.get("user_id") == user_id:
+        elif pet_id is None and change.get("user_id") == user_id:
             visible.append(change)
     return visible
 

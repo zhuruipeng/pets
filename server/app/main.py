@@ -24,8 +24,9 @@ from sqlalchemy.orm import Session
 
 from . import auth, feedback, members, sync, unified
 from .config import Settings, get_settings
+from .changes import active_member_pet_ids, member_payload, pet_payload, record_change
 from .db import get_session, init_db
-from .models import Pet
+from .models import Member, Pet, User
 
 
 @asynccontextmanager
@@ -266,10 +267,14 @@ def _to_out(pet: Pet) -> PetOut:
 @app.get("/pets", response_model=list[PetOut], tags=["pets"])
 def list_pets(
     session: Session = Depends(get_session),
-    owner: str = Query(..., description="当前用户 id"),
+    owner: str | None = Query(default=None, description="当前用户 id（兼容旧客户端）"),
     include_archived: bool = False,
+    user: User = Depends(auth.current_user),
 ) -> list[PetOut]:
-    stmt = select(Pet).where(Pet.deleted_at.is_(None), Pet.created_by == owner)
+    if owner is not None and owner != user.id:
+        raise HTTPException(status_code=403, detail="forbidden")
+    stmt = select(Pet).where(Pet.deleted_at.is_(None),
+                             Pet.id.in_(active_member_pet_ids(session, user.id)))
     if not include_archived:
         stmt = stmt.where(Pet.archived_at.is_(None))
     rows = session.execute(stmt.order_by(Pet.created_at)).scalars().all()
@@ -280,18 +285,33 @@ def list_pets(
 def create_pet(
     payload: PetIn,
     session: Session = Depends(get_session),
-    owner: str = Query(..., description="当前用户 id"),
+    owner: str | None = Query(default=None, description="当前用户 id（兼容旧客户端）"),
+    user: User = Depends(auth.current_user),
 ) -> PetOut:
+    if owner is not None and owner != user.id:
+        raise HTTPException(status_code=403, detail="forbidden")
     now = _now_ms()
-    pet = Pet(**payload.model_dump(), created_by=owner, created_at=now, updated_at=now)
+    pet = Pet(**payload.model_dump(), created_by=user.id, created_at=now, updated_at=now)
     session.add(pet)
+    session.flush()
+    member = Member(pet_id=pet.id, user_id=user.id, role="owner",
+                    status="active", joined_at=now)
+    session.add(member)
+    session.flush()
+    record_change(session, table_name="pets", row_id=pet.id, op="upsert",
+                  pet_id=pet.id, user_id=user.id, payload=pet_payload(pet), changed_at=now)
+    record_change(session, table_name="members", row_id=member.id, op="upsert",
+                  pet_id=pet.id, user_id=user.id, payload=member_payload(member, now),
+                  changed_at=now)
     session.commit()
     session.refresh(pet)
     return _to_out(pet)
 
 
 @app.get("/pets/{pet_id}", response_model=PetOut, tags=["pets"])
-def get_pet(pet_id: str, session: Session = Depends(get_session)) -> PetOut:
+def get_pet(pet_id: str, session: Session = Depends(get_session),
+            user: User = Depends(auth.current_user)) -> PetOut:
+    members._require_role(session, pet_id, user, "read")
     pet = session.get(Pet, pet_id)
     if pet is None or pet.deleted_at is not None:
         raise HTTPException(status_code=404, detail="pet not found")
@@ -303,14 +323,19 @@ def update_pet(
     pet_id: str,
     payload: PetIn,
     session: Session = Depends(get_session),
+    user: User = Depends(auth.current_user),
 ) -> PetOut:
+    members._require_role(session, pet_id, user, "edit_profile")
     pet = session.get(Pet, pet_id)
     if pet is None or pet.deleted_at is not None:
         raise HTTPException(status_code=404, detail="pet not found")
 
     for key, value in payload.model_dump().items():
         setattr(pet, key, value)
-    pet.updated_at = _now_ms()
+    pet.updated_at = max(_now_ms(), pet.updated_at + 1)
+    record_change(session, table_name="pets", row_id=pet.id, op="upsert",
+                  pet_id=pet.id, user_id=user.id, payload=pet_payload(pet),
+                  changed_at=pet.updated_at)
 
     session.commit()
     session.refresh(pet)
@@ -333,12 +358,18 @@ def update_pet(
 # None」，返回 dict 就 500。所以这类「什么都不返回」的路由，唯一稳妥的写法
 # 就是**不写返回注解**。
 @app.delete("/pets/{pet_id}", status_code=204, tags=["pets"])
-def delete_pet(pet_id: str, session: Session = Depends(get_session)):
+def delete_pet(pet_id: str, session: Session = Depends(get_session),
+               user: User = Depends(auth.current_user)):
     """软删除。同步场景下硬删会丢数据，务必保持这个行为。"""
+    members._require_role(session, pet_id, user, "delete_pet")
     pet = session.get(Pet, pet_id)
     if pet is None:
         raise HTTPException(status_code=404, detail="pet not found")
-    now = _now_ms()
+    if pet.deleted_at is not None:
+        return
+    now = max(_now_ms(), pet.updated_at + 1)
     pet.deleted_at = now
     pet.updated_at = now
+    record_change(session, table_name="pets", row_id=pet.id, op="delete",
+                  pet_id=pet.id, user_id=user.id, payload=pet_payload(pet), changed_at=now)
     session.commit()

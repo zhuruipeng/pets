@@ -26,7 +26,7 @@ from .changes import (
     resolve_role,
 )
 from .db import get_session
-from .models import Member, Pet, SyncChange, User
+from .models import Member, Pet, PetRecord, SyncChange, User
 from .sync_logic import is_newer, now_ms, role_can, visible_to
 
 router = APIRouter(tags=["sync"])
@@ -83,12 +83,15 @@ def _pet_id_of(change: PushChangeIn) -> str | None:
     if change.table == "users":
         return None
     if change.table == "pets":
-        return change.payload.get("id") or change.row_id
+        return change.row_id
     return change.payload.get("pet_id")
 
 
-def _action_for(table: str) -> str:
-    return _TABLE_ACTION.get(table, "write_data")
+def _action_for(change: PushChangeIn) -> str:
+    if change.table == "pets" and (change.op == "delete" or
+                                  change.payload.get("deleted_at") is not None):
+        return "delete_pet"
+    return _TABLE_ACTION.get(change.table, "write_data")
 
 
 def _rejected(change: PushChangeIn, result: str) -> dict:
@@ -185,6 +188,9 @@ def _bootstrap_owner_if_needed(
         return
     if has_any_member(session, pet_id):
         return
+    existing_pet = session.get(Pet, pet_id)
+    if existing_pet is not None and existing_pet.created_by != user.id:
+        return
     # 只有这行宠物确实更新时才补，避免为一堆过期重传凭空造成员关系。
     current = latest_change(session, "pets", change.row_id)
     current_ts = (current.payload or {}).get("updated_at") if current is not None else None
@@ -228,21 +234,30 @@ def sync_push(
     返回里 rejected 与 applied 一样重要：客户端要据此清 outbox ——
     stale 也删（服务端已有更新的版本，本地这条推不上去，留着只会卡住队列）。
     """
-    # 引导先行：见 _bootstrap_owner_if_needed 的说明。
-    for change in payload.changes:
-        if change.table == "pets" and change.op == "upsert":
-            _bootstrap_owner_if_needed(session, change, user)
-
     applied: list[dict] = []
     rejected: list[dict] = []
-
+    valid_changes: list[PushChangeIn] = []
     for change in payload.changes:
-        if change.table not in SYNC_TABLES:
+        if (change.table not in SYNC_TABLES or change.op not in ("upsert", "delete")
+                or change.payload.get("id", change.row_id) != change.row_id):
             rejected.append(_rejected(change, "invalid"))
             continue
-        if change.op not in ("upsert", "delete"):
-            rejected.append(_rejected(change, "invalid"))
+        if change.table == "members":
+            # 权限关系只通过邀请/接受/移除接口变更，不能发布与实体表不符的快照。
+            rejected.append(_rejected(change, "forbidden"))
             continue
+        valid_changes.append(change)
+
+    # 身份校验在引导之前，避免无效载荷先产生 owner 或修改另一只宠物。
+    for change in valid_changes:
+        if change.table == "pets" and change.op == "upsert":
+            normalized = change.model_copy(update={"payload": {
+                **change.payload, "id": change.row_id, "updated_at": change.updated_at,
+            }})
+            _bootstrap_owner_if_needed(session, normalized, user)
+
+    # 附件依赖父记录；同批输入即使附件在前，也先接收 records。
+    for change in sorted(valid_changes, key=lambda item: item.table == "attachments"):
 
         pet_id = _pet_id_of(change)
         if change.table == "users":
@@ -255,18 +270,40 @@ def sync_push(
                 rejected.append(_rejected(change, "invalid"))
                 continue
             role = resolve_role(session, pet_id, user.id)
-            if role is None or not role_can(role, _action_for(change.table)):
+            if role is None or not role_can(role, _action_for(change)):
                 rejected.append(_rejected(change, "forbidden"))
                 continue
 
         current = latest_change(session, change.table, change.row_id)
-        current_ts = (current.payload or {}).get("updated_at") if current is not None else None
+        if current is not None and current.pet_id != pet_id:
+            rejected.append(_rejected(change, "forbidden"))
+            continue
+        if change.table == "attachments":
+            record_id = change.payload.get("record_id")
+            parent = latest_change(session, "records", record_id) if record_id else None
+            if parent is None and record_id:
+                parent = session.get(PetRecord, record_id)
+            if parent is None or parent.pet_id != pet_id:
+                rejected.append(_rejected(change, "forbidden"))
+                continue
+        if change.table == "pets":
+            existing_pet = session.get(Pet, change.row_id)
+            if (existing_pet is not None and change.payload.get("created_by",
+                    existing_pet.created_by) != existing_pet.created_by):
+                rejected.append(_rejected(change, "forbidden"))
+                continue
+        current_ts = current.changed_at if current is not None else None
         if not is_newer(change.updated_at, current_ts):
             rejected.append(_rejected(change, "stale"))
             continue
 
         # payload 原样存：walk_sessions 的轨迹点就在 payload["points"] 里，
         # 不拆到别处（见协议第三节）。拆开会让「整段覆盖」的语义无处落脚。
+        snapshot = {**change.payload, "id": change.row_id, "updated_at": change.updated_at}
+        if change.op == "delete":
+            snapshot["deleted_at"] = snapshot.get("deleted_at") or change.updated_at
+        if change.table == "pets":
+            _ensure_pet_row(session, snapshot)
         record_change(
             session,
             table_name=change.table,
@@ -274,7 +311,7 @@ def sync_push(
             op=change.op,
             pet_id=pet_id,
             user_id=user.id,
-            payload=change.payload,
+            payload=snapshot,
             changed_at=change.updated_at,
         )
         # 立刻 flush：同一批次里对同一行的多条变更要能相互看到，

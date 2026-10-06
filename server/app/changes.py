@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Member, SyncChange
+from .models import Member, Pet, SyncChange
 
 
 def record_change(
@@ -121,3 +121,10 @@ def member_payload(member: Member, changed_at: int) -> dict[str, Any]:
         "deleted_at": member.deleted_at,
         "updated_at": changed_at,
     }
+
+
+def pet_payload(pet: Pet) -> dict[str, Any]:
+    """实体档案的同步快照；布尔值与客户端 SQLite 的 0/1 口径一致。"""
+    values = {column.name: getattr(pet, column.name) for column in Pet.__table__.columns}
+    return {key: int(value) if isinstance(value, bool) else value
+            for key, value in values.items()}

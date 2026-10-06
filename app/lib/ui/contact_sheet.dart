@@ -58,6 +58,7 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    final loginIdentifiersLocked = widget.user.region != 'local';
 
     return Padding(
       padding: EdgeInsets.only(bottom: viewInsets),
@@ -128,8 +129,15 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
                     ),
                   ),
                   const SizedBox(height: AppSpace.gapL),
+                  if (loginIdentifiersLocked) ...[
+                    Text(L.t('contact.loginLocked'),
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                    const SizedBox(height: AppSpace.gapM),
+                  ],
                   TextField(
                     controller: _phone,
+                    readOnly: loginIdentifiersLocked,
                     keyboardType: TextInputType.phone,
                     decoration: InputDecoration(
                       labelText: L.t('contact.phone'),
@@ -141,12 +149,14 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
                     controller: _wechat,
                     decoration: InputDecoration(
                       labelText: L.t('contact.wechat'),
-                      prefixIcon: const Icon(Icons.chat_bubble_outline, size: 18),
+                      prefixIcon:
+                          const Icon(Icons.chat_bubble_outline, size: 18),
                     ),
                   ),
                   const SizedBox(height: AppSpace.gapM),
                   TextField(
                     controller: _email,
+                    readOnly: loginIdentifiersLocked,
                     keyboardType: TextInputType.emailAddress,
                     decoration: InputDecoration(
                       labelText: L.t('contact.email'),

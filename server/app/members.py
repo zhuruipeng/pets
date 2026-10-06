@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from .auth import current_user
 from .changes import member_payload, record_change, resolve_role
 from .db import get_session
-from .models import Member, Pet, User
+from .models import Member, Pet, SyncChange, User
 from .sync_logic import normalize_target, now_ms, role_can
 
 router = APIRouter(tags=["members"])
@@ -67,26 +67,28 @@ def invite_member(
             select(Member).where(
                 Member.pet_id == pet_id,
                 Member.user_id == invited.id,
-                Member.deleted_at.is_(None),
             )
         )
         .scalars()
         .first()
     )
-    if existing is not None:
+    if existing is not None and existing.deleted_at is None:
         detail = "already a member" if existing.status == "active" else "already invited"
         raise HTTPException(status_code=409, detail=detail)
 
     now = now_ms()
     # joined_at 先记邀请时间；接受时会被改成真正加入的时间（见 accept）。
-    member = Member(
-        pet_id=pet_id,
-        user_id=invited.id,
-        role=payload.role,
-        status="pending",
-        joined_at=now,
-    )
-    session.add(member)
+    if existing is None:
+        member = Member(pet_id=pet_id, user_id=invited.id, role=payload.role,
+                        status="pending", joined_at=now)
+        session.add(member)
+    else:
+        # UNIQUE(pet_id,user_id) 包含已软删行，重邀必须复用原行。
+        member = existing
+        member.role = payload.role
+        member.status = "pending"
+        member.joined_at = now
+        member.deleted_at = None
     session.flush()
 
     # 成员变更要进同步日志（pet_id 用该宠物），否则其他设备看不到新人。
@@ -203,6 +205,21 @@ def accept_invite(
         payload=member_payload(member, now),
         changed_at=now,
     )
+    # 授权前各设备已推进全局游标，旧宠物数据当时被过滤掉了。
+    # 重发每行最新快照（含墓碑），保留 LWW 时间戳。
+    # 已有成员幂等跳过，新成员的所有设备都能接到历史。
+    session.flush()
+    latest_seqs = (select(func.max(SyncChange.seq))
+                   .where(SyncChange.pet_id == member.pet_id)
+                   .group_by(SyncChange.table_name, SyncChange.row_id))
+    snapshots = session.execute(
+        select(SyncChange).where(SyncChange.seq.in_(latest_seqs))
+        .order_by(SyncChange.seq)
+    ).scalars().all()
+    for snapshot in snapshots:
+        record_change(session, table_name=snapshot.table_name, row_id=snapshot.row_id,
+                      op=snapshot.op, pet_id=snapshot.pet_id, user_id=snapshot.user_id,
+                      payload=dict(snapshot.payload), changed_at=snapshot.changed_at)
     session.commit()
     return {"ok": True}
 
