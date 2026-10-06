@@ -127,6 +127,147 @@ void main() {
           reason: '已有记录不会被追溯修改，新记录才会带');
     });
 
+    group('崩溃自动上报', () {
+      /// 收集每次调用，便于断言内容。
+      late List<Map<String, String?>> sent;
+
+      /// 装一个假的上报器。**必须换掉真的** —— 真发会把测试数据
+      /// 真的送到开发者的邮箱，而且依赖网络，结果不确定。
+      setUp(() {
+        sent = [];
+        CrashLog.feedbackSender =
+            ({required String message,
+              String kind = 'manual',
+              String? appVersion,
+              String? region,
+              String? platform,
+              String? stack}) async {
+          sent.add({
+            'message': message,
+            'kind': kind,
+            'appVersion': appVersion,
+            'region': region,
+            'platform': platform,
+            'stack': stack,
+          });
+        };
+      });
+
+      tearDown(() {
+        // 恢复成真的，否则后续测试会用到假实现
+        CrashLog.feedbackSender =
+            ({required String message,
+              String kind = 'manual',
+              String? appVersion,
+              String? region,
+              String? platform,
+              String? stack}) async {};
+      });
+
+      test('启动后把待传的崩溃全部送出并清空', () async {
+        await log.record(CrashEntry(
+          at: DateTime.now(),
+          kind: 'zone',
+          message: 'boom',
+          stack: '#0 main',
+          context: const {'appVersion': '0.1.8+10', 'region': 'intl'},
+        ));
+
+        await log.autoUpload();
+
+        expect(sent.length, 1);
+        expect(sent.first['message'], contains('boom'));
+        // kind 要能区分「自动上报的崩溃」与「用户手动提的建议」
+        expect(sent.first['kind'], 'crash-zone');
+        // 版本与区域必须带上 —— 没有版本号的崩溃没法定位是哪一版出的
+        expect(sent.first['appVersion'], '0.1.8+10');
+        expect(sent.first['region'], 'intl');
+        // 送出的应清空，否则下次启动会重复送同一批
+        expect(log.recent, isEmpty);
+      });
+
+      test('**上传失败时保留记录**（关键决策）', () async {
+        // 崩���样本可能隔很久才复现一次，丢一条就少一个样本。
+        // 而「请求返回 200」也不保证对方真收到了。
+        // 所以失败一律保留，等下次启动再试。
+        CrashLog.feedbackSender =
+            ({required String message,
+              String kind = 'manual',
+              String? appVersion,
+              String? region,
+              String? platform,
+              String? stack}) async {
+          throw Exception('network down');
+        };
+
+        await log.record(CrashEntry(
+          at: DateTime.now(),
+          kind: 'zone',
+          message: 'boom',
+          stack: 's',
+        ));
+        await log.autoUpload();
+
+        expect(log.recent.length, 1, reason: '失败时不该丢记录');
+      });
+
+      test('没有待传记录时不发请求', () async {
+        await log.autoUpload();
+        expect(sent, isEmpty);
+      });
+
+      test('上报内容不含任何账号或设备标识', () async {
+        // 这是隐私政策的红线：不收设备唯一标识、不做用户画像。
+        // 定位 bug 只需要「什么错、哪一版、什么平台」，不需要「是谁」。
+        await log.record(CrashEntry(
+          at: DateTime.now(),
+          kind: 'zone',
+          message: 'boom',
+          stack: 's',
+          context: const {
+            'appVersion': '0.1.8+10',
+            'region': 'intl',
+            'platform': 'iOS',
+          },
+        ));
+        await log.autoUpload();
+
+        final blob = sent.first.values.join(' ');
+        for (final banned in ['imei', 'oaid', 'idfa', 'device_id', '手机号']) {
+          expect(blob.toLowerCase(), isNot(contains(banned)));
+        }
+      });
+
+      test('重复调用不会并发上传', () async {
+        var inflight = 0;
+        CrashLog.feedbackSender =
+            ({required String message,
+              String kind = 'manual',
+              String? appVersion,
+              String? region,
+              String? platform,
+              String? stack}) async {
+          inflight++;
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          inflight--;
+        };
+
+        await log.record(CrashEntry(
+          at: DateTime.now(),
+          kind: 'zone',
+          message: 'boom',
+          stack: 's',
+        ));
+
+        await Future.wait([
+          log.autoUpload(),
+          log.autoUpload(),
+          log.autoUpload(),
+        ]);
+        expect(inflight, 0);
+      });
+    });
+
     test('clear 清空内存', () async {
       await log.record(CrashEntry(
         at: DateTime.now(),

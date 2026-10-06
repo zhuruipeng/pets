@@ -97,6 +97,25 @@ Future<void> _stampVersion() async {
   }
 }
 
+/// 首帧之后再上传崩溃记录。
+///
+/// ## 为什么延后到首帧之后
+///
+/// 上传要走网络，慢的话会拖慢启动。而启动速度是用户直接感知的，
+/// 崩溃上报是后台义务 —— 两者冲突时先保证前者。
+///
+/// ## 为什么要等一会再开始
+///
+/// 刚启动时往往网络还没就绪（要连 WiFi、握手 TLS、解析 DNS）。
+/// 立刻发大概率失败，失败就得等下次启动 —— 白白浪费一次机会。
+/// 延迟几秒给网络留出时间。
+Future<void> _uploadCrashesLater() async {
+  await Future<void>.delayed(const Duration(seconds: 3));
+  if (CrashLog.instance.recent.isNotEmpty) {
+    await CrashLog.instance.autoUpload();
+  }
+}
+
 /// 启动流程。与 [main] 分开是因为要整段被 zone 包住。
 Future<void> _bootstrap() async {
   // 数据库先就位，避免首帧闪一下空态。
@@ -117,6 +136,11 @@ Future<void> _bootstrap() async {
   if (launchId != null) _pendingReminderId = launchId;
 
   runApp(const ProviderScope(child: PetApp()));
+
+  // 崩溃记录自动补传。**放在 runApp 之后** ——
+  // 上报要发网络请求，可能慢；放在它前面会拖慢首帧，
+  // 而首帧延迟是用户能直接感知到的，崩溃上报不是。
+  unawaited(_uploadCrashesLater());
 }
 
 /// 通知点击的统一入口。context 还没准备好就先记下来，首帧后再弹。

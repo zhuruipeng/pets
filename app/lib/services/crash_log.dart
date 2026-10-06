@@ -34,6 +34,21 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../data/sync/sync_api.dart';
+
+/// 反馈提交的函数签名。
+///
+/// 抽成 typedef 是为了让测试能注入假实现 —— `autoUpload` 内部要发网络请求，
+/// 测试里真发会既慢又不确定（还可能真的把测试数据发到开发者邮箱）。
+typedef FeedbackFn = Future<void> Function({
+  required String message,
+  String kind,
+  String? appVersion,
+  String? region,
+  String? platform,
+  String? stack,
+});
+
 /// 保留最近多少条。
 ///
 /// 30 条的取舍：一个人一周能踩到的 bug 撑死十条，30 条够回溯一个多月；
@@ -172,6 +187,102 @@ class CrashLog {
       debugPrint('[crash_log] 写入失败：$e');
     }
   }
+
+  /// 把当前缓冲写回文件。
+  ///
+  /// 为什么需要它：自动上报成功后要从缓冲里**删掉已送达的**，
+  /// 而文件是追加写的、不会自动收缩 —— 不重写一遍的话，
+  /// 下次启动又把旧的读回来了，等于没删。
+  Future<void> _persist() async {
+    final file = _file;
+    if (file == null) return;
+    try {
+      await file.writeAsString(
+        _buffer.map((e) => '${jsonEncode(e.toJson())}\n').join(),
+      );
+    } catch (e) {
+      debugPrint('[crash_log] 重写失败：$e');
+    }
+  }
+
+  /// 把未上传的崩溃记录上传。
+  ///
+  /// ## 为什么是「下次启动时传」而不是「崩溃时传」
+  ///
+  /// 崩溃瞬间 App 已经死了，socket 也断了 —— 那时发请求必然失败。
+  /// 所以记录留在本地，等**下次启动**再补传。这也符合
+  /// 「崩溃时用户不会想立刻联网」的实际。
+  ///
+  /// ## 为什么是「匿名」的
+  ///
+  /// 隐私政策里承诺不收集设备唯一标识、不做用户画像。所以上传的内容里
+  /// **没有** 设备 ID、账号、手机号、IMEI 之类的东西，只有：
+  /// 崩溃类型、消息、堆栈、App 版本、区域、平台。
+  ///
+  /// 这意味着同两个人的两次相同崩溃无法区分 —— 这是**故意的**：
+  /// 定位 bug 只需要「什么错、在哪一版、什么设备」，不需要「是谁」。
+  ///
+  /// ## 为什么上传失败不重试到天荒地老
+  ///
+  /// 离线状态下重试没有意义，且每次启动都重试会耗电。
+  /// 失败就留在本地，等下次启动再试 —— 那时候用户可能已经联网了。
+  Future<void> autoUpload() async {
+    if (_buffer.isEmpty) return;
+    if (_uploading) return;
+    _uploading = true;
+    try {
+      var sent = 0;
+      for (final e in _buffer) {
+        try {
+          await feedbackSender(
+            message: '[自动上报] ${e.message.split('\n').first}',
+            kind: 'crash-${e.kind}',
+            appVersion: e.context['appVersion'] ?? _appVersion,
+            region: e.context['region'] ?? _region,
+            platform: e.context['platform'] ?? Platform.operatingSystem,
+            stack: e.stack,
+          );
+          sent++;
+        } catch (_) {
+          // 单条失败就停 —— 多半是网络问题，继续试也是白试，
+          // 而且会把用户电量耗在重试上。
+          break;
+        }
+      }
+      if (sent > 0) {
+        // 只清掉**已确认送达**的那些，剩下的留在本地等下次。
+        // 为什么不全清：请求返回不代表对方真的收到了，
+        // 而崩溃记录复现一次可能隔很久，丢一条就少一个样本。
+        _buffer.removeRange(0, sent);
+        await _persist();
+        debugPrint('[crash_log] 已自动上报 $sent 条崩溃记录');
+      }
+    } catch (_) {
+      // 上报本身绝不能影响 App 启动 —— 它失败就静默，
+      // 反正记录还在本地，用户可以手动提交。
+    } finally {
+      _uploading = false;
+    }
+  }
+
+  bool _uploading = false;
+
+  /// 注入点。测试用它替换成假实现，避免真发请求。
+  ///
+  /// 必须是 `FeedbackFn`（一个闭包）而不是 `SyncApi` —— 要绑的是
+  /// 「提交反馈」这个动作，不是整个 API 客户端。返回 SyncApi 会让
+  /// 类型不匹配，而且测试想替换时还得造一个真的 SyncApi。
+  @visibleForTesting
+  static FeedbackFn feedbackSender = ({required String message, String kind = 'manual', String? appVersion, String? region, String? platform, String? stack}) {
+        return SyncApi().submitFeedback(
+          message: message,
+          kind: kind,
+          appVersion: appVersion,
+          region: region,
+          platform: platform,
+          stack: stack,
+        );
+      };
 
   /// 一键清空。用户觉得「这些都修好了」时该能自己删。
   Future<void> clear() async {
