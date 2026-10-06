@@ -1,7 +1,7 @@
 # My Pet · Privacy Policy
 
 **Effective date:** 30 September 2026
-**Last updated:** 30 September 2026
+**Last updated:** 6 October 2026
 
 This policy explains what information "My Pet" (the "App") collects, how we use it,
 where it is stored, and how you can manage it. The operator is **Linyi Weiyuan Tools**.
@@ -10,6 +10,10 @@ where it is stored, and how you can manage it. The operator is **Linyi Weiyuan T
 > not in the App — advertising SDKs, analytics tracking, server-side push, AI analysis —
 > it is not listed here. Describing collection that does not exist is worse than
 > omitting it: if a store audit finds the mismatch, the policy loses your trust for good.
+>
+> The one exception is **crash logs** (see 2.4), which really are uploaded
+> automatically. That is stated plainly here rather than papered over with an
+> argument that crash logs "aren't analytics".
 
 ---
 
@@ -47,6 +51,24 @@ your region after you deliberately sign in. Photos are never uploaded.
 - No third-party analytics services
 - We do not read your other photos — we only take the single image you select in the
   system photo picker
+
+### 2.4 Crash logs (the only thing uploaded automatically)
+
+When the App crashes, it records an error report and sends it to our server **the next
+time you open the App**, so we can fix the problem. It contains:
+
+- the error type and message
+- the program stack trace (which line went wrong)
+- your App version, your region, and your device OS version
+
+**It does not contain** your account, phone number, pet's name, entries, photos,
+or anything that could identify you. It includes no device identifier.
+
+Its only purpose is to locate and fix crashes. **It is never used to analyse how you
+use the App.**
+
+You can review and delete these records under "My page -> Report a problem";
+anything you delete there will no longer be uploaded.
 
 ---
 
