@@ -38,7 +38,8 @@ PRIVACY = os.path.join(RUNNER, "PrivacyInfo.xcprivacy")
 # iOS 这边就不能还是 flutter create 生成的 com.weiyuantool.petApp。
 # 两个市场是**两个独立的应用**，能在同一台手机上并存对比。
 INTL_BUNDLE_ID = "com.weiyuantool.pet"
-INTL_DISPLAY_NAME = "My Pet"
+# 每个 Runner 配置分别设置 cn / intl 桌面名称，修复脚本不能覆盖成固定名称。
+DISPLAY_NAME_SETTING = "$(APP_DISPLAY_NAME)"
 
 # ---- 权限声明文案 ----
 #
@@ -146,9 +147,9 @@ def apply_info_plist(check_only: bool) -> list[str]:
     pending: list[str] = []
 
     # 1. 桌面显示名 + 包名
-    if plist.get("CFBundleDisplayName") != INTL_DISPLAY_NAME:
-        plist["CFBundleDisplayName"] = INTL_DISPLAY_NAME
-        pending.append(f"CFBundleDisplayName = {INTL_DISPLAY_NAME}")
+    if plist.get("CFBundleDisplayName") != DISPLAY_NAME_SETTING:
+        plist["CFBundleDisplayName"] = DISPLAY_NAME_SETTING
+        pending.append(f"CFBundleDisplayName = {DISPLAY_NAME_SETTING}")
 
     # 2. 权限声明
     for key, desc in PERMISSION_KEYS:

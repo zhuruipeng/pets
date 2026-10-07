@@ -26,6 +26,9 @@ Future<void> runUpdateCheck(
   final container = ProviderScope.containerOf(context, listen: false);
   final service = container.read(appUpdateServiceProvider);
 
+  // iOS 不能用安卓的版本清单、强制更新门槛和安装流程。
+  if (!service.supportsUpdates) return;
+
   final info = await PackageInfo.fromPlatform();
   final currentBuild = int.tryParse(info.buildNumber) ?? 0;
 
@@ -143,7 +146,8 @@ Future<void> _downloadAndInstall(
   required UpdateManifest manifest,
 }) async {
   final progress = ValueNotifier<double?>(0);
-  final status = ValueNotifier<String>(L.tp('update.downloading', {'percent': 0}));
+  final status =
+      ValueNotifier<String>(L.tp('update.downloading', {'percent': 0}));
 
   // 用不可关的对话框承载进度。下载中途被划掉会留下半个 APK，
   // 下次安装直接失败 —— 不如不让关。
@@ -238,6 +242,5 @@ Widget _kv(String label, String value, {bool highlight = false}) {
 }
 
 void _toast(BuildContext context, String text) {
-  ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(text)));
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 }

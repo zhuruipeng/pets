@@ -1,14 +1,13 @@
 #!/bin/zsh
 # 打「海外区（intl）」iOS 未签名 ipa。
 #
-# 为什么是未签名：没有 $99/年的 Apple Developer 账号，签不了名。
+# 为什么是未签名：还没有配置开发团队与分发签名。
 # 产物要用 Sideloadly（https://sideloadly.io）或 AltStore 侧载，
 # 免费 Apple ID 签出来的包 **7 天过期**。
 #
 # 两个值绑死在这个脚本里，别手敲 flutter 命令：
-#   --flavor 不是必须的（iOS 侧没有 Android 那套 flavor），
-#   但 **--dart-define=REGION=intl 漏掉就会打出「中文区包 + 海外区行为」的错包** ——
-#   能装、能启动，只有联网登录时才露馅。
+#   --flavor intl 对应共享 Xcode scheme，REGION 对应同一个市场。
+# 通用模拟器 / 两区构建入口：python3 tool/build_mobile.py，见双端开发说明。
 set -euo pipefail
 
 FLUTTER="$HOME/development/flutter/bin/flutter"
@@ -82,7 +81,8 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
   "$FLUTTER" build ios \
     --release \
     --no-codesign \
-    --dart-define=REGION=intl
+    --flavor intl \
+    --dart-define-from-file=dart_define/intl.json
 
 [ -d "$APP" ] || { echo "✗ 没产出 $APP，构建应该失败了" >&2; exit 1; }
 

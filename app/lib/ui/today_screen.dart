@@ -15,7 +15,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/feature_flags.dart';
+import '../core/app_capabilities.dart';
 import '../core/l10n.dart';
 import '../core/region.dart';
 import '../core/theme.dart';
@@ -81,7 +81,7 @@ class TodayScreen extends ConsumerWidget {
               ],
 
               // 遛狗入口见 feature_flags.dart：GPS 没接之前不能放出来。
-              if (kWalkEnabled)
+              if (AppCapabilities.current.supports(AppFeature.walkTracking))
                 _WalkBanner(activeWalk: activeWalk, pet: currentPet),
 
               upcoming.when(
@@ -467,7 +467,7 @@ class _WeekOverview extends ConsumerWidget {
     String weightLabel,
   ) {
     final tiles = <Widget>[
-      if (kWalkEnabled)
+      if (AppCapabilities.current.supports(AppFeature.walkTracking))
         Expanded(
           child: StatTile(
             icon: Icons.directions_walk_rounded,

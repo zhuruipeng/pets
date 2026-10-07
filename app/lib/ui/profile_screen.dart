@@ -25,7 +25,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../core/feature_flags.dart';
+import '../core/app_capabilities.dart';
 import '../core/l10n.dart';
 import '../core/region.dart';
 import '../core/theme.dart';
@@ -507,7 +507,7 @@ class _InfoTab extends ConsumerWidget {
         // ---- 遛狗记录 ----
         const SizedBox(height: AppSpace.gapXl),
         // 遛狗没开时整块不出现，见 feature_flags.dart。
-        if (kWalkEnabled) ...[
+        if (AppCapabilities.current.supports(AppFeature.walkTracking)) ...[
           Text(
             L.t('profile.section.walks'),
             style: const TextStyle(
