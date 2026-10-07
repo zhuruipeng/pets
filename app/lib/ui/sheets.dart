@@ -13,7 +13,9 @@ import '../core/theme.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../domain/expense_stats.dart';
+import '../domain/symptom_observation.dart';
 import '../providers.dart';
+import 'symptom_fields.dart';
 import 'widgets.dart';
 
 // ------------------------------------------------------------------ 添加宠物
@@ -565,6 +567,7 @@ class _AddRecordSheet extends ConsumerStatefulWidget {
 
 class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
   late RecordType _type = widget.initialType;
+  SymptomObservation _symptom = const SymptomObservation();
   final _value = TextEditingController();
   final _note = TextEditingController();
 
@@ -629,6 +632,7 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     RecordType.dewormExternal,
     RecordType.medication,
     RecordType.medical,
+    RecordType.symptom,
     RecordType.grooming,
     RecordType.feeding,
     RecordType.water,
@@ -704,6 +708,11 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
           const SizedBox(height: 16),
 
           _typeFields(unit, lastKg),
+          if (_error != null && _type == RecordType.symptom)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_error!, style: const TextStyle(color: AppColors.danger)),
+            ),
 
           const SizedBox(height: 16),
           TextField(
@@ -757,6 +766,11 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
         RecordType.weight => _weightField(unit, lastKg),
         RecordType.medication => _medicationFields(),
         RecordType.medical => _medicalFields(),
+        RecordType.symptom => SymptomFields(
+            petId: widget.petId,
+            initial: _symptom,
+            onChanged: (v) => _symptom = v,
+          ),
         RecordType.feeding => _feedingFields(),
         // 饮水与睡眠填的是「数值 + 固定单位」。走通用文本框但要补单位后缀 ——
         // 否则用户不知道那个 200 是毫升还是口数，也没法参与「今天喝了多少」的统计。
@@ -1135,6 +1149,15 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     Map<String, dynamic> payload = const {};
 
     switch (_type) {
+      case RecordType.symptom:
+        try {
+          payload = _symptom.toPayload();
+          text = _symptom.symptom;
+        } on ArgumentError catch (e) {
+          setState(() => _error = L.error(e));
+          return;
+        }
+        break;
       case RecordType.weight:
         // 输入按展示单位，存储统一公制。
         num_ = Units.fromDisplayWeight(_currentWeight(unit), unit);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import json
 from fastapi.testclient import TestClient
 from sqlalchemy import BigInteger, create_engine, event, select
 from sqlalchemy.dialects.postgresql import JSONB
@@ -168,6 +169,40 @@ def push(db, user_id, table, row_id, payload, timestamp=10, op="upsert"):
                                    updated_at=timestamp, op=op)]),
         user=db.get(User, user_id), session=db,
     )
+
+
+@pytest.mark.parametrize("user_id,allowed", [("owner", True), ("editor", True), ("viewer", False), ("outsider", False)])
+def test_symptom_observation_uses_existing_sync_and_pet_permissions(db, user_id, allowed):
+    observation = {"symptom": "vomiting", "count": 2, "appetite": "reduced",
+                   "energy": "low", "stool": "soft", "medical_record_id": "visit"}
+    result = push(db, user_id, "records", "observation", {
+        "pet_id": "pet", "type": "symptom", "recorded_at": 8,
+        "created_at": 10, "created_by": user_id, "payload": json.dumps(observation),
+    })
+    assert bool(result["applied"]) == allowed
+    if allowed:
+        saved = db.execute(select(SyncChange).where(SyncChange.row_id == "observation")).scalar_one()
+        assert saved.payload["type"] == "symptom"
+        assert json.loads(saved.payload["payload"]) == observation
+        assert saved.payload["recorded_at"] == 8
+    else:
+        assert result["rejected"][0]["result"] == "forbidden"
+        assert db.execute(select(SyncChange).where(SyncChange.row_id == "observation")).first() is None
+
+
+def test_restored_completion_keeps_backup_caregiver_without_claiming_the_importer_performed_care(db):
+    changes = _care_changes()
+    changes[0].payload.update(created_by=None, actor_name="Original caregiver")
+    details = json.loads(changes[1].payload["payload"])
+    details["backup_actor_name"] = "Original caregiver"
+    changes[1].payload["payload"] = json.dumps(details)
+    result = sync_push(PushIn(changes=changes), user=db.get(User, "owner"), session=db)
+    assert len(result["applied"]) == 3
+    log = db.execute(select(SyncChange).where(SyncChange.table_name == "reminder_logs")).scalar_one()
+    assert log.payload["created_by"] is None
+    assert log.payload["actor_name"] == "Original caregiver"
+    record = db.execute(select(SyncChange).where(SyncChange.table_name == "records")).scalar_one()
+    assert json.loads(record.payload["payload"])["backup_actor_name"] == "Original caregiver"
 
 
 @pytest.mark.parametrize("method,url,body", [

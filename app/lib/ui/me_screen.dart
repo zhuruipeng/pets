@@ -25,6 +25,7 @@ import 'feedback_page.dart';
 import 'legal_page.dart';
 import 'sheets.dart';
 import 'update_flow.dart';
+import 'backup_page.dart';
 import 'widgets.dart';
 
 /// 联系方式摘要：一行里把填过的都列出来，没填的跳过。
@@ -209,6 +210,20 @@ class MeScreen extends ConsumerWidget {
           ],
         ),
 
+        const SizedBox(height: AppSpace.gapM),
+        _Card(
+          title: L.t('backup.title'),
+          icon: Icons.save_alt,
+          children: [
+            _LinkRow(
+              icon: Icons.folder_zip_outlined,
+              label: L.t('backup.title'),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const BackupPage()),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: AppSpace.gapM),
         _Card(
           title: L.t('me.about'),

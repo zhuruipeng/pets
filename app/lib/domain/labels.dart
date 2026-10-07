@@ -13,6 +13,7 @@ import '../core/l10n.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import 'immunization.dart' show PlanItemType;
+import 'symptom_observation.dart';
 
 /// 记录类型 → 展示名。
 String recordTypeLabel(RecordType type) => switch (type) {
@@ -22,6 +23,7 @@ String recordTypeLabel(RecordType type) => switch (type) {
       RecordType.dewormExternal => L.t('plan.deworm.external'),
       RecordType.medication => L.t('addRecord.type.medication'),
       RecordType.medical => L.t('addRecord.type.medical'),
+      RecordType.symptom => L.t('observation.title'),
       RecordType.grooming => L.t('addRecord.type.grooming'),
       RecordType.feeding => L.t('addRecord.type.feeding'),
       RecordType.water => L.t('addRecord.type.water'),
@@ -160,6 +162,9 @@ String feedKindLabel(String code) => switch (code) {
 /// 体重走单位换算；喂食带自己存的 unit（g）；都没有就落回 valueText。
 /// 算不出来返回 null，调用方不显示这一行 —— 不拿占位符糊弄。
 String? recordValueLine(PetRecord r, WeightUnit unit) {
+  if (r.type == RecordType.symptom) {
+    return SymptomObservation.fromRecord(r)?.title ?? r.valueText;
+  }
   final v = r.valueNum;
   if (v != null) {
     if (r.type == RecordType.weight) return Units.formatWeight(v, unit);
@@ -181,6 +186,8 @@ String recordPayloadSummary(PetRecord r) {
   final p = r.payload;
   final parts = <String>[];
   switch (r.type) {
+    case RecordType.symptom:
+      return SymptomObservation.fromRecord(r)?.summary ?? '';
     case RecordType.medication:
       final dose = (p['dose'] as String?)?.trim() ?? '';
       final route = (p['route'] as String?) ?? '';

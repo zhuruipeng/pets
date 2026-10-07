@@ -447,6 +447,7 @@ IconData recordTypeIcon(RecordType type) => switch (type) {
       RecordType.dewormExternal => Icons.bug_report_outlined,
       RecordType.medication => Icons.medication_liquid_outlined,
       RecordType.medical => Icons.local_hospital_outlined,
+      RecordType.symptom => Icons.health_and_safety_outlined,
       RecordType.grooming => Icons.shower_outlined,
       RecordType.feeding => Icons.restaurant_outlined,
       // 注意 toilet 已经占了 water_drop，饮水另用一个杯子图标。

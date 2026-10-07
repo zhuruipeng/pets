@@ -36,10 +36,20 @@ import 'domain/immunization.dart';
 import 'domain/pet_report.dart';
 import 'domain/medication_course.dart';
 import 'domain/family_care.dart';
+import 'domain/symptom_observation.dart';
 import 'services/app_update_service.dart';
 import 'services/report_renderer.dart';
 import 'services/avatar_store.dart';
 import 'services/notification_service.dart';
+import 'services/backup_service.dart';
+
+final backupServiceProvider = FutureProvider<BackupService>((ref) async {
+  await ref.watch(dbReadyProvider.future);
+  return BackupService(
+    db: ref.read(databaseProvider).db,
+    documentsPath: (await getApplicationDocumentsDirectory()).path,
+  );
+});
 
 /// 未登录时的占位用户 id。登录后被 [UserRepository.adoptAccount] 换成账号 id。
 /// 保留这个名字是为了不让已有调用点（created_by 的赋值处）全改一遍。
@@ -560,6 +570,28 @@ class AppActions {
   }) async {
     final actor = await _users.current();
     await _requirePetPermission(petId);
+    if (type == RecordType.symptom) {
+      final observation = SymptomObservation.fromPayload(payload);
+      if (observation == null) throw ArgumentError('observation.invalid');
+      if (observation.medicalRecordId != null) {
+        final visit = await _records.findById(observation.medicalRecordId!);
+        if (visit == null ||
+            visit.petId != petId ||
+            visit.type != RecordType.medical ||
+            visit.deletedAt != null) {
+          throw ArgumentError('observation.linkUnavailable');
+        }
+      }
+      if (observation.courseReminderId != null) {
+        final reminder = await _reminders.findById(observation.courseReminderId!);
+        if (reminder == null ||
+            reminder.petId != petId ||
+            reminder.deletedAt != null ||
+            MedicationCourse.fromReminder(reminder) == null) {
+          throw ArgumentError('observation.linkUnavailable');
+        }
+      }
+    }
     await _records.createSimple(
       petId: petId,
       type: type,

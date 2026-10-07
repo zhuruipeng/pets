@@ -51,6 +51,8 @@ import 'sheets.dart';
 import 'walk_detail.dart';
 import 'widgets.dart';
 import 'medication_courses.dart';
+import 'symptom_observations.dart';
+import 'care_handoff.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -795,6 +797,22 @@ class _HealthTab extends ConsumerWidget {
       ),
       children: [
         MedicationCoursesLink(pet: pet),
+        ListTile(
+          leading: const Icon(Icons.health_and_safety_outlined),
+          title: Text(L.t('observation.title')),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => SymptomObservationsPage(pet: pet)),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.assignment_outlined),
+          title: Text(L.t('handoff.title')),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => CareHandoffPage(pet: pet)),
+          ),
+        ),
         const SizedBox(height: AppSpace.gapL),
         _SectionTitle(L.t('profile.section.quick')),
         const SizedBox(height: AppSpace.gapM),

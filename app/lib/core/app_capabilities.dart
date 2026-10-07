@@ -11,6 +11,9 @@ enum AppFeature {
   petProfiles,
   familyCareBoard,
   medicationCourses,
+  symptomObservations,
+  careHandoff,
+  localBackup,
   petDeletion,
   walkTracking,
   apkUpdates,
@@ -35,6 +38,9 @@ class AppCapabilities {
         AppFeature.petProfiles ||
         AppFeature.familyCareBoard ||
         AppFeature.medicationCourses ||
+        AppFeature.symptomObservations ||
+        AppFeature.careHandoff ||
+        AppFeature.localBackup ||
         AppFeature.petDeletion =>
           true,
         AppFeature.walkTracking =>
