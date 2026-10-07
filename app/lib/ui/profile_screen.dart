@@ -12,6 +12,7 @@
 /// 落在 M2/M3，先摆空态 —— 空态也要写清楚「以后这里放什么」。
 library;
 
+import 'delete_pet_button.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -50,7 +51,6 @@ import 'sheets.dart';
 import 'walk_detail.dart';
 import 'widgets.dart';
 import 'medication_courses.dart';
-import 'delete_pet_button.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -411,6 +411,15 @@ class _InfoTab extends ConsumerWidget {
                   valueColor: AppColors.danger,
                 ),
               ],
+
+        // ---- 危险区（删除宠物）----
+        //
+        // 放在资料页最末尾：删除不可逆，位置该反映操作频率 —���
+        // 「归档」是日常操作，「删除」一年可能做一次。
+        //
+        // DeletePetButton 这个组件之前写好了却从没被挂进任何页面，
+        // 所以 iOS 上根本找不到删除入口 —— 挂在���里。
+        _dangerZone(context),
             ],
           ),
         ),
@@ -720,6 +729,30 @@ class _InfoTab extends ConsumerWidget {
     await ref.read(petRepositoryProvider).archive(pet.id);
     ref.invalidate(petsProvider);
     ref.invalidate(upcomingRemindersProvider);
+  }
+
+  /// 资料页末尾：删除宠物。
+  ///
+  /// ## 为什么放在最后而不是顶部
+  ///
+  /// 删除不可逆（只能先归档、确认没用再删）。放在显眼处容易被误触 ——
+  /// 「归档」是日常操作，「删除」是一年可能做一次的事，位置该反映频率。
+  ///
+  /// ## 为什么这个组件之前是死的
+  ///
+  /// `DeletePetButton` 写好了但**从没被挂进任何页面**，
+  /// 所以 iOS 上根本找不到删除入口。这里是它该在的地方。
+  Widget _dangerZone(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 28, bottom: 8),
+      child: Column(
+        children: [
+          const Divider(),
+          const SizedBox(height: AppSpace.gapM),
+          DeletePetButton(pet: pet),
+        ],
+      ),
+    );
   }
 }
 
@@ -2701,21 +2734,59 @@ class _DocumentsCard extends ConsumerWidget {
   }
 
   Future<void> _pick(BuildContext context, WidgetRef ref) async {
-    // 与记录详情页同款（file_selector 官方插件，理由见那边注释）。
-    final picked = await openFile(
-      acceptedTypeGroups: [
-        XTypeGroup(
-          label: L.t('detail.documents'),
-          extensions: kDocumentExtensions,
+    // ⚠️ `openFile` 与 `File.length()` 都在 try 里，理由见 record_detail.dart
+    // 的同名方法（那里有完整分析）。
+    //
+    // **这里曾经漏了。** 之前修「点添加文档没反应」时只改了记录详情页，
+    // 忘了宠物档案页也有一模一样的按钮 —— 同一个 bug 修了一半，
+    // 于是用户在这边点还是没反应。
+    //
+    // 教训：`grep 'detail.documents.add'` 找到 N 处就要检查 N 处，
+    // 「我改过这个 bug」不等于「这个 bug 修完了」。
+    String path;
+    String name;
+    int size;
+    try {
+      // 与记录详情页同款（file_selector 官方插件，理由见那边注释）。
+      final picked = await openFile(
+        acceptedTypeGroups: [
+          XTypeGroup(
+            label: L.t('detail.documents'),
+            extensions: kDocumentExtensions,
+          ),
+        ],
+      );
+      // null = 用户主动取消，正常路径，静默返回。
+      if (picked == null) return;
+      if (picked.path.isEmpty) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(L.t('doc.pickFailed'))),
+        );
+        return;
+      }
+      path = picked.path;
+      name = picked.name;
+      size = await File(path).length();
+    } catch (e) {
+      // 取消在某些 iOS 版本里是抛异常而非返回 null，单独识别，
+      // 别把「用户主动取消」显示成「出错了」。
+      final cancelled = e.toString().toLowerCase();
+      final isCancel = cancelled.contains('cancel') ||
+          cancelled.contains('already_active') ||
+          cancelled.contains('user_canceled') ||
+          cancelled.contains('inconsistency');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isCancel
+              ? L.t('doc.pickCancelled')
+              : L.tp('doc.pickError', {'e': '$e'})),
         ),
-      ],
-    );
-    if (picked == null) return;
+      );
+      return;
+    }
 
-    final path = picked.path;
-    if (path.isEmpty) return;
-
-    final size = await File(path).length();
     if (size > kMaxDocumentBytes) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2733,8 +2804,8 @@ class _DocumentsCard extends ConsumerWidget {
       await ref.read(appActionsProvider).addDocument(
             petId: pet.id,
             sourcePath: path,
-            fileName: picked.name,
-            mime: mimeOfExt(picked.name),
+            fileName: name,
+            mime: mimeOfExt(name),
             sizeBytes: size,
           );
       ref.invalidate(petRecordsProvider(pet.id));
