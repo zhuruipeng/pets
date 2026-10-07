@@ -217,18 +217,26 @@ class MeScreen extends ConsumerWidget {
             // 版本号从构建产物读，不硬编码 —— 硬编码的那份迟早和 pubspec 对不上，
             // 而「我到底装的是哪版」正是排查更新问题的第一句话。
             //
-            // 正式包只显示版本名（v0.1.3）；那个括号里的数字是 Android 的
-            // versionCode，给系统比版本用的，用户看了只会困惑。开发构建
-            // 保留完整信息 —— 排查时要精确到哪个 build。
+            // ⚠️ **正式包也显示 build 号**（原先只有开发构建才显示）。
+            //
+            // 原来的理由是「括号里那个数字给系统比版本用，用户看了只会困惑」。
+            // 这个理由在**侧载/内测场景下站不住**：同一个版本名会对应很多个包
+            // （0.1.8 就有 +9 到 +13 五份），而「你装的是哪一版」恰恰是排查
+            // 问题的第一句话。
+            //
+            // 这不是假设 —— 2026-10-07 那天用户报「看不到删除宠物」，
+            // 我先花了很多时间从代码里推断原因，最后发现真正的问题是他装的
+            // 是旧包。如果界面上当时就写着 `v0.1.8 (11)`，那句「你看一下
+            // 我页面的版本号」十秒钟就能定位。
+            //
+            // 显示 build 号的代价只是多几个字符，收益是少一次误判。
             FutureBuilder<PackageInfo>(
               future: PackageInfo.fromPlatform(),
               builder: (_, snapshot) {
                 final info = snapshot.data;
                 final text = info == null
                     ? '—'
-                    : kDebugMode
-                        ? 'v${info.version} (${info.buildNumber})'
-                        : 'v${info.version}';
+                    : 'v${info.version} (${info.buildNumber})';
                 return InfoRow(L.t('me.version'), text);
               },
             ),
