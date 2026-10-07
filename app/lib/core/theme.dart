@@ -19,6 +19,7 @@ class AppColors {
   /// 两者不一致会出现「按钮是 A 色、文字选中态是 B 色」的割裂。
   static const Color seed = Color(0xFF7657E8);
   static const Color primary = Color(0xFF7657E8);
+  static const Color primaryText = Color(0xFF6244C5);
   static const Color primaryLight = Color(0xFFEDE9FE);
 
   /// 页面底色：非常浅的冷灰，让白卡片浮起来但不刺眼。
@@ -26,20 +27,20 @@ class AppColors {
   static const Color surface = Colors.white;
 
   /// 卡片描边：极淡，几乎只做边界提示。
-  static const Color border = Color(0xFFEDEDF2);
+  static const Color border = Color(0xFFE5E5EF);
   static const Color divider = Color(0xFFF1F1F5);
 
   /// 文字三级。
   static const Color textPrimary = Color(0xFF1A1A1F);
-  static const Color textSecondary = Color(0xFF8A8A99);
-  static const Color textTertiary = Color(0xFFB4B4C2);
+  static const Color textSecondary = Color(0xFF626272);
+  static const Color textTertiary = Color(0xFF707080);
 
   /// 语义色。
-  static const Color danger = Color(0xFFE5484D);
+  static const Color danger = Color(0xFFC7353C);
   static const Color dangerBg = Color(0xFFFDECEC);
-  static const Color success = Color(0xFF16A34A);
+  static const Color success = Color(0xFF168344);
   static const Color successBg = Color(0xFFE7F7EE);
-  static const Color warning = Color(0xFFD97706);
+  static const Color warning = Color(0xFFA65E09);
   static const Color warningBg = Color(0xFFFDF3E7);
 
   /// 今日待办「类型图标」的底色。参考稿里每个待办图标底色不同，
@@ -70,6 +71,10 @@ class AppSpace {
 
   /// 页面左右边距。
   static const double page = 16;
+
+  /// 底栏已独立于内容，仅为最后一个区块保留呼吸空间。
+  static const double pageBottom = 32;
+  static const double tapTarget = 44;
 
   static const double gapXs = 4;
   static const double gapS = 8;
@@ -102,4 +107,28 @@ class AppGradients {
     end: Alignment.bottomRight,
     colors: [Color(0xFF8A6FEC), Color(0xFF6646D8)],
   );
+}
+
+/// 保留系统字体，让中文与英文共享清晰的字号层级。
+class AppText {
+  AppText._();
+  static const pageTitle = TextStyle(
+      fontSize: 22,
+      fontWeight: FontWeight.w700,
+      color: AppColors.textPrimary,
+      height: 1.3);
+  static const hero = TextStyle(
+      fontSize: 24,
+      fontWeight: FontWeight.w700,
+      color: AppColors.textPrimary,
+      height: 1.25);
+  static const section = TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.w600,
+      color: AppColors.textPrimary,
+      height: 1.4);
+  static const body =
+      TextStyle(fontSize: 14, color: AppColors.textPrimary, height: 1.45);
+  static const caption =
+      TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4);
 }

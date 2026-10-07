@@ -194,12 +194,27 @@ ThemeData buildAppTheme() {
     primary: AppColors.primary,
     surface: AppColors.surface,
     outlineVariant: AppColors.border,
+    onSurface: AppColors.textPrimary,
+    onSurfaceVariant: AppColors.textSecondary,
+    outline: AppColors.textTertiary,
   );
 
   return ThemeData(
     colorScheme: scheme,
     useMaterial3: true,
     scaffoldBackgroundColor: AppColors.pageBg,
+    textTheme: const TextTheme(
+      headlineSmall: AppText.hero,
+      titleLarge: AppText.pageTitle,
+      titleMedium: AppText.section,
+      titleSmall: AppText.section,
+      bodyLarge: AppText.body,
+      bodyMedium: AppText.body,
+      bodySmall: AppText.caption,
+      labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      labelMedium: AppText.caption,
+      labelSmall: AppText.caption,
+    ),
     splashFactory: InkSparkle.splashFactory,
     cardTheme: CardThemeData(
       elevation: 0,
@@ -226,22 +241,22 @@ ThemeData buildAppTheme() {
       surfaceTintColor: Colors.transparent,
       indicatorColor: Colors.transparent,
       // 参考稿的底部栏没有胶囊底，靠图标与文字变色表示选中。
-      height: 62,
+      height: 68,
       elevation: 0,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return TextStyle(
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-          color: selected ? AppColors.primary : AppColors.textTertiary,
+          color: selected ? AppColors.primaryText : AppColors.textSecondary,
         );
       }),
       iconTheme: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return IconThemeData(
           size: 23,
-          color: selected ? AppColors.primary : AppColors.textTertiary,
+          color: selected ? AppColors.primaryText : AppColors.textSecondary,
         );
       }),
     ),
@@ -257,10 +272,17 @@ ThemeData buildAppTheme() {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.chip),
         ),
+        minimumSize: const Size(0, AppSpace.tapTarget),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       ),
     ),
+    textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+      foregroundColor: AppColors.primaryText,
+      minimumSize: const Size(0, AppSpace.tapTarget),
+      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+    )),
     chipTheme: ChipThemeData(
       backgroundColor: AppColors.surface,
       selectedColor: AppColors.primaryLight,
@@ -345,7 +367,8 @@ class _HomeShellState extends State<HomeShell> {
       // Restore local alarm slots only; this does not initiate network sync.
       if (AppDatabase.instance.isOpen) {
         unawaited(ProviderScope.containerOf(context, listen: false)
-            .read(appActionsProvider).refreshNotifications());
+            .read(appActionsProvider)
+            .refreshNotifications());
       }
 
       // 冷启动时被通知点开：那时还没有 context，只能等首帧。

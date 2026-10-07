@@ -51,7 +51,7 @@ class MeScreen extends ConsumerWidget {
         AppSpace.page,
         AppSpace.gapS,
         AppSpace.page,
-        96,
+        AppSpace.pageBottom,
       ),
       children: [
         _PageTitle(L.t('me.title')),
@@ -85,7 +85,7 @@ class MeScreen extends ConsumerWidget {
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.primary,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 36),
+                    minimumSize: const Size(0, AppSpace.tapTarget),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                 ),
@@ -95,49 +95,7 @@ class MeScreen extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpace.gapM),
 
-        // ---- 双市场诊断面板（仅 debug）。改 flavor 后这几行必须跟着变。
-        // release 包里整个消失，正式用户不会看到开发自检信息。 ----
-        if (kDebugMode) ...[
-          _Card(
-            title: L.t('me.build.title'),
-            icon: Icons.tune_rounded,
-            children: [
-              // 值都加前缀，避免「区域 intl」和「免疫规则集 intl」看起来重复。
-              InfoRow(L.t('me.build.region'), 'region:${region.name}'),
-              InfoRow(L.t('me.build.api'), region.apiBaseUrl),
-              InfoRow(
-                L.t('me.build.map'),
-                region.mapRenderingEnabled ? 'on' : 'off',
-                valueColor: region.mapRenderingEnabled
-                    ? AppColors.primary
-                    : AppColors.textTertiary,
-              ),
-              InfoRow(
-                  L.t('me.build.geocoder'), 'vendor:${region.geocoderVendor}'),
-              InfoRow(
-                L.t('me.build.immunization'),
-                'rules:${region.immunizationRuleSet}',
-              ),
-              InfoRow(
-                L.t('me.build.icp'),
-                region.requiresIcpDisplay ? 'required' : 'n/a',
-              ),
-              InfoRow(
-                L.t('me.build.locale'),
-                L.current == AppLang.zh ? 'zh' : 'en',
-              ),
-              InfoRow(
-                L.t('me.build.units'),
-                '${Units.defaultWeightUnit(region).name} / '
-                '${Units.defaultDistanceUnit(region).name}',
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpace.gapM),
-        ],
-
         if (region.requiresIcpDisplay) ...[
-          const SizedBox(height: AppSpace.gapM),
           _Card(
             title: L.t('me.build.icp'),
             icon: Icons.verified_outlined,
@@ -194,7 +152,7 @@ class MeScreen extends ConsumerWidget {
                               height: 1.5,
                               color: has
                                   ? AppColors.textPrimary
-                                  : AppColors.textTertiary,
+                                  : AppColors.textSecondary,
                             ),
                           ),
                         ),
@@ -299,6 +257,48 @@ class MeScreen extends ConsumerWidget {
             ),
           ],
         ),
+
+        // ---- 双市场诊断面板（仅 debug）。改 flavor 后这几行必须跟着变。
+        // release 包里整个消失，正式用户不会看到开发自检信息。 ----
+        if (kDebugMode) ...[
+          const SizedBox(height: AppSpace.gapM),
+          _Card(
+            title: L.t('me.build.title'),
+            icon: Icons.tune_rounded,
+            children: [
+              // 值都加前缀，避免「区域 intl」和「免疫规则集 intl」看起来重复。
+              InfoRow(L.t('me.build.region'), 'region:${region.name}'),
+              InfoRow(L.t('me.build.api'), region.apiBaseUrl),
+              InfoRow(
+                L.t('me.build.map'),
+                region.mapRenderingEnabled ? 'on' : 'off',
+                valueColor: region.mapRenderingEnabled
+                    ? AppColors.primary
+                    : AppColors.textTertiary,
+              ),
+              InfoRow(
+                  L.t('me.build.geocoder'), 'vendor:${region.geocoderVendor}'),
+              InfoRow(
+                L.t('me.build.immunization'),
+                'rules:${region.immunizationRuleSet}',
+              ),
+              InfoRow(
+                L.t('me.build.icp'),
+                region.requiresIcpDisplay ? 'required' : 'n/a',
+              ),
+              InfoRow(
+                L.t('me.build.locale'),
+                L.current == AppLang.zh ? 'zh' : 'en',
+              ),
+              InfoRow(
+                L.t('me.build.units'),
+                '${Units.defaultWeightUnit(region).name} / '
+                '${Units.defaultDistanceUnit(region).name}',
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpace.gapM),
+        ],
 
         // 页脚版本号已移到上面的「关于」卡片里，与「检查更新」放一起 ——
         // 「我装的是哪版」和「有没有新版」本来是同一个问题。
@@ -626,11 +626,7 @@ class _PageTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         text,
-        style: const TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
+        style: AppText.pageTitle,
       );
 }
 
@@ -648,38 +644,29 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpace.gapL,
-        AppSpace.gapM,
-        AppSpace.gapL,
-        AppSpace.gapS,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: AppRadius.cardBorder,
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 17, color: AppColors.primary),
-              const SizedBox(width: AppSpace.gapS),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpace.gapS),
-          ...children,
-        ],
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.gapL,
+          AppSpace.gapM,
+          AppSpace.gapL,
+          AppSpace.gapS,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 17, color: AppColors.primary),
+                const SizedBox(width: AppSpace.gapS),
+                Expanded(child: Text(title, style: AppText.section)),
+              ],
+            ),
+            const SizedBox(height: AppSpace.gapS),
+            ...children,
+          ],
+        ),
       ),
     );
   }

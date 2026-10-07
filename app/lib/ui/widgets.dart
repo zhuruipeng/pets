@@ -14,7 +14,8 @@ import '../domain/immunization.dart';
 
 // 提醒文案的解析与类型表在 core 里（通知服务也要用），
 // 这里再导出一次，免得所有界面文件都要多 import 一个。
-export '../core/reminder_text.dart' show kManualReminderTypes, reminderTypeLabel;
+export '../core/reminder_text.dart'
+    show kManualReminderTypes, reminderTypeLabel;
 
 // 类型 → 文案的纯映射搬去了 domain/labels.dart（那边不引 Flutter，
 // 纯逻辑层如「导出报告」的内容组装也能用）。这里转发一次，界面文件不必改 import。
@@ -62,47 +63,44 @@ class EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: cs.primaryContainer.withValues(alpha: 0.5),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 34, color: cs.primary),
+    return LayoutBuilder(builder: (context, constraints) {
+      return SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: constraints.hasBoundedHeight ? constraints.maxHeight : 0,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpace.gapXl),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primaryLight,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 34, color: AppColors.primary),
+                ),
+                const SizedBox(height: AppSpace.gapXl),
+                Text(title,
+                    textAlign: TextAlign.center, style: AppText.section),
+                if (hint != null) ...[
+                  const SizedBox(height: AppSpace.gapS),
+                  Text(hint!,
+                      textAlign: TextAlign.center, style: AppText.caption),
+                ],
+                if (action != null) ...[
+                  const SizedBox(height: AppSpace.gapXl),
+                  action!,
+                ],
+              ],
             ),
-            const SizedBox(height: 20),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            if (hint != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                hint!,
-                textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: cs.outline),
-              ),
-            ],
-            if (action != null) ...[
-              const SizedBox(height: 24),
-              action!,
-            ],
-          ],
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
 
@@ -158,17 +156,10 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 20, 4, 10),
+      padding: const EdgeInsets.fromLTRB(4, AppSpace.gapL, 4, AppSpace.gapM),
       child: Row(
         children: [
-          Text(
-            title,
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const Spacer(),
+          Expanded(child: Text(title, style: AppText.section)),
           if (trailing != null) trailing!,
         ],
       ),
@@ -196,24 +187,22 @@ class InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.gapM),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 13.5,
-              color: AppColors.textSecondary,
-            ),
+          Expanded(
+            flex: 2,
+            child: Text(label,
+                style: AppText.body.copyWith(color: AppColors.textSecondary)),
           ),
           const SizedBox(width: 16),
           Expanded(
+            flex: 3,
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 13.5,
+              style: AppText.body.copyWith(
                 fontWeight: FontWeight.w500,
                 color: valueColor ?? AppColors.textPrimary,
               ),
@@ -260,30 +249,22 @@ class StatTile extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-                height: 1.1,
-              ),
-            ),
-            if (unit != null) ...[
-              const SizedBox(width: 2),
-              Text(
-                unit!,
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  color: AppColors.textSecondary,
-                ),
+        Text.rich(
+          TextSpan(
+            text: value,
+            children: [
+              if (unit != null) TextSpan(
+                text: ' $unit',
+                style: AppText.caption,
               ),
             ],
-          ],
+          ),
+          style: const TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+            height: 1.25,
+          ),
         ),
         const SizedBox(height: 5),
         Row(
@@ -301,10 +282,10 @@ class StatTile extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 11,
+                  fontSize: 12,
                   color: AppColors.textSecondary,
                 ),
               ),
@@ -347,14 +328,14 @@ class SoftTag extends StatelessWidget {
             Icon(icon, size: 12, color: fg),
             const SizedBox(width: 4),
           ],
-          Text(
+          Flexible(child: Text(
             text,
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w500,
               color: fg,
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -545,7 +526,13 @@ IconData documentIcon(String? ext) =>
       'pdf' => Icons.picture_as_pdf_outlined,
       'doc' || 'docx' || 'txt' || 'rtf' => Icons.description_outlined,
       'xls' || 'xlsx' || 'csv' => Icons.table_chart_outlined,
-      'jpg' || 'jpeg' || 'png' || 'heic' || 'heif' || 'webp' || 'gif' =>
+      'jpg' ||
+      'jpeg' ||
+      'png' ||
+      'heic' ||
+      'heif' ||
+      'webp' ||
+      'gif' =>
         Icons.image_outlined,
       _ => Icons.insert_drive_file_outlined,
     };
@@ -607,8 +594,8 @@ class TodoTile extends StatelessWidget {
     // 按类型散列到一组底色，保证同一类型每次拿到的颜色一致。
     final tint = overdue
         ? AppColors.dangerBg
-        : AppColors.tileTints[reminder.type.hashCode.abs() %
-            AppColors.tileTints.length];
+        : AppColors.tileTints[
+            reminder.type.hashCode.abs() % AppColors.tileTints.length];
     final fg = overdue ? AppColors.danger : AppColors.primary;
 
     return Container(

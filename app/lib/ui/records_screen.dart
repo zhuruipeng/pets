@@ -194,11 +194,7 @@ class _Header extends StatelessWidget {
         children: [
           Text(
             L.t('records.title'),
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
+            style: AppText.pageTitle,
           ),
           const Spacer(),
           SoftTag(
@@ -300,7 +296,7 @@ class _FilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 50,
+      height: 60 + (MediaQuery.textScalerOf(context).scale(13) - 13),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(
@@ -315,27 +311,20 @@ class _FilterBar extends StatelessWidget {
           final label =
               opt == null ? L.t('records.filter.all') : recordTypeLabel(opt);
 
-          return GestureDetector(
-            onTap: () => onChanged(opt),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              padding: const EdgeInsets.symmetric(horizontal: 13),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected ? AppColors.primary : AppColors.surface,
-                borderRadius: BorderRadius.circular(AppRadius.chip),
-                border: Border.all(
-                  color: selected ? AppColors.primary : AppColors.border,
-                ),
-              ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  color: selected ? Colors.white : AppColors.textSecondary,
-                ),
-              ),
+          return ChoiceChip(
+            label: Text(label),
+            selected: selected,
+            showCheckmark: false,
+            onSelected: (_) => onChanged(opt),
+            selectedColor: AppColors.primaryLight,
+            backgroundColor: AppColors.surface,
+            labelStyle: AppText.caption.copyWith(
+              fontWeight: FontWeight.w600,
+              color: selected ? AppColors.primaryText : AppColors.textSecondary,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            side: BorderSide(
+              color: selected ? AppColors.primaryLight : AppColors.border,
             ),
           );
         },
@@ -416,15 +405,15 @@ class WeightChartCard extends ConsumerWidget {
                 padding: const EdgeInsets.only(left: 6),
                 child: Row(
                   children: [
-                    Text(
+                    Expanded(child: Text(
                       L.t('records.weight.title'),
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 14,
                         color: AppColors.textPrimary,
                       ),
-                    ),
-                    const Spacer(),
+                    )),
+                    const SizedBox(width: AppSpace.gapM),
                     Text(
                       Units.formatWeight(points.last.kg, unit),
                       style: const TextStyle(
@@ -576,12 +565,9 @@ class RecordTimeline extends StatelessWidget {
       children: [
         for (final entry in groups.entries) ...[
           SectionHeader(entry.key),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: AppRadius.cardBorder,
-              border: Border.all(color: AppColors.border),
-            ),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpace.gapL,
               vertical: AppSpace.gapXs,
@@ -596,6 +582,7 @@ class RecordTimeline extends StatelessWidget {
                   ),
                 ],
               ],
+            ),
             ),
           ),
         ],
@@ -669,7 +656,8 @@ class RecordRow extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  spacing: 6, runSpacing: AppSpace.gapXs,
                   children: [
                     Text(
                       recordTypeLabel(r.type),
@@ -680,7 +668,6 @@ class RecordRow extends ConsumerWidget {
                       ),
                     ),
                     if (backfilled) ...[
-                      const SizedBox(width: 6),
                       SoftTag(
                         L.t('timeline.backfilled'),
                         color: AppColors.warning,
@@ -691,7 +678,8 @@ class RecordRow extends ConsumerWidget {
                 ),
                 if (valueLine != null) ...[
                   const SizedBox(height: 3),
-                  Row(
+                  Wrap(
+                    spacing: 6, runSpacing: AppSpace.gapXs,
                     children: [
                       Text(
                         valueLine,
@@ -702,17 +690,12 @@ class RecordRow extends ConsumerWidget {
                         ),
                       ),
                       if (deltaLine != null) ...[
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
+                        Text(
                             deltaLine,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 11.5,
                               color: AppColors.textSecondary,
                             ),
-                          ),
                         ),
                       ],
                     ],
@@ -757,10 +740,15 @@ class RecordRow extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              GestureDetector(
-                onTap: () => _delete(ref),
-                child: const Icon(Icons.close_rounded,
-                    size: 16, color: AppColors.textTertiary),
+              IconButton(
+                onPressed: () => _delete(ref),
+                tooltip: L.t('action.delete'),
+                constraints: const BoxConstraints(
+                  minWidth: AppSpace.tapTarget, minHeight: AppSpace.tapTarget,
+                ),
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.close_rounded,
+                    size: 18, color: AppColors.textSecondary),
               ),
             ],
           ),

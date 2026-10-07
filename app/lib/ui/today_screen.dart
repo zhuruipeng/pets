@@ -64,7 +64,7 @@ class TodayScreen extends ConsumerWidget {
               AppSpace.page,
               AppSpace.gapS,
               AppSpace.page,
-              96,
+              AppSpace.pageBottom,
             ),
             children: [
               const _Greeting(),
@@ -72,9 +72,7 @@ class TodayScreen extends ConsumerWidget {
 
               if (currentPet != null) ...[
                 _PetHeroCard(pet: currentPet),
-                const SizedBox(height: AppSpace.gapL),
                 _WeekOverview(pet: currentPet),
-                const SizedBox(height: AppSpace.gapL),
                 _QuickAddRow(pet: currentPet),
                 FamilyCareBoard(pet: currentPet),
                 const SizedBox(height: AppSpace.gapL),
@@ -96,8 +94,7 @@ class TodayScreen extends ConsumerWidget {
                 data: (reminders) => _TodoSection(reminders: reminders),
               ),
 
-              if (list.length > 1)
-                _PetStrip(pets: list, current: currentPet),
+              if (list.length > 1) _PetStrip(pets: list, current: currentPet),
             ],
           ),
         );
@@ -125,7 +122,9 @@ class _Greeting extends ConsumerWidget {
     final hour = DateTime.now().hour;
     final greeting = hour < 12
         ? L.t('home.greetingMorning')
-        : (hour < 18 ? L.t('home.greetingAfternoon') : L.t('home.greetingEvening'));
+        : (hour < 18
+            ? L.t('home.greetingAfternoon')
+            : L.t('home.greetingEvening'));
 
     return Row(
       children: [
@@ -206,18 +205,18 @@ class _CircleIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadius.chip),
-      onTap: onTap,
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          border: Border.all(color: AppColors.border),
+    return Material(
+      color: AppColors.surface,
+      shape: const CircleBorder(side: BorderSide(color: AppColors.border)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: AppSpace.tapTarget,
+          height: AppSpace.tapTarget,
+          child: Icon(icon, size: 21, color: AppColors.textPrimary),
         ),
-        child: Icon(icon, size: 19, color: AppColors.textPrimary),
       ),
     );
   }
@@ -243,9 +242,8 @@ class _PetHeroCard extends ConsumerWidget {
     final records = ref.watch(petRecordsProvider(pet.id)).valueOrNull;
     final latest = _latestWeight(records);
 
-    final weightValue = latest == null
-        ? '--'
-        : Units.weightNumber(latest, unit);
+    final weightValue =
+        latest == null ? '--' : Units.weightNumber(latest, unit);
     final weightUnit = Units.weightUnitLabel(unit);
 
     return Container(
@@ -406,12 +404,9 @@ class _WeekOverview extends ConsumerWidget {
 
     // 用 ?. 而不是 `x == null ? null : x.…`：后者 analyzer 会报
     // prefer_null_aware_operators，而且可读性更差。
-    final walkCount = walks
-        ?.where((w) => !w.startedAt.isBefore(from))
-        .length;
-    final recordCount = records
-        ?.where((r) => !r.recordedAt.isBefore(from))
-        .length;
+    final walkCount = walks?.where((w) => !w.startedAt.isBefore(from)).length;
+    final recordCount =
+        records?.where((r) => !r.recordedAt.isBefore(from)).length;
 
     // 第三格：有两磅以上体重才谈「较上次」，只有一条时退回「当前体重」
     // —— 恒为「--」的格子摆在那只会让人怀疑 App 是不是坏了。
@@ -453,7 +448,8 @@ class _WeekOverview extends ConsumerWidget {
           // 遛狗没开时把「散步次数」那格抽掉：它恒为 0，留着是噪音不是信息。
           // 两格时中间只剩一根分隔线，三格时是两根，所以这里动态拼。
           child: Row(
-            children: _statTiles(walkCount, recordCount, weightValue, weightLabel),
+            children:
+                _statTiles(walkCount, recordCount, weightValue, weightLabel),
           ),
         ),
       ],
@@ -560,7 +556,6 @@ class _QuickAddRow extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHeader(L.t('today.quickAdd')),
-        const SizedBox(height: AppSpace.gapM),
         Container(
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpace.gapS,
@@ -592,8 +587,7 @@ class _QuickAddRow extends ConsumerWidget {
                   icon: Icons.grid_view_rounded,
                   label: L.t('today.quickAdd.more'),
                   tint: AppColors.tileTints[1],
-                  onTap: () =>
-                      showAddRecordSheet(context, ref, petId: pet.id),
+                  onTap: () => showAddRecordSheet(context, ref, petId: pet.id),
                 ),
               ),
             ],
@@ -619,32 +613,38 @@ class _QuickAddTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: AppRadius.tileBorder,
-      child: Column(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: tint,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, size: 19, color: AppColors.primary),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: AppRadius.tileBorder,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpace.gapXs),
+          child: Column(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: tint,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, size: 19, color: AppColors.primary),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -693,15 +693,14 @@ class _TodoSection extends ConsumerWidget {
     // 三分：过期 → 今天 → 之后。
     // 「今天」与「之后」必须分开 —— 首页要先回答「今天要做什么」，
     // 未来的事归到 Upcoming，不占今天的注意力。
-    final endOfToday = DateTime(now.year, now.month, now.day)
-        .add(const Duration(days: 1));
+    final endOfToday =
+        DateTime(now.year, now.month, now.day).add(const Duration(days: 1));
     final overdue = sorted.where((r) => r.nextAt.isBefore(now)).toList();
     final today = sorted
         .where((r) => !r.nextAt.isBefore(now) && r.nextAt.isBefore(endOfToday))
         .toList();
-    final upcoming = sorted
-        .where((r) => !r.nextAt.isBefore(endOfToday))
-        .toList();
+    final upcoming =
+        sorted.where((r) => !r.nextAt.isBefore(endOfToday)).toList();
 
     final visible = [...overdue, ...today].take(12).toList();
 
@@ -962,13 +961,14 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
               ),
             )
           else ...[
-            if (r.rule['mode'] != 'medication') IconButton(
-              tooltip: L.t('today.snooze'),
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _snooze(r.id),
-              icon: const Icon(Icons.schedule_rounded,
-                  size: 19, color: AppColors.textSecondary),
-            ),
+            if (r.rule['mode'] != 'medication')
+              IconButton(
+                tooltip: L.t('today.snooze'),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _snooze(r.id),
+                icon: const Icon(Icons.schedule_rounded,
+                    size: 19, color: AppColors.textSecondary),
+              ),
             FilledButton(
               onPressed: () => r.rule['mode'] == 'medication'
                   ? showReminderDueSheet(context, reminderId: r.id)
@@ -992,8 +992,9 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
   Future<void> _complete(Reminder reminder) async {
     setState(() => _busy = true);
     try {
-      final result = await ref.read(appActionsProvider).completeReminder(
-          reminder.id, expectedDueAt: reminder.nextAt);
+      final result = await ref
+          .read(appActionsProvider)
+          .completeReminder(reminder.id, expectedDueAt: reminder.nextAt);
       if (!mounted) return;
       final next = result.nextAt;
       final msg = next == null
@@ -1004,7 +1005,8 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L.error(e))));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(L.error(e))));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1447,8 +1449,8 @@ class _NotificationSheet extends StatelessWidget {
                       ),
                     )
                   : ListView.separated(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpace.page),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: AppSpace.page),
                       itemCount: sorted.length,
                       separatorBuilder: (_, __) => const RowDivider(),
                       itemBuilder: (_, i) {
@@ -1461,8 +1463,8 @@ class _NotificationSheet extends StatelessWidget {
                                 width: 30,
                                 height: 30,
                                 decoration: BoxDecoration(
-                                  color: AppColors
-                                      .tileTints[i % AppColors.tileTints.length],
+                                  color: AppColors.tileTints[
+                                      i % AppColors.tileTints.length],
                                   borderRadius: BorderRadius.circular(9),
                                 ),
                                 child: Icon(

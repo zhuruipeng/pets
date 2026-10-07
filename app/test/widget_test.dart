@@ -98,6 +98,44 @@ void main() {
     });
   });
 
+  testWidgets('小屏大字的空态仍能滚动到添加按钮', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.6)),
+          child: SizedBox(
+            width: 320,
+            height: 240,
+            child: EmptyState(
+              icon: Icons.pets_outlined,
+              title: L.t('profile.empty.title'),
+              hint: L.t('profile.empty.hint'),
+              action: FilledButton(onPressed: () {}, child: const Text('添加')),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('添加'));
+    await tester.pumpAndSettle();
+    expect(find.text('添加').hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('窄统计格的大字时间与单位完整换行', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(
+      body: MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(1.3)),
+        child: SizedBox(width: 126, child: StatTile(
+          icon: Icons.schedule, value: '今天 19:56', unit: 'kg', label: '最近记录',
+        )),
+      ),
+    )));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   group('我的页自检面板', () {
     testWidgets('展示当前区域的四项关键配置', (tester) async {
       await tester.pumpWidget(
@@ -108,6 +146,13 @@ void main() {
       await tester.pumpAndSettle();
 
       const region = AppRegion.current;
+
+      await tester.scrollUntilVisible(
+        find.text('region:${region.name}'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
 
       // 值带前缀，避免同名值（比如区域 intl 与规则集 intl）互相混淆
       expect(find.text('region:${region.name}'), findsOneWidget);
@@ -497,7 +542,8 @@ void main() {
       expect(L.tp('lost.since', {'n': 3}), isNot(contains('{n}')));
     });
 
-    test('手动提醒相关文案都已翻译', () {      for (final k in [
+    test('手动提醒相关文案都已翻译', () {
+      for (final k in [
         'reminder.add',
         'reminder.new',
         'reminder.edit',
@@ -628,7 +674,8 @@ void main() {
     test('dueLabel：过期 / 今天 / 未来', () {
       final now = DateTime.now();
       expect(dueLabel(now), L.t('timeline.today'));
-      expect(dueLabel(now.subtract(const Duration(days: 3))).contains('3'), isTrue);
+      expect(dueLabel(now.subtract(const Duration(days: 3))).contains('3'),
+          isTrue);
       expect(dueLabel(now.add(const Duration(days: 3))).contains('3'), isTrue);
     });
 
@@ -723,8 +770,8 @@ void main() {
           isNot(reminderTypeIcon('unknown_type')));
       expect(reminderTypeIcon('deworm_external'),
           isNot(reminderTypeIcon('unknown_type')));
-      expect(reminderTypeIcon('checkup'),
-          isNot(reminderTypeIcon('unknown_type')));
+      expect(
+          reminderTypeIcon('checkup'), isNot(reminderTypeIcon('unknown_type')));
     });
   });
 
@@ -776,13 +823,16 @@ void main() {
     test('按数字段比大小，后缀不参与', () {
       expect(AppUpdateService.compareVersion('0.2.0', '0.1.9') > 0, isTrue);
       expect(AppUpdateService.compareVersion('0.1.0', '0.1.0'), 0);
-      expect(AppUpdateService.compareVersion('1.0.0-beta', '0.9.9') > 0, isTrue);
+      expect(
+          AppUpdateService.compareVersion('1.0.0-beta', '0.9.9') > 0, isTrue);
     });
 
     test('清单缺字段或格式不对时解析失败，而不是抛异常', () {
       expect(UpdateManifest.tryParse(null), isNull);
-      expect(UpdateManifest.tryParse({'version': '0.2.0'}), isNull); // 缺 build/url
-      expect(UpdateManifest.tryParse({'version': '', 'build': 2, 'url': 'x'}), isNull);
+      expect(
+          UpdateManifest.tryParse({'version': '0.2.0'}), isNull); // 缺 build/url
+      expect(UpdateManifest.tryParse({'version': '', 'build': 2, 'url': 'x'}),
+          isNull);
 
       final ok = UpdateManifest.tryParse({
         'version': '0.2.0',

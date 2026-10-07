@@ -213,7 +213,7 @@ class _HeroHeader extends ConsumerWidget {
                 onPressed: () => showEditPetSheet(context, pet: pet),
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.primary,
-                  minimumSize: const Size(0, 30),
+                  minimumSize: const Size(0, AppSpace.tapTarget),
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   visualDensity: VisualDensity.compact,
                   shape: RoundedRectangleBorder(
@@ -238,20 +238,28 @@ class _HeroHeader extends ConsumerWidget {
             children: [
               PetAvatar(pet: pet, size: 96, borderWidth: 4),
               Positioned(
-                right: -2,
-                bottom: -2,
-                child: GestureDetector(
-                  onTap: () => showAvatarSheet(context, ref, pet),
-                  child: Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2.5),
+                right: -8,
+                bottom: -8,
+                child: Material(
+                  color: Colors.transparent,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: IconButton(
+                    onPressed: () => showAvatarSheet(context, ref, pet),
+                    tooltip: L.t('profile.edit'),
+                    constraints: const BoxConstraints(
+                      minWidth: AppSpace.tapTarget, minHeight: AppSpace.tapTarget,
                     ),
-                    child: const Icon(Icons.photo_camera_rounded,
-                        size: 14, color: Colors.white),
+                    padding: const EdgeInsets.all(7),
+                    icon: Container(
+                      width: 30, height: 30,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary, shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.surface, width: 2.5),
+                      ),
+                      child: const Icon(Icons.photo_camera_rounded,
+                          size: 14, color: AppColors.surface),
+                    ),
                   ),
                 ),
               ),
@@ -268,12 +276,7 @@ class _HeroHeader extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   // Header 上最大的文字就是它 —— 名字是身份页的视觉中心。
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                    height: 1.15,
-                  ),
+                  style: AppText.hero,
                 ),
               ),
               const SizedBox(width: 6),
@@ -367,17 +370,13 @@ class _InfoTab extends ConsumerWidget {
         AppSpace.page,
         AppSpace.gapL,
         AppSpace.page,
-        96,
+        AppSpace.pageBottom,
       ),
       children: [
         // ---- 基本信息 ----
         Text(
           L.t('profile.section.basic'),
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
+          style: AppText.section,
         ),
         const SizedBox(height: AppSpace.gapM),
         Container(
@@ -412,14 +411,6 @@ class _InfoTab extends ConsumerWidget {
                 ),
               ],
 
-        // ---- 危险区（删除宠物）----
-        //
-        // 放在资料页最末尾：删除不可逆，位置该反映操作频率 —���
-        // 「归档」是日常操作，「删除」一年可能做一次。
-        //
-        // DeletePetButton 这个组件之前写好了却从没被挂进任何页面，
-        // 所以 iOS 上根本找不到删除入口 —— 挂在���里。
-        _dangerZone(context),
             ],
           ),
         ),
@@ -428,11 +419,7 @@ class _InfoTab extends ConsumerWidget {
         const SizedBox(height: AppSpace.gapXl),
         Text(
           L.t('profile.section.traits'),
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
+          style: AppText.section,
         ),
         const SizedBox(height: AppSpace.gapM),
         Container(
@@ -469,11 +456,7 @@ class _InfoTab extends ConsumerWidget {
         const SizedBox(height: AppSpace.gapXl),
         Text(
           L.t('profile.section.family'),
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
+          style: AppText.section,
         ),
         const SizedBox(height: AppSpace.gapM),
         _FamilyCard(pet: pet),
@@ -482,11 +465,7 @@ class _InfoTab extends ConsumerWidget {
         const SizedBox(height: AppSpace.gapXl),
         Text(
           L.t('profile.section.documents'),
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
+          style: AppText.section,
         ),
         const SizedBox(height: AppSpace.gapM),
         _DocumentsCard(pet: pet),
@@ -495,11 +474,7 @@ class _InfoTab extends ConsumerWidget {
         const SizedBox(height: AppSpace.gapXl),
         Text(
           L.t('profile.reminders'),
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
+          style: AppText.section,
         ),
         const SizedBox(height: AppSpace.gapM),
         _RemindersCard(pet: pet),
@@ -510,11 +485,7 @@ class _InfoTab extends ConsumerWidget {
         if (AppCapabilities.current.supports(AppFeature.walkTracking)) ...[
           Text(
             L.t('profile.section.walks'),
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
+            style: AppText.section,
           ),
           const SizedBox(height: AppSpace.gapM),
           _WalksCard(petId: pet.id, petName: pet.name),
@@ -588,7 +559,7 @@ class _InfoTab extends ConsumerWidget {
             ),
           ),
         ),
-        DeletePetButton(pet: pet),
+        _dangerZone(context),
       ],
     );
   }
@@ -767,11 +738,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         text,
-        style: const TextStyle(
-          fontSize: 13.5,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
+        style: AppText.section,
       );
 }
 
@@ -791,7 +758,7 @@ class _HealthTab extends ConsumerWidget {
         AppSpace.page,
         AppSpace.gapL,
         AppSpace.page,
-        96,
+        AppSpace.pageBottom,
       ),
       children: [
         MedicationCoursesLink(pet: pet),
@@ -1802,7 +1769,7 @@ class _RecordsTab extends ConsumerWidget {
             AppSpace.page,
             AppSpace.gapL,
             AppSpace.page,
-            96,
+            AppSpace.pageBottom,
           ),
           children: [RecordTimeline(records: sorted)],
         );
@@ -1867,7 +1834,7 @@ class _MemoriesTab extends ConsumerWidget {
             AppSpace.page,
             AppSpace.gapL,
             AppSpace.page,
-            96,
+            AppSpace.pageBottom,
           ),
           children: [
             Row(
@@ -2144,7 +2111,7 @@ class _ExpenseTab extends ConsumerWidget {
           AppSpace.page,
           AppSpace.gapL,
           AppSpace.page,
-          96,
+          AppSpace.pageBottom,
         ),
         children: [
           SizedBox(
