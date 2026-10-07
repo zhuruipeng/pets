@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../core/app_capabilities.dart';
 import '../core/l10n.dart';
 import '../core/region.dart';
 import '../core/theme.dart';
@@ -111,7 +112,8 @@ class MeScreen extends ConsumerWidget {
                     ? AppColors.primary
                     : AppColors.textTertiary,
               ),
-              InfoRow(L.t('me.build.geocoder'), 'vendor:${region.geocoderVendor}'),
+              InfoRow(
+                  L.t('me.build.geocoder'), 'vendor:${region.geocoderVendor}'),
               InfoRow(
                 L.t('me.build.immunization'),
                 'rules:${region.immunizationRuleSet}',
@@ -127,7 +129,7 @@ class MeScreen extends ConsumerWidget {
               InfoRow(
                 L.t('me.build.units'),
                 '${Units.defaultWeightUnit(region).name} / '
-                    '${Units.defaultDistanceUnit(region).name}',
+                '${Units.defaultDistanceUnit(region).name}',
               ),
             ],
           ),
@@ -248,33 +250,36 @@ class MeScreen extends ConsumerWidget {
               label: L.t('me.terms'),
               onTap: () => showLegalPage(context, LegalDoc.terms),
             ),
-            const RowDivider(),
-            InkWell(
-              onTap: () => runUpdateCheck(context, interactive: true),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                child: Row(
-                  children: [
-                    const Icon(Icons.system_update_alt_rounded,
-                        size: 18, color: AppColors.primary),
-                    const SizedBox(width: AppSpace.gapM),
-                    Expanded(
-                      child: Text(
-                        L.t('update.check'),
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          color: AppColors.textPrimary,
+            if (AppCapabilities.current.supports(AppFeature.apkUpdates)) ...[
+              const RowDivider(),
+              InkWell(
+                onTap: () => runUpdateCheck(context, interactive: true),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.system_update_alt_rounded,
+                          size: 18, color: AppColors.primary),
+                      const SizedBox(width: AppSpace.gapM),
+                      Expanded(
+                        child: Text(
+                          L.t('update.check'),
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
                       ),
-                    ),
-                    const Icon(Icons.chevron_right_rounded,
-                        size: 18, color: AppColors.textTertiary),
-                  ],
+                      const Icon(Icons.chevron_right_rounded,
+                          size: 18, color: AppColors.textTertiary),
+                    ],
+                  ),
                 ),
               ),
-            ),
+            ],
             Padding(
-              padding: const EdgeInsets.only(top: AppSpace.gapS, bottom: AppSpace.gapS),
+              padding: const EdgeInsets.only(
+                  top: AppSpace.gapS, bottom: AppSpace.gapS),
               child: Text(
                 L.t('me.about.body'),
                 style: const TextStyle(

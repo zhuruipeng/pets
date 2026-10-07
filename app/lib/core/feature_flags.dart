@@ -20,3 +20,11 @@ library;
 ///
 /// 关掉期间代码一行不删，schema / model / repository / 迁移测试全部保留。
 const bool kWalkEnabled = false;
+
+/// 苹果小组件：尚未实现 WidgetKit 扩展和共享数据容器。
+/// 接入原生扩展、验证同步与隐私展示后才能打开。
+const bool kIosWidgetsEnabled = false;
+
+/// 苹果快捷指令：尚未实现原生 App Intents 桥接。
+/// 完成动作权限检查、重复执行保护和真机验证后才能打开。
+const bool kIosShortcutsEnabled = false;

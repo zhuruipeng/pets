@@ -16,7 +16,8 @@
 ///    凡是号称「无感更新」的，本质都是「后台先下好，再弹安装器」——这里也是。
 ///
 /// 3. **iOS 走不通这条路**。Apple 不允许 App 自己下载安装包，只能跳到商店。
-///    所以本文件在 iOS 上只做「查版本 + 提示」，不做下载。
+///    当前服务端清单属于 Android，iOS 不查这个清单。
+///    上架后另接 App Store 更新提示，不能复用 APK 的 build / minBuild。
 library;
 
 import 'dart:convert';
@@ -27,6 +28,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../core/app_capabilities.dart';
 import '../core/region.dart';
 
 /// 服务端版本清单。
@@ -61,7 +63,7 @@ class UpdateManifest {
   /// 低于这个 build 必须更新（强制）。用来推掉有严重 bug 的版本。
   final int minBuild;
 
-  /// 海外区 iOS 跳商店用。国内不上 App Store，留空即可。
+  /// 兼容旧清单的预留字段。iOS 更新需另接 App Store，不读取此 APK 清单。
   final String? iosStoreUrl;
 
   static UpdateManifest? tryParse(Object? raw) {
@@ -109,9 +111,14 @@ class UpdateCheckOutcome {
 }
 
 class AppUpdateService {
-  AppUpdateService({http.Client? client}) : _client = client ?? http.Client();
+  AppUpdateService({http.Client? client, AppCapabilities? capabilities})
+      : _client = client ?? http.Client(),
+        _capabilities = capabilities ?? AppCapabilities.current;
 
   final http.Client _client;
+  final AppCapabilities _capabilities;
+
+  bool get supportsUpdates => _capabilities.supports(AppFeature.apkUpdates);
 
   static const MethodChannel _installer =
       MethodChannel('com.weiyuantool.pet_app/installer');
@@ -131,7 +138,7 @@ class AppUpdateService {
     required int currentBuild,
     String? currentVersion,
   }) async {
-    if (!Platform.isAndroid && !Platform.isIOS) {
+    if (!supportsUpdates) {
       return const UpdateCheckOutcome(UpdateCheckStatus.unsupported);
     }
     try {
@@ -183,6 +190,9 @@ class AppUpdateService {
     UpdateManifest manifest, {
     void Function(double? progress)? onProgress,
   }) async {
+    if (!supportsUpdates) {
+      throw UnsupportedError('APK updates are only available on Android');
+    }
     final tmp = await getTemporaryDirectory();
     final dir = Directory(p.join(tmp.path, 'update'));
     if (!dir.existsSync()) dir.createSync(recursive: true);
@@ -211,9 +221,7 @@ class AppUpdateService {
 
     if (!isDownloadComplete(received, total)) {
       throw HttpException(
-        received <= 0
-            ? '下载到的文件是空的'
-            : '下载不完整：$received / ${total ?? "?"} 字节',
+        received <= 0 ? '下载到的文件是空的' : '下载不完整：$received / ${total ?? "?"} 字节',
       );
     }
     return dest.path;
@@ -243,7 +251,8 @@ class AppUpdateService {
   /// 调用方应引导用户去设置里授权。
   Future<bool> installApk(String path) async {
     if (!Platform.isAndroid) return false;
-    final ok = await _installer.invokeMethod<bool>('installApk', {'path': path});
+    final ok =
+        await _installer.invokeMethod<bool>('installApk', {'path': path});
     return ok ?? false;
   }
 

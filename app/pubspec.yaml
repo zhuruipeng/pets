@@ -110,6 +110,9 @@ dev_dependencies:
 # 首次拉取后请执行 `flutter pub upgrade --major-versions` 对齐最新稳定版。
 
 flutter:
+  # 保持现有 CocoaPods 工程；换 Mac 时不依赖机器上的 Flutter 全局开关。
+  config:
+    enable-swift-package-manager: false
   uses-material-design: true
   assets:
     # ⚠️ 原来这里还声明了 `assets/i18n/`，但那个目录从不存在、也没有任何代码
