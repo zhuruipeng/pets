@@ -8,6 +8,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../db/app_database.dart';
+import 'user_repository.dart';
 
 /// 共养角色。三档，与同步协议的权限矩阵一一对应。
 ///
@@ -122,7 +123,29 @@ class MemberRepository {
     // Offline-created pets have not received the server's owner membership yet.
     final memberships = await _db.query(_table, columns: ['id'],
         where: 'pet_id = ?', whereArgs: [petId], limit: 1);
-    return memberships.isEmpty && pets.single['created_by'] == userId ? MemberRole.owner : null;
+
+    // 本地建的宠物，登录后仍认自己为主人 —— **防御性兜底，不是某次 bug 的根因**。
+    //
+    // 起因是我排查「登录后看不到删除按钮」时怀疑这里：`adoptAccount`
+    // 会把本地用户行的 id 从 `local-user` 改成服务端 accountId，
+    // 若宠物的 `created_by` 没跟着迁移，`created_by == userId` 就会不成立。
+    //
+    // **但这个怀疑是错的。** `adoptAccount` 已经迁移了
+    // `pets / records / walk_sessions / reminder_logs` 四张表的 created_by
+    // （见 user_repository.dart 的注释）；用户那次问题的真正原因是
+    // 装了旧包 —— 删除按钮组件在包里但从未被任何页面引用。
+    //
+    // 留下这个兜底的理由：迁移是**单点依赖**。若某次迁移缺席
+    // （老版本升级上来、迁移中途失败、将来新增一张带 created_by 的表
+    // 而忘了加进那份列表），这里的宽松判定能让用户不至于突然失去
+    // 自己宠物的所有权 —— 那个后果（按钮消失、提醒不能编辑）
+    // 比「多认一个主人」严重得多，且用户完全无从理解。
+    //
+    // 安全性已验证：`created_by` 既不是自己也不是 localUserId 时仍返回
+    // null（测试「别人的宠物不会被误判成自己的」覆盖）。
+    final createdBy = pets.single['created_by'];
+    final isMine = createdBy == userId || createdBy == UserRepository.localUserId;
+    return memberships.isEmpty && isMine ? MemberRole.owner : null;
   }
 
   Future<List<PetMember>> listByPet(String petId) async {
