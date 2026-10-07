@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import '../services/share_helper.dart';
 
 import 'core/region.dart';
+import 'core/l10n.dart';
 import 'core/units.dart';
 import 'data/db/app_database.dart';
 import 'data/models.dart';
@@ -33,6 +34,8 @@ import 'domain/expense_stats.dart';
 import 'domain/health_ledger.dart';
 import 'domain/immunization.dart';
 import 'domain/pet_report.dart';
+import 'domain/medication_course.dart';
+import 'domain/family_care.dart';
 import 'services/app_update_service.dart';
 import 'services/report_renderer.dart';
 import 'services/avatar_store.dart';
@@ -298,6 +301,26 @@ final petMembersProvider =
   return ref.read(memberRepositoryProvider).listByPet(petId);
 });
 
+final petRoleProvider = FutureProvider.family<MemberRole?, String>((ref, petId) async {
+  final user = await ref.watch(currentUserProvider.future);
+  await ref.watch(petsProvider.future);
+  await ref.watch(petMembersProvider(petId).future);
+  return ref.read(memberRepositoryProvider).roleFor(petId, user?.id ?? kCurrentUserId);
+});
+
+final careLogsProvider = FutureProvider.family<List<Map<String, Object?>>, String>((ref, petId) async {
+  await ref.watch(dbReadyProvider.future);
+  return ref.read(reminderRepositoryProvider).logsForPet(petId);
+});
+
+final careEventsProvider = FutureProvider.family<List<CareEvent>, (String, int)>((ref, key) async {
+  final records = await ref.watch(petRecordsProvider(key.$1).future);
+  final reminders = await ref.watch(petRemindersProvider(key.$1).future);
+  final logs = await ref.watch(careLogsProvider(key.$1).future);
+  return buildCareEvents(records: records, reminders: reminders, logs: logs,
+      day: DateTime.fromMillisecondsSinceEpoch(key.$2));
+});
+
 // ------------------------------------------------------------------ 动作层
 
 /// 写操作的集合。UI 调它，由它负责失效相关 provider。
@@ -326,6 +349,60 @@ class AppActions {
   ExpenseRepository get _expenses => ref.read(expenseRepositoryProvider);
   WalkRepository get _walks => ref.read(walkRepositoryProvider);
   NotificationService get _notify => ref.read(notificationServiceProvider);
+
+  Future<void> _requirePetPermission(String petId, {bool manage = false}) async {
+    final role = await ref.read(memberRepositoryProvider).roleFor(petId, await _currentUserId());
+    if (role == null || (manage ? !role.canManage : !role.canWrite)) {
+      throw StateError(L.t(manage ? 'pet.delete.ownerOnly' : 'care.readOnly'));
+    }
+  }
+
+  Future<void> deletePet(String petId) async {
+    final pet = await _pets.findById(petId);
+    if (pet == null) throw StateError(L.t('care.error.changed'));
+    await _requirePetPermission(pet.id, manage: true);
+    await _pets.softDelete(pet.id);
+    for (final reminder in await _reminders.listForPet(pet.id)) {
+      await _notify.cancel(reminder.id);
+    }
+    if (ref.read(selectedPetIdProvider) == pet.id) {
+      ref.read(selectedPetIdProvider.notifier).state = null;
+    }
+    if (ref.read(activeWalkProvider)?.petId == pet.id) {
+      ref.read(activeWalkProvider.notifier).state = null;
+    }
+    ref.invalidate(petsProvider);
+    ref.invalidate(upcomingRemindersProvider);
+    ref.invalidate(petRoleProvider(pet.id));
+    await ref.read(syncControllerProvider.notifier).markDirty();
+  }
+
+  Future<Reminder> saveMedicationCourse(String petId, MedicationCourse course,
+      {Reminder? existing}) async {
+    await _requirePetPermission(petId);
+    if (existing != null && existing.petId != petId) throw StateError('wrong pet');
+    final saved = existing == null
+        ? await _reminders.createCourse(petId: petId, course: course)
+        : await _reminders.updateCourse(existing, course);
+    await _syncReminder(saved);
+    await _notify.requestPermission();
+    await ref.read(syncControllerProvider.notifier).markDirty();
+    return saved;
+  }
+
+  Future<void> toggleMedicationCourse(Reminder reminder, bool enabled) async {
+    await _requirePetPermission(reminder.petId);
+    await _syncReminder(await _reminders.toggleCourse(reminder, enabled));
+    await ref.read(syncControllerProvider.notifier).markDirty();
+  }
+
+  Future<void> refreshNotifications() async {
+    await _notify.cancelAll();
+    for (final pet in await _pets.listAll()) {
+      await _notify.rescheduleAll(await _reminders.listForPet(pet.id, onlyEnabled: true),
+          petName: pet.name);
+    }
+  }
 
   /// 最近一次 [addPet] 生成的计划条数。
   ///
@@ -481,6 +558,8 @@ class AppActions {
     Map<String, dynamic> payload = const {},
     String? note,
   }) async {
+    final actor = await _users.current();
+    await _requirePetPermission(petId);
     await _records.createSimple(
       petId: petId,
       type: type,
@@ -489,7 +568,7 @@ class AppActions {
       valueNum: valueNum,
       valueText: valueText,
       unit: unit,
-      payload: payload,
+      payload: {...payload, if (actor != null) 'actor_name': actor.nickname},
       note: note,
     );
     ref.invalidate(petRecordsProvider(petId));
@@ -637,10 +716,19 @@ class AppActions {
   }
 
   /// 完成一次提醒：留档 + 排下次 + 重排通知。
-  Future<ReminderTickResult> completeReminder(String reminderId) async {
-    final result = await _reminders.completeOnce(reminderId);
+  Future<ReminderTickResult> completeReminder(String reminderId, {DateTime? expectedDueAt}) async {
+    final reminder = await _reminders.findById(reminderId);
+    if (reminder == null) throw StateError(L.t('care.error.changed'));
+    await _requirePetPermission(reminder.petId);
+    final actor = await _users.current();
+    final result = await _reminders.completeOnce(reminderId,
+        expectedDueAt: expectedDueAt ?? reminder.nextAt,
+        createdBy: actor?.id ?? kCurrentUserId, actorName: actor?.nickname);
     ref.invalidate(upcomingRemindersProvider);
     ref.invalidate(petRemindersProvider(result.reminder.petId));
+    ref.invalidate(careLogsProvider(result.reminder.petId));
+    ref.invalidate(petRecordsProvider(result.reminder.petId));
+    await ref.read(syncControllerProvider.notifier).markDirty();
 
     if (result.nextAt != null) {
       await _notify.schedule(result.reminder, nextAt: result.nextAt!);
@@ -653,6 +741,9 @@ class AppActions {
   Future<void> snoozeReminder(String reminderId) async {
     final reminder = await _reminders.findById(reminderId);
     if (reminder == null) return;
+    await _requirePetPermission(reminder.petId);
+    // A course's slots are fixed; postponing a dose by a whole day breaks it.
+    if (reminder.rule['mode'] == 'medication') throw StateError(L.t('med.pauseHint'));
 
     final next = await _reminders.snooze(reminderId, const Duration(days: 1));
     ref.invalidate(upcomingRemindersProvider);
@@ -675,6 +766,7 @@ class AppActions {
     required int everyDays,
     required DateTime firstAt,
   }) async {
+    await _requirePetPermission(petId);
     final reminder = await _reminders.createInterval(
       petId: petId,
       type: type,
@@ -687,12 +779,17 @@ class AppActions {
   }
 
   Future<void> updateReminder(Reminder reminder) async {
+    await _requirePetPermission(reminder.petId);
+    if (reminder.rule['mode'] == 'medication') {
+      throw StateError(L.t('med.error.schedule'));
+    }
     await _reminders.update(reminder);
     await _syncReminder(reminder);
   }
 
   /// 删除提醒。**软删除 + 撤掉通知**：记录留着，但不能再弹。
   Future<void> deleteReminder(Reminder reminder) async {
+    await _requirePetPermission(reminder.petId);
     await _reminders.softDelete(reminder.id);
     await _notify.cancel(reminder.id);
     ref.invalidate(petRemindersProvider(reminder.petId));
@@ -750,12 +847,6 @@ class AppActions {
   }) async {
     final updated = await _walks.setFeedback(sessionId, mood: mood, note: note);
     if (updated != null) ref.invalidate(petWalksProvider(updated.petId));
-  }
-
-  Future<void> deletePet(String petId) async {
-    await _pets.softDelete(petId);
-    ref.invalidate(petsProvider);
-    ref.invalidate(upcomingRemindersProvider);
   }
 
   /// 保存联系方式（M5）。
@@ -1116,9 +1207,19 @@ class SyncController extends Notifier<SyncStatus> {
       lastSyncAt: await _engine.lastSyncAt(),
       pending: await _engine.pendingCount(),
     );
+    // Shared records must update immediately after a manual sync.
+    ref.invalidate(petsProvider);
+    ref.invalidate(petRecordsProvider);
+    ref.invalidate(petRemindersProvider);
+    ref.invalidate(petMembersProvider);
+    ref.invalidate(petRoleProvider);
+    ref.invalidate(careLogsProvider);
+    ref.invalidate(upcomingRemindersProvider);
+    ref.invalidate(weightSeriesProvider);
+    await ref.read(appActionsProvider).refreshNotifications();
   }
 
-  /// 本地进了一批新数据。**不立刻同步**，等下一次定时/前台恢复时一起走 ——
+  /// 本地进了一批新数据。不立刻同步，等待用户主动同步或登录时同步。
   /// 连记五条就发五次请求是纯浪费。
   Future<void> markDirty() async {
     state = state.copyWith(pending: await _engine.pendingCount());

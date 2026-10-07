@@ -18,7 +18,7 @@
 /// 老用户升级时会按版本顺序重放，改一句就会在别人手机上错位。
 library;
 
-const int kSchemaVersion = 6;
+const int kSchemaVersion = 7;
 
 const String createUsers = '''
 CREATE TABLE users (
@@ -203,11 +203,18 @@ CREATE TABLE reminders (
 const String createReminderLogs = '''
 CREATE TABLE reminder_logs (
   id           TEXT PRIMARY KEY,
+  pet_id       TEXT,
   reminder_id  TEXT NOT NULL,
   due_at       INTEGER NOT NULL,
   done_at      INTEGER,
   record_id    TEXT,
   action       TEXT,
+  created_by   TEXT,
+  actor_name   TEXT,
+  stock_used   REAL NOT NULL DEFAULT 0,
+  created_at   INTEGER NOT NULL DEFAULT 0,
+  updated_at   INTEGER NOT NULL DEFAULT 0,
+  deleted_at   INTEGER,
   UNIQUE(reminder_id, due_at)
 );
 ''';
@@ -301,7 +308,7 @@ final List<String> onCreate = [
 ///
 /// **不在这个列表里的表不会被同步**，见 docs/同步协议.md 第三节：
 /// - `walk_points`：逐点同步会把变更日志撑爆，它随 session 一起传
-/// - `reminder_logs`：本地行为统计，跨设备合并意义不大，且表里没有 updated_at
+/// v7 起 reminder_logs 参与同步，用于家庭照护人与给药余量。
 /// - `pet_tags`：目前没有任何写入路径
 /// 即使表在 [kSyncedTables] 里，某些行也不该进 outbox。表名 → 额外的 WHEN 条件。
 ///
@@ -328,6 +335,7 @@ const List<({String table, String petExpr, bool hasDeletedAt})> kSyncedTables = 
     hasDeletedAt: true,
   ),
   (table: 'reminders', petExpr: 'NEW.pet_id', hasDeletedAt: true),
+  (table: 'reminder_logs', petExpr: 'NEW.pet_id', hasDeletedAt: true),
   (table: 'expenses', petExpr: 'NEW.pet_id', hasDeletedAt: true),
   (table: 'walk_sessions', petExpr: 'NEW.pet_id', hasDeletedAt: true),
 ];
@@ -429,7 +437,8 @@ final Map<int, List<String>> migrations = {
     // ---- 同步元数据与变更队列 ----
     createSyncMeta,
     createSyncOutbox,
-    ...createSyncTriggers,
+    // Completion-log columns only exist from v7 onward.
+    ...createSyncTriggers.where((sql) => !sql.contains(' ON reminder_logs')),
   ],
 
   // v5：费用记录（M8）。
@@ -470,5 +479,22 @@ final Map<int, List<String>> migrations = {
       hasDeletedAt: true,
       skipWhen: kSyncSkipWhen['attachments'],
     ),
+  ],
+  7: [
+    'ALTER TABLE reminder_logs ADD COLUMN pet_id TEXT',
+    'ALTER TABLE reminder_logs ADD COLUMN created_by TEXT',
+    'ALTER TABLE reminder_logs ADD COLUMN actor_name TEXT',
+    'ALTER TABLE reminder_logs ADD COLUMN stock_used REAL NOT NULL DEFAULT 0',
+    'ALTER TABLE reminder_logs ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE reminder_logs ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE reminder_logs ADD COLUMN deleted_at INTEGER',
+    "UPDATE reminder_logs SET id = 'log_' || reminder_id || '_' || due_at, "
+        'pet_id = (SELECT pet_id FROM reminders WHERE id = reminder_id), '
+        'created_by = (SELECT created_by FROM records WHERE id = record_id), '
+        'created_at = due_at, updated_at = COALESCE(done_at, due_at)',
+    ..._triggersFor('reminder_logs', 'NEW.pet_id', hasDeletedAt: true),
+    "INSERT OR REPLACE INTO sync_outbox(table_name,row_id,pet_id,op,updated_at) "
+        "SELECT 'reminder_logs',id,pet_id,'upsert',updated_at FROM reminder_logs "
+        'WHERE pet_id IS NOT NULL',
   ],
 };

@@ -66,6 +66,61 @@ void main() {
         'updated_at': timestamp,
       });
 
+  test('canonical shared completion replaces a later offline duplicate', () async {
+    await pet('p1');
+    final dose = {'id': 'dose_course_9', 'pet_id': 'p1', 'type': 'medication',
+      'recorded_at': 9, 'created_at': 9, 'updated_at': 3000,
+      'created_by': 'u1', 'payload': '{"course_id":"course","due_at":9,"actor_name":"Alice"}'};
+    final log = {'id': 'log_course_9', 'pet_id': 'p1', 'reminder_id': 'course',
+      'due_at': 9, 'done_at': 9, 'action': 'done', 'record_id': 'dose_course_9',
+      'created_at': 9, 'updated_at': 3000, 'stock_used': 1.0,
+      'created_by': 'u1', 'actor_name': 'Alice'};
+    await db.insert('records', dose);
+    await db.insert('reminder_logs', log);
+    api.onPush = (changes) async => PushResult(
+      applied: changes.where((c) => c.table == 'pets').toList(),
+      rejected: [for (final c in changes.where((c) => c.table != 'pets')) (change: c, reason: 'stale')]);
+    api.onPull = (_) async => PullResult(changes: [
+      SyncChange(table: 'records', rowId: 'dose_course_9', op: 'upsert', updatedAt: 2000,
+        payload: {...dose, 'updated_at': 2000, 'created_by': 'u2',
+          'payload': '{"course_id":"course","due_at":9,"actor_name":"Bob"}'}),
+      SyncChange(table: 'reminder_logs', rowId: 'log_course_9', op: 'upsert', updatedAt: 2000,
+        payload: {...log, 'updated_at': 2000, 'created_by': 'u2', 'actor_name': 'Bob'}),
+    ], nextSince: 2, hasMore: false);
+    final result = await engine.sync();
+    expect(result.ok, isTrue, reason: '${result.error}');
+    expect((await db.query('reminder_logs')).single['actor_name'], 'Bob');
+    expect((await db.query('records')).single['created_by'], 'u2');
+    expect(await engine.pendingCount(), 0);
+  });
+
+  test('course dependencies are pushed before logs even across a batch boundary', () async {
+    await pet('p1', timestamp: 9000);
+    await db.insert('reminders', {'id': 'course', 'pet_id': 'p1', 'type': 'medication',
+      'title': 'Medicine', 'rule': '{}', 'next_at': 9, 'created_at': 9, 'updated_at': 9000});
+    for (var i = 0; i < 201; i++) {
+      await db.insert('records', {'id': 'record-$i', 'pet_id': 'p1', 'type': 'medication',
+        'recorded_at': 1, 'created_at': 1, 'updated_at': 1, 'created_by': 'u1'});
+    }
+    await db.insert('reminder_logs', {'id': 'log_course_9', 'pet_id': 'p1', 'reminder_id': 'course',
+      'due_at': 9, 'done_at': 9, 'action': 'done', 'record_id': 'record-200',
+      'created_at': 9, 'updated_at': 2});
+    final received = <String>{};
+    api.onPush = (changes) async {
+      for (final change in changes) {
+        if (change.table == 'reminder_logs') {
+          expect(received, containsAll(['pets:p1', 'reminders:course', 'records:record-200']));
+        }
+        received.add('${change.table}:${change.rowId}');
+      }
+      return PushResult(applied: changes, rejected: const []);
+    };
+    expect((await engine.sync()).ok, isTrue);
+    expect(api.batches, hasLength(2));
+    expect(received, contains('reminder_logs:log_course_9'));
+    expect(await engine.pendingCount(), 0);
+  });
+
   for (final timestamp in [1000, 2000]) {
     test('上传中的再次编辑不能被旧响应从队列中删除（$timestamp）', () async {
       await pet('p1');

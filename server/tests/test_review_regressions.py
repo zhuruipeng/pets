@@ -80,6 +80,88 @@ def login(db, user_id):
     app.dependency_overrides[current_user] = lambda: db.get(User, user_id)
 
 
+def _care_changes(pet_id="pet", timestamp=10, due_at=9):
+    course_id = "course"
+    dose_id = f"dose_{course_id}_{due_at}"
+    log_id = f"log_{course_id}_{due_at}"
+    return [
+        PushChangeIn(table="reminder_logs", row_id=log_id, op="upsert", updated_at=timestamp,
+                     payload={"pet_id": pet_id, "reminder_id": course_id, "due_at": due_at,
+                              "done_at": timestamp, "record_id": dose_id, "stock_used": 0.5,
+                              "action": "done", "created_by": "forged", "actor_name": "Forged"}),
+        PushChangeIn(table="records", row_id=dose_id, op="upsert", updated_at=timestamp,
+                     payload={"pet_id": pet_id, "type": "medication", "created_at": timestamp,
+                              "created_by": "forged", "recorded_at": timestamp, "payload":
+                              '{"course_id":"course","due_at":' + str(due_at) + '}'}),
+        PushChangeIn(table="reminders", row_id=course_id, op="upsert", updated_at=timestamp,
+                     payload={"pet_id": pet_id, "title": "Medicine", "type": "medication"}),
+    ]
+
+
+def test_care_completion_dependency_order_actor_and_duplicate(db):
+    changes = _care_changes()
+    result = sync_push(PushIn(device_id="one", changes=changes), user=db.get(User, "editor"), session=db)
+    assert len(result["applied"]) == 3
+    log = db.execute(select(SyncChange).where(SyncChange.table_name == "reminder_logs")).scalar_one()
+    assert log.payload["created_by"] == "editor"
+    assert log.payload["actor_name"] == "editor"
+    newer = _care_changes(timestamp=20)
+    duplicate = sync_push(PushIn(device_id="two", changes=newer), user=db.get(User, "owner"), session=db)
+    assert len(duplicate["applied"]) == 1  # course schedule remains ordinary LWW
+    assert len(duplicate["rejected"]) == 2
+    assert all(row["result"] == "stale" for row in duplicate["rejected"])
+    assert db.execute(select(SyncChange).where(SyncChange.table_name == "reminder_logs")).scalar_one().payload["created_by"] == "editor"
+
+
+@pytest.mark.parametrize("user_id", ["viewer", "outsider"])
+def test_care_completion_requires_write_access(db, user_id):
+    result = sync_push(PushIn(device_id="one", changes=_care_changes()), user=db.get(User, user_id), session=db)
+    assert not result["applied"]
+    assert all(row["result"] == "forbidden" for row in result["rejected"])
+
+
+@pytest.mark.parametrize("field,value", [
+    ("pet_id", "other-pet"), ("stock_used", -1), ("stock_used", "wrong"),
+    ("stock_used", float("inf")), ("done_at", None), ("action", "unknown"),
+    ("due_at", True), ("reminder_id", "missing"), ("record_id", "missing"),
+])
+def test_care_completion_invalid_parent_or_values_are_rejected(db, field, value):
+    changes = _care_changes()
+    sync_push(PushIn(device_id="one", changes=changes[1:]), user=db.get(User, "editor"), session=db)
+    log = changes[0]
+    log.payload[field] = value
+    result = sync_push(PushIn(device_id="one", changes=[log]), user=db.get(User, "owner"), session=db)
+    assert not result["applied"]
+    assert result["rejected"][0]["result"] in ("invalid", "forbidden")
+
+
+def test_historical_completion_does_not_invent_a_caregiver(db):
+    changes = _care_changes()
+    changes[0].payload["created_by"] = None
+    changes[0].payload["actor_name"] = None
+    result = sync_push(PushIn(device_id="one", changes=changes), user=db.get(User, "owner"), session=db)
+    assert len(result["applied"]) == 3
+    log = db.execute(select(SyncChange).where(SyncChange.table_name == "reminder_logs")).scalar_one()
+    assert log.payload["created_by"] is None
+    assert log.payload["actor_name"] is None
+
+
+def test_dose_record_can_be_corrected_without_rewriting_completion_history(db):
+    result = sync_push(PushIn(device_id="one", changes=_care_changes()), user=db.get(User, "editor"), session=db)
+    assert len(result["applied"]) == 3
+    original = db.execute(select(SyncChange).where(SyncChange.table_name == "records")).scalar_one()
+    edited = PushChangeIn(table="records", row_id=original.row_id, op="upsert", updated_at=20,
+                          payload={**original.payload, "recorded_at": 8})
+    result = sync_push(PushIn(device_id="one", changes=[edited]), user=db.get(User, "editor"), session=db)
+    assert len(result["applied"]) == 1
+    log = db.execute(select(SyncChange).where(SyncChange.table_name == "reminder_logs")).scalar_one()
+    assert log.payload["done_at"] == 10
+    assert log.payload["stock_used"] == 0.5
+    # A second completion by the same account has a different creation instant.
+    duplicate = sync_push(PushIn(device_id="two", changes=_care_changes(timestamp=30)), user=db.get(User, "editor"), session=db)
+    assert sum(row["result"] == "stale" for row in duplicate["rejected"]) == 2
+
+
 def push(db, user_id, table, row_id, payload, timestamp=10, op="upsert"):
     return sync_push(
         PushIn(changes=[PushChangeIn(table=table, row_id=row_id, payload=payload,

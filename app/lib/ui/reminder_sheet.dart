@@ -17,6 +17,9 @@ import '../core/theme.dart';
 import '../data/models.dart';
 import '../providers.dart';
 import 'widgets.dart';
+import 'medication_courses.dart';
+import '../domain/medication_course.dart';
+import '../data/repositories/member_repository.dart';
 
 /// 周期预设。单位统一折算成「天」存库，与 ReminderRepository 的 rule 格式一致。
 const List<({String labelKey, int days})> _repeatPresets = [
@@ -33,6 +36,9 @@ Future<void> showReminderSheet(
   required Pet pet,
   Reminder? existing,
 }) {
+  if (existing?.rule['mode'] == 'medication') {
+    return showMedicationCourseForm(context, pet: pet, existing: existing);
+  }
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -336,7 +342,7 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(L.error(e))));
     }
   }
 
@@ -389,7 +395,10 @@ Future<void> showReminderDueSheet(
   final reminder = await container.read(reminderRepositoryProvider).findById(reminderId);
 
   if (!context.mounted) return;
-  if (reminder == null || reminder.deletedAt != null) {
+  final pet = reminder == null ? null : await container.read(petRepositoryProvider).findById(reminder.petId);
+  if (!context.mounted) return;
+  if (reminder == null || reminder.deletedAt != null || !reminder.enabled ||
+      pet == null || pet.deletedAt != null || pet.archivedAt != null) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(L.t('reminder.due.unknown'))));
     return;
@@ -416,6 +425,8 @@ class _ReminderDueSheetState extends ConsumerState<_ReminderDueSheet> {
   @override
   Widget build(BuildContext context) {
     final r = widget.reminder;
+    final course = MedicationCourse.fromReminder(r);
+    final canWrite = ref.watch(petRoleProvider(r.petId)).valueOrNull?.canWrite == true;
 
     return SafeArea(
       child: Padding(
@@ -470,11 +481,16 @@ class _ReminderDueSheetState extends ConsumerState<_ReminderDueSheet> {
               ],
             ),
             const SizedBox(height: AppSpace.gapL),
+            if (course != null) ...[
+              Text('${course.dose} · ${L.t('addRecord.med.route.${course.route}')}'),
+              Text(L.t('med.givenConfirm')),
+              const SizedBox(height: AppSpace.gapM),
+            ],
             Row(
               children: [
-                Expanded(
+                if (course == null) Expanded(
                   child: OutlinedButton(
-                    onPressed: _busy ? null : _snooze,
+                    onPressed: _busy || !canWrite ? null : _snooze,
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.primary,
                       side: const BorderSide(color: AppColors.border),
@@ -483,14 +499,14 @@ class _ReminderDueSheetState extends ConsumerState<_ReminderDueSheet> {
                     child: Text(L.t('today.snooze')),
                   ),
                 ),
-                const SizedBox(width: AppSpace.gapM),
+                if (course == null) const SizedBox(width: AppSpace.gapM),
                 Expanded(
                   child: FilledButton(
-                    onPressed: _busy ? null : _complete,
+                    onPressed: _busy || !canWrite ? null : _complete,
                     style: FilledButton.styleFrom(
                       minimumSize: const Size(0, 44),
                     ),
-                    child: Text(L.t('today.done')),
+                    child: Text(L.t(course == null ? 'today.done' : 'med.given')),
                   ),
                 ),
               ],
@@ -508,7 +524,8 @@ class _ReminderDueSheetState extends ConsumerState<_ReminderDueSheet> {
 
     try {
       final result =
-          await ref.read(appActionsProvider).completeReminder(widget.reminder.id);
+          await ref.read(appActionsProvider).completeReminder(widget.reminder.id,
+              expectedDueAt: widget.reminder.nextAt);
       if (!mounted) return;
       final next = result.nextAt;
       navigator.pop();
@@ -520,7 +537,7 @@ class _ReminderDueSheetState extends ConsumerState<_ReminderDueSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(L.error(e))));
     }
   }
 

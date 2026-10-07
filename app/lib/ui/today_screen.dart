@@ -24,6 +24,8 @@ import '../data/models.dart';
 import '../providers.dart';
 import 'sheets.dart';
 import 'widgets.dart';
+import 'family_care_board.dart';
+import 'reminder_sheet.dart';
 
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
@@ -74,7 +76,7 @@ class TodayScreen extends ConsumerWidget {
                 _WeekOverview(pet: currentPet),
                 const SizedBox(height: AppSpace.gapL),
                 _QuickAddRow(pet: currentPet),
-                _TodayLog(pet: currentPet),
+                FamilyCareBoard(pet: currentPet),
                 const SizedBox(height: AppSpace.gapL),
               ],
 
@@ -89,7 +91,7 @@ class TodayScreen extends ConsumerWidget {
                 ),
                 error: (e, _) => Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text('$e'),
+                  child: Text(L.error(e)),
                 ),
                 data: (reminders) => _TodoSection(reminders: reminders),
               ),
@@ -540,137 +542,6 @@ class _WeekOverview extends ConsumerWidget {
 /// 日常真正在手机上反复记的只有体重、喂食、用药三件，
 /// 疫苗和驱虫一年才几次，塞在「更多」里足够了。
 /// 摊开九个图标反而会让每次记录都要先做一次选择。
-/// 今日日志：把今天记过的东西按时间倒序列出来。
-///
-/// 为什么要有这一块：疫苗、驱虫那些是**低频事件**，一年才几条；而喂食、饮水、
-/// 排泄、睡眠是**每天都会发生**的 —— 它们才是养宠日常，也正是兽医问诊时最想
-/// 知道、而主人最记不住的东西（「最近喝得多吗」）。之前记完就沉进「记录」页的
-/// 长时间线里，当天根本看不到自己记过什么。
-///
-/// 今天没有记录时整块不出现：空态留给旁边的待办区，首页不再多一层噪音。
-class _TodayLog extends ConsumerWidget {
-  const _TodayLog({required this.pet});
-
-  final Pet pet;
-
-  /// 首页只摆最近几条，多了会把「接下来 7 天」挤下去。
-  static const _maxRows = 5;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final all =
-        ref.watch(petRecordsProvider(pet.id)).valueOrNull ?? const <PetRecord>[];
-
-    final now = DateTime.now();
-    final today = all
-        .where((r) =>
-            r.recordedAt.year == now.year &&
-            r.recordedAt.month == now.month &&
-            r.recordedAt.day == now.day)
-        .toList()
-      ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
-
-    if (today.isEmpty) return const SizedBox.shrink();
-
-    const region = AppRegion.current;
-    final unit = Units.defaultWeightUnit(region);
-    final rows = today.take(_maxRows).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(
-          L.t('today.log'),
-          trailing: today.length > _maxRows
-              ? Text(
-                  L.tp('today.log.total', {'n': today.length}),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                )
-              : null,
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: AppRadius.cardBorder,
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            children: [
-              for (var i = 0; i < rows.length; i++) ...[
-                if (i > 0) const RowDivider(),
-                _LogRow(record: rows[i], unit: unit),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 日志一行：类型 + 值 + 时间。
-class _LogRow extends StatelessWidget {
-  const _LogRow({required this.record, required this.unit});
-
-  final PetRecord record;
-  final WeightUnit unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final value = recordValueLine(record, unit);
-    final extra = recordPayloadSummary(record);
-    final detail = [
-      if (value != null) value,
-      if (extra.isNotEmpty) extra,
-    ].join(' · ');
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpace.gapL,
-        vertical: 11,
-      ),
-      child: Row(
-        children: [
-          Icon(recordTypeIcon(record.type), size: 17, color: AppColors.primary),
-          const SizedBox(width: AppSpace.gapM),
-          Expanded(
-            child: Text(
-              recordTypeLabel(record.type),
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-          if (detail.isNotEmpty)
-            Text(
-              detail,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          const SizedBox(width: AppSpace.gapM),
-          Text(
-            _hm(record.recordedAt),
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textTertiary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _hm(DateTime d) =>
-      '${d.hour.toString().padLeft(2, '0')}:'
-      '${d.minute.toString().padLeft(2, '0')}';
-}
-
 class _QuickAddRow extends ConsumerWidget {
   const _QuickAddRow({required this.pet});
 
@@ -1091,7 +962,7 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
               ),
             )
           else ...[
-            IconButton(
+            if (r.rule['mode'] != 'medication') IconButton(
               tooltip: L.t('today.snooze'),
               visualDensity: VisualDensity.compact,
               onPressed: () => _snooze(r.id),
@@ -1099,7 +970,9 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
                   size: 19, color: AppColors.textSecondary),
             ),
             FilledButton(
-              onPressed: () => _complete(r.id),
+              onPressed: () => r.rule['mode'] == 'medication'
+                  ? showReminderDueSheet(context, reminderId: r.id)
+                  : _complete(r),
               style: FilledButton.styleFrom(
                 minimumSize: const Size(0, 34),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1116,10 +989,11 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
     );
   }
 
-  Future<void> _complete(String id) async {
+  Future<void> _complete(Reminder reminder) async {
     setState(() => _busy = true);
     try {
-      final result = await ref.read(appActionsProvider).completeReminder(id);
+      final result = await ref.read(appActionsProvider).completeReminder(
+          reminder.id, expectedDueAt: reminder.nextAt);
       if (!mounted) return;
       final next = result.nextAt;
       final msg = next == null
@@ -1130,7 +1004,7 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L.error(e))));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

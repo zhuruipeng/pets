@@ -92,7 +92,7 @@ class UserRepository {
 
       // created_by 现在没有外键约束（schema 里没声明），可以直接改。
       // 将来若补上 FK，这段要改成先插新行再改引用。
-      for (final table in ['pets', 'records', 'walk_sessions']) {
+      for (final table in ['pets', 'records', 'walk_sessions', 'reminder_logs']) {
         await txn.update(
           table,
           {'created_by': accountId},

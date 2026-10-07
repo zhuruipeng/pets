@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -257,7 +259,8 @@ def sync_push(
             _bootstrap_owner_if_needed(session, normalized, user)
 
     # 附件依赖父记录；同批输入即使附件在前，也先接收 records。
-    for change in sorted(valid_changes, key=lambda item: item.table == "attachments"):
+    priority = {"pets": 0, "reminders": 1, "records": 2, "attachments": 3, "reminder_logs": 4}
+    for change in sorted(valid_changes, key=lambda item: priority.get(item.table, 2)):
 
         pet_id = _pet_id_of(change)
         if change.table == "users":
@@ -286,6 +289,55 @@ def sync_push(
             if parent is None or parent.pet_id != pet_id:
                 rejected.append(_rejected(change, "forbidden"))
                 continue
+        if change.table == "reminder_logs":
+            reminder_id = change.payload.get("reminder_id")
+            due_at = change.payload.get("due_at")
+            stock_used = change.payload.get("stock_used", 0)
+            parent = latest_change(session, "reminders", reminder_id) if isinstance(reminder_id, str) else None
+            if (parent is None or parent.pet_id != pet_id or type(due_at) is not int
+                    or change.row_id != f"log_{reminder_id}_{due_at}"
+                    or not isinstance(stock_used, (int, float)) or isinstance(stock_used, bool)
+                    or not math.isfinite(stock_used) or stock_used < 0
+                    or change.payload.get("action") != "done"
+                    or type(change.payload.get("done_at")) is not int):
+                rejected.append(_rejected(change, "invalid"))
+                continue
+            # A scheduled occurrence is completed once, even if two offline
+            # devices submit it. Preserve the first accepted caregiver and dose.
+            if current is not None:
+                rejected.append(_rejected(change, "stale"))
+                continue
+            record_id = change.payload.get("record_id")
+            record = latest_change(session, "records", record_id) if isinstance(record_id, str) else None
+            if record_id is not None and (record is None or record.pet_id != pet_id):
+                rejected.append(_rejected(change, "invalid"))
+                continue
+        dose_details = None
+        if change.table == "records" and change.op == "upsert":
+            details = change.payload.get("payload", {})
+            if isinstance(details, str):
+                try:
+                    details = json.loads(details)
+                except (ValueError, TypeError):
+                    details = {}
+            if isinstance(details, dict) and details.get("course_id"):
+                course_id, due_at = details["course_id"], details.get("due_at")
+                parent = latest_change(session, "reminders", course_id) if isinstance(course_id, str) else None
+                if (parent is None or parent.pet_id != pet_id or type(due_at) is not int
+                        or change.row_id != f"dose_{course_id}_{due_at}"):
+                    rejected.append(_rejected(change, "invalid"))
+                    continue
+                if current is not None:
+                    # Distinguish an edit to the original record from a second
+                    # device creating another completion of the same slot.
+                    original = current.payload or {}
+                    if (current.op == "delete" or type(original.get("created_at")) is not int
+                            or change.payload.get("created_at") != original["created_at"]
+                            or change.payload.get("created_by") != original.get("created_by")):
+                        rejected.append(_rejected(change, "stale"))
+                        continue
+                else:
+                    dose_details = {**details, "actor_name": user.nickname}
         if change.table == "pets":
             existing_pet = session.get(Pet, change.row_id)
             if (existing_pet is not None and change.payload.get("created_by",
@@ -300,6 +352,17 @@ def sync_push(
         # payload 原样存：walk_sessions 的轨迹点就在 payload["points"] 里，
         # 不拆到别处（见协议第三节）。拆开会让「整段覆盖」的语义无处落脚。
         snapshot = {**change.payload, "id": change.row_id, "updated_at": change.updated_at}
+        if dose_details is not None:
+            snapshot["created_by"] = user.id
+            snapshot["payload"] = json.dumps(dose_details, ensure_ascii=False)
+        if change.table == "reminder_logs" and snapshot.get("created_by") is not None:
+            if snapshot.get("actor_name") is not None:
+                snapshot["created_by"] = user.id
+                snapshot["actor_name"] = user.nickname
+            else:
+                # Migrated logs can identify the historical author only through
+                # a linked record; uploading them does not make the uploader it.
+                snapshot["created_by"] = (record.payload or {}).get("created_by") if record is not None else None
         if change.op == "delete":
             snapshot["deleted_at"] = snapshot.get("deleted_at") or change.updated_at
         if change.table == "pets":

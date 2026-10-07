@@ -33,6 +33,7 @@ const List<String> kSyncableTables = [
   'records',
   'attachments',
   'reminders',
+  'reminder_logs',
   'expenses',
   'walk_sessions',
 ];
@@ -304,7 +305,10 @@ class SyncEngine {
       // 队列和快照一起读取，避免二者之间的编辑产生时间戳/载荷不一致。
       final batchSize = await _db.transaction((txn) async {
         final rows = await txn.query('sync_outbox',
-            orderBy: 'updated_at ASC', limit: _pushBatch);
+            orderBy: "CASE table_name WHEN 'users' THEN 0 WHEN 'pets' THEN 0 "
+                "WHEN 'reminders' THEN 1 WHEN 'records' THEN 2 "
+                "WHEN 'attachments' THEN 3 WHEN 'reminder_logs' THEN 4 ELSE 2 END, updated_at ASC",
+            limit: _pushBatch);
         for (final row in rows) {
           final c = await _snapshot(row, executor: txn);
           if (c != null) {
@@ -471,10 +475,17 @@ class SyncEngine {
         local.isEmpty ? null : (local.first['updated_at'] as num?)?.toInt();
     final remoteUpdatedAt =
         c.updatedAt ?? (payload['updated_at'] as num?)?.toInt() ?? c.seq;
+    // The server keeps the first completion of an occurrence. Its canonical
+    // timestamp can be older than this device's duplicate offline completion.
+    final isCompletion = c.table == 'reminder_logs' ||
+        (c.table == 'records' && c.rowId.startsWith('dose_') && c.op == 'upsert');
+    final pending = isCompletion ? await txn.query('sync_outbox',
+        where: 'table_name = ? AND row_id = ?', whereArgs: [c.table, c.rowId], limit: 1) : null;
+    final canonicalCompletion = isCompletion && pending!.isEmpty;
 
     // 远端不比本地新就跳过。**不抛异常、不记录**：这是正常情况
     // （同一行两处都改过，本地那份更新）。
-    if (localUpdatedAt != null &&
+    if (!canonicalCompletion && localUpdatedAt != null &&
         remoteUpdatedAt != null &&
         remoteUpdatedAt <= localUpdatedAt) {
       return false;

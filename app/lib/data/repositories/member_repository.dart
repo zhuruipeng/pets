@@ -103,6 +103,28 @@ class MemberRepository {
 
   Database get _db => _injected ?? AppDatabase.instance.db;
 
+  Future<MemberRole?> roleFor(String petId, String userId) async {
+    final pets = await _db.query('pets', where: 'id = ? AND deleted_at IS NULL AND archived_at IS NULL',
+        whereArgs: [petId], limit: 1);
+    if (pets.isEmpty) return null;
+    final rows = await _db.query(_table, where: 'pet_id = ? AND user_id = ?',
+        whereArgs: [petId, userId], limit: 1);
+    if (rows.isNotEmpty) {
+      final row = rows.single;
+      if (row['deleted_at'] != null || row['status'] != 'active') return null;
+      return switch (row['role']) {
+        'owner' => MemberRole.owner,
+        'editor' || 'caretaker' => MemberRole.editor,
+        'viewer' => MemberRole.viewer,
+        _ => null,
+      };
+    }
+    // Offline-created pets have not received the server's owner membership yet.
+    final memberships = await _db.query(_table, columns: ['id'],
+        where: 'pet_id = ?', whereArgs: [petId], limit: 1);
+    return memberships.isEmpty && pets.single['created_by'] == userId ? MemberRole.owner : null;
+  }
+
   Future<List<PetMember>> listByPet(String petId) async {
     final rows = await _db.query(
       _table,

@@ -380,12 +380,13 @@ class Reminder {
   final String title;
 
   /// JSON: {"mode":"interval","days":90} 或 {"mode":"once","at":1730000000000}
+  /// 用药疗程见 domain/medication_course.dart，mode 为 medication。
   final Map<String, dynamic> rule;
 
   final DateTime nextAt;
   final bool enabled;
 
-  /// auto（系统按免疫规程生成）/ manual（用户自建）
+  /// auto（系统按免疫规程生成）/ manual（用户自建）/ medication_course
   final String? source;
 
   final DateTime createdAt;
@@ -442,6 +443,7 @@ class Reminder {
     DateTime? nextAt,
     bool? enabled,
     String? source,
+    DateTime? updatedAt,
   }) {
     return Reminder(
       id: id,
@@ -453,7 +455,7 @@ class Reminder {
       enabled: enabled ?? this.enabled,
       source: source ?? this.source,
       createdAt: createdAt,
-      updatedAt: DateTime.now(),
+      updatedAt: updatedAt ?? DateTime.now(),
       deletedAt: deletedAt,
     );
   }

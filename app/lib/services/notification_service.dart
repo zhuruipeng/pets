@@ -13,9 +13,12 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../core/reminder_text.dart';
 import '../data/models.dart';
+import '../domain/medication_course.dart';
 
 class NotificationService {
   NotificationService._();
+  @visibleForTesting
+  NotificationService.forTesting();
 
   static final NotificationService instance = NotificationService._();
 
@@ -113,7 +116,10 @@ class NotificationService {
   /// **调用时机有讲究**：必须在用户看到第一条计划之后。
   /// 一进 App 就弹，授权率会掉一半。
   Future<bool> requestPermission() async {
-    await init();
+    try { await init(); } catch (e) {
+      debugPrint('notification initialization failed: $e');
+      return false;
+    }
 
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
@@ -140,8 +146,6 @@ class NotificationService {
     required DateTime nextAt,
     String? petName,
   }) async {
-    await init();
-
     if (!reminder.enabled) {
       await cancel(reminder.id);
       return;
@@ -159,6 +163,30 @@ class NotificationService {
     );
 
     try {
+      await init();
+      final course = MedicationCourse.fromReminder(reminder);
+      if (course != null) {
+        // Queue independent slots so a missed confirmation does not suppress
+        // the next reminder. Keep headroom under iOS's pending-request limit.
+        await cancel(reminder.id);
+        final pending = await _plugin.pendingNotificationRequests();
+        final available = (60 - pending.length).clamp(0, 32);
+        final now = DateTime.now();
+        final slots = course.upcomingSlots(nextAt.isAfter(now) ? nextAt : now,
+            limit: available);
+        for (final slot in slots) {
+          await _plugin.zonedSchedule(
+            _stableId('${reminder.id}_${slot.millisecondsSinceEpoch}'),
+            _titleOf(reminder),
+            [if (petName != null) petName, course.dose].join(' · '),
+            tz.TZDateTime.from(slot, tz.local), details,
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+            uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+            payload: reminder.id,
+          );
+        }
+        return;
+      }
       await _plugin.zonedSchedule(
         _stableId(reminder.id),
         _titleOf(reminder),
@@ -189,17 +217,25 @@ class NotificationService {
   }
 
   Future<void> cancel(String reminderId) async {
-    await init();
     try {
+      await init();
       await _plugin.cancel(_stableId(reminderId));
+      // A course schedules multiple slots, all with this reminder payload.
+      for (final request in await _plugin.pendingNotificationRequests()) {
+        if (request.payload == reminderId) await _plugin.cancel(request.id);
+      }
     } catch (_) {
       // 忽略：取消失败不影响数据。
     }
   }
 
   Future<void> cancelAll() async {
-    await init();
-    await _plugin.cancelAll();
+    try {
+      await init();
+      await _plugin.cancelAll();
+    } catch (e) {
+      debugPrint('cancel notifications failed: $e');
+    }
   }
 
   /// 通知标题。解析规则与列表页完全一致（core/reminder_text.dart）——

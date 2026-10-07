@@ -49,6 +49,8 @@ import 'reminder_sheet.dart';
 import 'sheets.dart';
 import 'walk_detail.dart';
 import 'widgets.dart';
+import 'medication_courses.dart';
+import 'delete_pet_button.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -577,6 +579,7 @@ class _InfoTab extends ConsumerWidget {
             ),
           ),
         ),
+        DeletePetButton(pet: pet),
       ],
     );
   }
@@ -758,6 +761,8 @@ class _HealthTab extends ConsumerWidget {
         96,
       ),
       children: [
+        MedicationCoursesLink(pet: pet),
+        const SizedBox(height: AppSpace.gapL),
         _SectionTitle(L.t('profile.section.quick')),
         const SizedBox(height: AppSpace.gapM),
         _QuickRecordBar(petId: pet.id),
@@ -1500,12 +1505,13 @@ class _ReminderRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final manual = reminder.source == 'manual';
+    final canWrite = ref.watch(petRoleProvider(pet.id)).valueOrNull?.canWrite == true;
 
     return InkWell(
       // 点进编辑，长按删除 —— 列表行放不下两个按钮，
       // 而「删除」是低频且危险的动作，长按是合适的门槛。
-      onTap: () => showReminderSheet(context, pet: pet, existing: reminder),
-      onLongPress: () => _confirmDelete(context, ref),
+      onTap: canWrite ? () => showReminderSheet(context, pet: pet, existing: reminder) : null,
+      onLongPress: canWrite ? () => _confirmDelete(context, ref) : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
@@ -1560,12 +1566,21 @@ class _ReminderRow extends ConsumerWidget {
             ),
             Switch(
               value: reminder.enabled,
-              onChanged: (v) async {
+              onChanged: !canWrite ? null : (v) async {
                 // 走 updateReminder 而不是只改库里的 enabled：它会顺带
                 // 撤掉/重排本地通知。只写数据的话，关掉的提醒照样会弹。
-                await ref
-                    .read(appActionsProvider)
-                    .updateReminder(reminder.copyWith(enabled: v));
+                try {
+                  final actions = ref.read(appActionsProvider);
+                  if (reminder.rule['mode'] == 'medication') {
+                    await actions.toggleMedicationCourse(reminder, v);
+                  } else {
+                    await actions.updateReminder(reminder.copyWith(enabled: v));
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L.error(e))));
+                  }
+                }
               },
             ),
           ],

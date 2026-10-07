@@ -342,6 +342,11 @@ class _HomeShellState extends State<HomeShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       runUpdateCheck(context, interactive: false);
+      // Restore local alarm slots only; this does not initiate network sync.
+      if (AppDatabase.instance.isOpen) {
+        unawaited(ProviderScope.containerOf(context, listen: false)
+            .read(appActionsProvider).refreshNotifications());
+      }
 
       // 冷启动时被通知点开：那时还没有 context，只能等首帧。
       final pending = _pendingReminderId;

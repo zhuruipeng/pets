@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
+import '../../domain/medication_course.dart';
 
 /// 完成一次提醒后的结果。
 class ReminderTickResult {
@@ -19,6 +20,7 @@ class ReminderTickResult {
     required this.reminder,
     required this.completedAt,
     required this.nextAt,
+    this.alreadyCompleted = false,
   });
 
   final Reminder reminder;
@@ -26,6 +28,7 @@ class ReminderTickResult {
 
   /// 下一次触发时间。为 null 表示这是一次性提醒，已完成终结。
   final DateTime? nextAt;
+  final bool alreadyCompleted;
 }
 
 class ReminderRepository {
@@ -61,7 +64,10 @@ class ReminderRepository {
     required DateTime to,
     bool onlyEnabled = true,
   }) async {
-    final where = <String>['deleted_at IS NULL', 'next_at >= ?', 'next_at <= ?'];
+    final where = <String>[
+      'deleted_at IS NULL', 'next_at >= ?', 'next_at <= ?',
+      'pet_id IN (SELECT id FROM pets WHERE deleted_at IS NULL AND archived_at IS NULL)',
+    ];
     if (onlyEnabled) where.add('enabled = 1');
 
     final rows = await _db.query(
@@ -129,57 +135,133 @@ class ReminderRepository {
     String reminderId, {
     DateTime? at,
     String? recordId,
+    String? createdBy,
+    String? actorName,
+    DateTime? expectedDueAt,
   }) async {
     final now = at ?? DateTime.now();
-    final reminder = await findById(reminderId);
-    if (reminder == null) {
-      throw StateError('reminder $reminderId 不存在');
+    return _db.transaction((txn) async {
+      final rows = await txn.query(_table, where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [reminderId], limit: 1);
+      if (rows.isEmpty) throw StateError('care.error.changed');
+      final reminder = Reminder.fromMap(rows.single);
+      final due = DateTime.fromMillisecondsSinceEpoch(
+          (expectedDueAt ?? reminder.nextAt).millisecondsSinceEpoch);
+      final logId = 'log_${reminder.id}_${due.millisecondsSinceEpoch}';
+      final existing = await txn.query(_logs, where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [logId]);
+      if (existing.isNotEmpty) {
+        return ReminderTickResult(reminder: reminder,
+            completedAt: DateTime.fromMillisecondsSinceEpoch(existing.single['done_at'] as int),
+            nextAt: reminder.enabled ? reminder.nextAt : null, alreadyCompleted: true);
+      }
+      if (!reminder.enabled || due != reminder.nextAt) {
+        throw StateError('care.error.changed');
+      }
+      final pets = await txn.query('pets', where: 'id = ? AND deleted_at IS NULL AND archived_at IS NULL',
+          whereArgs: [reminder.petId]);
+      if (pets.isEmpty) throw StateError('care.error.changed');
+      final course = MedicationCourse.fromReminder(reminder);
+      if (reminder.rule['mode'] == 'medication' && course == null) {
+        throw StateError('med.error.schedule');
+      }
+      final next = course == null ? reminder.nextOccurrence() :
+          course.nextAt(now.isAfter(due) ? now : due, inclusive: false);
+      final timestamp = now.millisecondsSinceEpoch > reminder.updatedAt.millisecondsSinceEpoch
+          ? now.millisecondsSinceEpoch : reminder.updatedAt.millisecondsSinceEpoch + 1;
+      final doseRecordId = course == null ? recordId :
+          'dose_${reminder.id}_${due.millisecondsSinceEpoch}';
+      if (course != null) {
+        await txn.insert('records', PetRecord(
+          id: doseRecordId!, petId: reminder.petId, type: RecordType.medication,
+          recordedAt: now, valueText: course.name,
+          payload: {'dose': course.dose, 'route': course.route,
+            'course_id': reminder.id, 'due_at': due.millisecondsSinceEpoch,
+            if (actorName != null) 'actor_name': actorName},
+          createdBy: createdBy ?? 'local-user', createdAt: now,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(timestamp),
+        ).toMap());
+      }
+      await txn.insert(_logs, {
+        'id': logId, 'pet_id': reminder.petId, 'reminder_id': reminder.id,
+        'due_at': due.millisecondsSinceEpoch, 'done_at': now.millisecondsSinceEpoch,
+        'record_id': doseRecordId, 'action': 'done', 'created_by': createdBy,
+        'actor_name': actorName, 'created_at': now.millisecondsSinceEpoch,
+        'updated_at': timestamp, 'stock_used': course?.unitsPerDose ?? 0,
+      });
+      await txn.update(_table, {
+        if (next != null) 'next_at': next.millisecondsSinceEpoch,
+        if (next == null) 'enabled': 0,
+        'updated_at': timestamp,
+      }, where: 'id = ?', whereArgs: [reminderId]);
+      return ReminderTickResult(reminder: reminder, completedAt: now, nextAt: next);
+    });
+  }
+
+  Future<List<Map<String, Object?>>> logsForPet(String petId) => _db.query(
+      _logs, where: 'pet_id = ? AND deleted_at IS NULL', whereArgs: [petId],
+      orderBy: 'done_at DESC');
+
+  Future<Reminder> createCourse({required String petId,
+      required MedicationCourse course, DateTime? now}) async {
+    final rule = course.toRule();
+    final stamp = now ?? DateTime.now();
+    final first = course.nextAt(stamp);
+    if (first == null) throw ArgumentError('med.error.expired');
+    return create(Reminder(id: _uuid.v4(), petId: petId, type: 'medication',
+        title: course.name.trim(), rule: rule, nextAt: first, source: 'medication_course',
+        createdAt: stamp, updatedAt: stamp));
+  }
+
+  Future<Reminder> updateCourse(Reminder reminder, MedicationCourse course) async {
+    final rule = course.toRule();
+    return _db.transaction((txn) async {
+      final current = await _courseForUpdate(txn, reminder);
+      final next = await _nextUncompleted(txn, current.id, course, DateTime.now());
+      if (next == null) throw ArgumentError('med.error.expired');
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final updated = current.copyWith(title: course.name.trim(), rule: rule, nextAt: next,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(
+              stamp > current.updatedAt.millisecondsSinceEpoch ? stamp : current.updatedAt.millisecondsSinceEpoch + 1));
+      await txn.update(_table, updated.toMap(), where: 'id = ?', whereArgs: [current.id]);
+      return updated;
+    });
+  }
+
+  Future<Reminder> toggleCourse(Reminder reminder, bool enabled) async {
+    return _db.transaction((txn) async {
+      final current = await _courseForUpdate(txn, reminder);
+      final course = MedicationCourse.fromReminder(current);
+      if (course == null) throw ArgumentError('med.error.schedule');
+      final next = enabled ? await _nextUncompleted(txn, current.id, course, DateTime.now()) : current.nextAt;
+      if (next == null) throw ArgumentError('med.error.expired');
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final updated = current.copyWith(enabled: enabled, nextAt: next,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(
+              stamp > current.updatedAt.millisecondsSinceEpoch ? stamp : current.updatedAt.millisecondsSinceEpoch + 1));
+      await txn.update(_table, updated.toMap(), where: 'id = ?', whereArgs: [current.id]);
+      return updated;
+    });
+  }
+
+  Future<Reminder> _courseForUpdate(DatabaseExecutor txn, Reminder reminder) async {
+    final rows = await txn.query(_table, where: 'id = ? AND deleted_at IS NULL', whereArgs: [reminder.id]);
+    if (rows.isEmpty || rows.single['rule'] != reminder.toMap()['rule']) {
+      throw StateError('care.error.changed');
     }
+    return Reminder.fromMap(rows.single);
+  }
 
-    // 1. 留档。due_at 用本次的 nextAt（不是 now），这样完成率统计才对得上。
-    await _db.insert(
-      _logs,
-      {
-        'id': _uuid.v4(),
-        'reminder_id': reminder.id,
-        'due_at': reminder.nextAt.millisecondsSinceEpoch,
-        'done_at': now.millisecondsSinceEpoch,
-        'record_id': recordId,
-        'action': 'done',
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-
-    // 2. 排下一次。
-    final next = reminder.nextOccurrence();
-    if (next != null) {
-      await _db.update(
-        _table,
-        {
-          'next_at': next.millisecondsSinceEpoch,
-          'updated_at': now.millisecondsSinceEpoch,
-        },
-        where: 'id = ?',
-        whereArgs: [reminderId],
-      );
-    } else {
-      // 一次性提醒，完成后停用而不是删除。
-      await _db.update(
-        _table,
-        {
-          'enabled': 0,
-          'updated_at': now.millisecondsSinceEpoch,
-        },
-        where: 'id = ?',
-        whereArgs: [reminderId],
-      );
+  Future<DateTime?> _nextUncompleted(DatabaseExecutor txn, String id,
+      MedicationCourse course, DateTime at) async {
+    var next = course.nextAt(at);
+    final logs = await txn.query(_logs, columns: ['due_at'],
+        where: 'reminder_id = ? AND deleted_at IS NULL', whereArgs: [id]);
+    final completed = logs.map((r) => r['due_at']).toSet();
+    while (next != null && completed.contains(next.millisecondsSinceEpoch)) {
+      next = course.nextAt(next, inclusive: false);
     }
-
-    return ReminderTickResult(
-      reminder: reminder,
-      completedAt: now,
-      nextAt: next,
-    );
+    return next;
   }
 
   /// 延后：不写完成日志，只把 next_at 往后推。
