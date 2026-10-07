@@ -21,6 +21,8 @@ import 'package:pet_app/ui/care_handoff.dart';
 import 'package:pet_app/ui/symptom_fields.dart';
 import 'package:pet_app/ui/symptom_observations.dart';
 import 'package:pet_app/ui/profile_screen.dart';
+import 'package:pet_app/ui/sheets.dart';
+import 'package:pet_app/services/backup_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FixturePets extends PetsNotifier {
@@ -293,7 +295,10 @@ void main() {
           child: MaterialApp(home: CareHandoffPage(pet: pet))));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const MaterialApp(home: BackupPage()));
+      await tester.pumpWidget(ProviderScope(overrides: [
+        backupInventoryProvider.overrideWith((ref) async =>
+            const BackupInventory(pets: 1, records: 3, attachments: 2)),
+      ], child: const MaterialApp(home: BackupPage())));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     });
@@ -328,6 +333,77 @@ void main() {
     expect(value!.symptom, 'cough');
     expect(value!.energy, 'low');
     expect(value!.count, 5);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('symptom save stays visible with a keyboard and enlarged text',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.runAsync(() async {
+      await container.read(petRecordsProvider(pet.id).future);
+      await container.read(petRemindersProvider(pet.id).future);
+      await container.read(weightSeriesProvider(pet.id).future);
+      await container.read(petRoleProvider(pet.id).future);
+    });
+    await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+            builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: const TextScaler.linear(1.5)),
+                child: child!),
+            home: Scaffold(
+                body: Consumer(
+                    builder: (context, ref, _) => TextButton(
+                        onPressed: () => showAddRecordSheet(context, ref,
+                            petId: pet.id, initialType: RecordType.symptom),
+                        child: const Text('open')))))));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    final count = find.byKey(const ValueKey('symptom-count'));
+    await tester.ensureVisible(count);
+    await tester.enterText(count, '0');
+    tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+    await tester.pumpAndSettle();
+    final save = find.widgetWithText(FilledButton, L.t('addRecord.save'));
+    expect(tester.getRect(save).bottom, lessThanOrEqualTo(380));
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(await tester.runAsync(() => records.listByPet(pet.id)), isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('quick symptom choices keep optional links out of the main form',
+      (tester) async {
+    SymptomObservation? value;
+    await tester.runAsync(() async {
+      await container.read(petRecordsProvider(pet.id).future);
+      await container.read(petRemindersProvider(pet.id).future);
+    });
+    await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+            home: Scaffold(
+                body: SingleChildScrollView(
+                    child: SymptomFields(
+                        petId: pet.id, onChanged: (v) => value = v))))));
+    await tester.pumpAndSettle();
+    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    final low = find.byKey(const ValueKey('observation.energy-low'));
+    await tester.ensureVisible(low);
+    await tester.tap(low);
+    expect(value!.energy, 'low');
+    final extra = find.text(L.t('observation.extra'));
+    await tester.ensureVisible(extra);
+    await tester.tap(extra);
+    await tester.pumpAndSettle();
+    expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(3));
     expect(tester.takeException(), isNull);
   });
 

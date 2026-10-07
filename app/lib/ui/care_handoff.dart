@@ -9,11 +9,13 @@ import 'package:share_plus/share_plus.dart' show XFile;
 import 'package:uuid/uuid.dart';
 
 import '../core/l10n.dart';
+import '../core/theme.dart';
 import '../data/models.dart';
 import '../domain/care_handoff.dart';
 import '../providers.dart';
 import '../services/report_renderer.dart';
 import '../services/share_helper.dart';
+import 'contact_sheet.dart';
 
 class CareHandoffPage extends ConsumerStatefulWidget {
   const CareHandoffPage({super.key, required this.pet});
@@ -69,15 +71,7 @@ class _CareHandoffPageState extends ConsumerState<CareHandoffPage> {
       if (pet == null || pet.deletedAt != null || role == null) {
         throw StateError('care.denied');
       }
-      final contact = !_includeContact || user == null
-          ? ''
-          : [
-              user.nickname,
-              user.phone,
-              user.email,
-              user.wechat,
-              user.contactNote,
-            ].whereType<String>().where((s) => s.trim().isNotEmpty).join('\n');
+      final contact = _includeContact ? handoffContact(user) : '';
       final report = buildCareHandoff(
           pet: pet,
           records: records,
@@ -125,63 +119,188 @@ class _CareHandoffPageState extends ConsumerState<CareHandoffPage> {
     }
   }
 
+  void _addTemplate(String key) {
+    final text = _instructions.text.trimRight();
+    _instructions.text = [if (text.isNotEmpty) text, L.t(key)].join('\n');
+    setState(() => _preview = null);
+  }
+
+  void _zoom() {
+    final bytes = _preview;
+    if (bytes == null) return;
+    showDialog<void>(
+        context: context,
+        builder: (context) => Dialog.fullscreen(
+              child: Scaffold(
+                appBar: AppBar(
+                    title: Text(L.t('handoff.preview')),
+                    leading: IconButton(
+                        tooltip: L.t('action.close'),
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close))),
+                body: InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 5,
+                    child: Center(child: Image.memory(bytes))),
+              ),
+            ));
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final contact = handoffContact(user);
+    Widget section(List<Widget> children) => Card(
+          margin: const EdgeInsets.only(bottom: 16),
+          child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: children)),
+        );
+    return Scaffold(
       appBar:
           AppBar(title: Text('${widget.pet.name} · ${L.t('handoff.title')}')),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        Text(L.t('handoff.help')),
-        const SizedBox(height: 12),
-        Wrap(spacing: 12, children: [
-          OutlinedButton(
-              onPressed: _busy ? null : () => _pick(true),
-              child: Text(
-                  '${L.t('handoff.from')}: ${_from.year}/${_from.month}/${_from.day}')),
-          OutlinedButton(
-              onPressed: _busy ? null : () => _pick(false),
-              child: Text(
-                  '${L.t('handoff.to')}: ${_to.year}/${_to.month}/${_to.day}')),
+      bottomNavigationBar: SafeArea(
+          child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_preview != null)
+            TextButton.icon(
+                onPressed: _busy ? null : _generate,
+                icon: const Icon(Icons.refresh),
+                label: Text(L.t('handoff.regenerate'))),
+          SizedBox(
+              width: double.infinity,
+              child: Builder(
+                  builder: (buttonContext) => FilledButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : _preview == null
+                                ? _generate
+                                : () => _share(buttonContext),
+                        icon: Icon(_preview == null
+                            ? Icons.preview_outlined
+                            : Icons.share_outlined),
+                        label: Text(L.t(_preview == null
+                            ? 'handoff.preview'
+                            : 'handoff.share')),
+                      ))),
         ]),
-        const SizedBox(height: 12),
-        TextField(
-            controller: _instructions,
-            enabled: !_busy,
-            minLines: 3,
-            maxLines: 6,
-            onChanged: (_) => setState(() => _preview = null),
-            decoration: InputDecoration(
-                labelText: L.t('handoff.instructions'),
-                hintText: L.t('handoff.instructionsHint'),
-                border: const OutlineInputBorder())),
-        SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(L.t('handoff.includeContact')),
-            value: _includeContact,
-            onChanged: _busy
-                ? null
-                : (v) => setState(() {
-                      _includeContact = v;
-                      _preview = null;
-                    })),
+      )),
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        Text(L.t('handoff.help'),
+            style: const TextStyle(color: AppColors.textSecondary)),
+        const SizedBox(height: 16),
+        section([
+          Text(L.t('handoff.period'),
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 12, runSpacing: 8, children: [
+            OutlinedButton(
+                onPressed: _busy ? null : () => _pick(true),
+                child: Text(
+                    '${L.t('handoff.from')}: ${_from.year}/${_from.month}/${_from.day}')),
+            OutlinedButton(
+                onPressed: _busy ? null : () => _pick(false),
+                child: Text(
+                    '${L.t('handoff.to')}: ${_to.year}/${_to.month}/${_to.day}')),
+          ]),
+        ]),
+        section([
+          Text(L.t('handoff.instructions'),
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 4, children: [
+            for (final key in ['feeding', 'walk', 'emergency'])
+              ActionChip(
+                label: Text(L.t('handoff.template.$key')),
+                onPressed: _busy
+                    ? null
+                    : () => _addTemplate('handoff.templateText.$key'),
+              ),
+          ]),
+          const SizedBox(height: 12),
+          TextField(
+              controller: _instructions,
+              enabled: !_busy,
+              minLines: 4,
+              maxLines: 8,
+              onChanged: (_) => setState(() => _preview = null),
+              decoration: InputDecoration(
+                  hintText: L.t('handoff.instructionsHint'),
+                  border: const OutlineInputBorder())),
+          if ((widget.pet.allergy ?? '').trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                  '${L.t('profile.field.allergy')}: ${widget.pet.allergy}',
+                  style: const TextStyle(color: AppColors.danger)),
+            ),
+        ]),
+        section([
+          SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(L.t('handoff.includeContact')),
+              value: _includeContact,
+              onChanged: _busy
+                  ? null
+                  : (v) => setState(() {
+                        _includeContact = v;
+                        _preview = null;
+                      })),
+          if (_includeContact)
+            Text(
+                user?.hasContact == true
+                    ? contact
+                    : [
+                        if (contact.isNotEmpty) contact,
+                        L.t('handoff.noContact')
+                      ].join('\n'),
+                style: const TextStyle(color: AppColors.textSecondary)),
+          if (_includeContact && user != null)
+            TextButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        setState(() => _preview = null);
+                        await showContactSheet(context, user: user);
+                        if (mounted) setState(() => _preview = null);
+                      },
+                icon: const Icon(Icons.edit_outlined),
+                label: Text(L.t('handoff.editContact'))),
+        ]),
         if (_error != null)
-          Text(_error!, style: const TextStyle(color: Colors.red)),
-        FilledButton.icon(
-            onPressed: _busy ? null : _generate,
-            icon: const Icon(Icons.preview_outlined),
-            label: Text(L.t('handoff.preview'))),
+          Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(_error!,
+                  style: const TextStyle(color: AppColors.danger))),
         if (_busy)
           const Padding(
               padding: EdgeInsets.all(12),
               child: Center(child: CircularProgressIndicator())),
-        if (_preview != null) ...[
-          const SizedBox(height: 16),
-          Image.memory(_preview!),
-          const SizedBox(height: 12),
-          Builder(
-              builder: (buttonContext) => OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _share(buttonContext),
-                  icon: const Icon(Icons.share_outlined),
-                  label: Text(L.t('handoff.share')))),
-        ],
-      ]));
+        if (_preview != null)
+          section([
+            Text(L.t('handoff.zoomHint'),
+                style: const TextStyle(color: AppColors.textSecondary)),
+            const SizedBox(height: 8),
+            InkWell(onTap: _zoom, child: Image.memory(_preview!)),
+          ]),
+      ]),
+    );
+  }
 }
+
+String handoffContact(LocalUser? user) => user == null
+    ? ''
+    : [
+        user.nickname,
+        user.phone,
+        user.email,
+        user.wechat,
+        user.contactNote,
+      ]
+        .whereType<String>()
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .join('\n');

@@ -185,6 +185,30 @@ void main() {
   });
 
   test(
+      'inventory tracks generated backups locally without exporting that status',
+      () async {
+    final initial = await exporter.inventory();
+    expect(initial.pets, 1);
+    expect(initial.records, 3);
+    expect(initial.attachments, 2);
+    expect(initial.lastGenerated, isNull);
+    final before = await source.query('sync_outbox');
+    final preview = await exporter.inspect(backup.path);
+    await exporter.markGenerated(preview);
+    expect((await exporter.inventory()).lastGenerated, preview.createdAt);
+    expect(await source.query('sync_outbox'), before);
+    final regenerated =
+        await exporter.exportTo(p.join(temp.path, 'second.zip'));
+    final archive = ZipDecoder().decodeBytes(await regenerated.readAsBytes());
+    expect(utf8.decode(archive.find('manifest.json')!.content),
+        isNot(contains('backup_last_generated')));
+    await importer.restore(regenerated.path,
+        expectedId: (await importer.inspect(regenerated.path)).id);
+    expect((await importer.inventory()).lastGenerated, isNull);
+    expect((await importer.inventory()).records, 3);
+  });
+
+  test(
       'portable backup contains media and data but no credentials or membership grants',
       () async {
     final preview = await exporter.inspect(backup.path);

@@ -57,26 +57,50 @@ class _SymptomFieldsState extends ConsumerState<SymptomFields> {
       medicalRecordId: _medical,
       courseReminderId: _course));
   Widget _choice(String label, String value, List<String> values,
-          ValueChanged<String> update, {bool symptom = false}) =>
-      Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: DropdownButtonFormField<String>(
-              initialValue: value,
-              isExpanded: true,
-              decoration: InputDecoration(
-                  labelText: L.t(label), border: const OutlineInputBorder()),
-              items: [
-                for (final code in values)
-                  DropdownMenuItem(
-                      value: code,
-                      child: Text(L.t(
-                          '${symptom ? 'observation.symptom' : 'observation.state'}.$code')))
-              ],
-              onChanged: (next) {
-                if (next == null) return;
-                setState(() => update(next));
-                _changed();
-              }));
+      ValueChanged<String> update,
+      {bool symptom = false}) {
+    void select(String next) {
+      setState(() => update(next));
+      _changed();
+    }
+
+    if (symptom) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: DropdownButtonFormField<String>(
+          initialValue: value,
+          isExpanded: true,
+          decoration: InputDecoration(
+              labelText: L.t(label), border: const OutlineInputBorder()),
+          items: [
+            for (final code in values)
+              DropdownMenuItem(
+                  value: code, child: Text(L.t('observation.symptom.$code')))
+          ],
+          onChanged: (next) {
+            if (next != null) select(next);
+          },
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(L.t(label), style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          for (final code in values)
+            ChoiceChip(
+              key: ValueKey('$label-$code'),
+              label: Text(L.t('observation.state.$code')),
+              selected: value == code,
+              onSelected: (_) => select(code),
+            ),
+        ]),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final records =
@@ -116,45 +140,58 @@ class _SymptomFieldsState extends ConsumerState<SymptomFields> {
           (v) => _energy = v),
       _choice('observation.stool', _stool, SymptomObservation.stools,
           (v) => _stool = v),
-      DropdownButtonFormField<String>(
-          key: ValueKey('observation-visit-$selectedVisit'),
-          initialValue: selectedVisit,
-          isExpanded: true,
-          decoration: InputDecoration(
-              labelText: L.t('observation.medical'),
-              border: const OutlineInputBorder()),
-          items: [
-            DropdownMenuItem(value: '', child: Text(L.t('observation.none'))),
-            for (final record in visits)
-              DropdownMenuItem(
-                  value: record.id,
-                  child: Text(
-                      '${record.recordedAt.month}/${record.recordedAt.day} ${record.valueText ?? ''}',
-                      overflow: TextOverflow.ellipsis))
-          ],
-          onChanged: (v) {
-            setState(() => _medical = v == '' ? null : v);
-            _changed();
-          }),
-      const SizedBox(height: 12),
-      DropdownButtonFormField<String>(
-          key: ValueKey('observation-course-$selectedCourse'),
-          initialValue: selectedCourse,
-          isExpanded: true,
-          decoration: InputDecoration(
-              labelText: L.t('observation.course'),
-              border: const OutlineInputBorder()),
-          items: [
-            DropdownMenuItem(value: '', child: Text(L.t('observation.none'))),
-            for (final reminder in courses)
-              DropdownMenuItem(
-                  value: reminder.id,
-                  child: Text(reminder.title, overflow: TextOverflow.ellipsis))
-          ],
-          onChanged: (v) {
-            setState(() => _course = v == '' ? null : v);
-            _changed();
-          }),
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 12),
+        maintainState: true,
+        initiallyExpanded: _medical != null || _course != null,
+        title: Text(L.t('observation.extra')),
+        subtitle: Text(L.t('observation.extraHint')),
+        children: [
+          DropdownButtonFormField<String>(
+              key: ValueKey('observation-visit-$selectedVisit'),
+              initialValue: selectedVisit,
+              isExpanded: true,
+              decoration: InputDecoration(
+                  labelText: L.t('observation.medical'),
+                  border: const OutlineInputBorder()),
+              items: [
+                DropdownMenuItem(
+                    value: '', child: Text(L.t('observation.none'))),
+                for (final record in visits)
+                  DropdownMenuItem(
+                      value: record.id,
+                      child: Text(
+                          '${record.recordedAt.month}/${record.recordedAt.day} ${record.valueText ?? ''}',
+                          overflow: TextOverflow.ellipsis))
+              ],
+              onChanged: (v) {
+                setState(() => _medical = v == '' ? null : v);
+                _changed();
+              }),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+              key: ValueKey('observation-course-$selectedCourse'),
+              initialValue: selectedCourse,
+              isExpanded: true,
+              decoration: InputDecoration(
+                  labelText: L.t('observation.course'),
+                  border: const OutlineInputBorder()),
+              items: [
+                DropdownMenuItem(
+                    value: '', child: Text(L.t('observation.none'))),
+                for (final reminder in courses)
+                  DropdownMenuItem(
+                      value: reminder.id,
+                      child:
+                          Text(reminder.title, overflow: TextOverflow.ellipsis))
+              ],
+              onChanged: (v) {
+                setState(() => _course = v == '' ? null : v);
+                _changed();
+              }),
+        ],
+      ),
     ]);
   }
 }

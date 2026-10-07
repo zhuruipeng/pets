@@ -15,7 +15,9 @@ import 'reminder_sheet.dart';
 import 'widgets.dart';
 
 class FamilyCareBoard extends ConsumerStatefulWidget {
-  const FamilyCareBoard({super.key, required this.pet});
+  const FamilyCareBoard(
+      {super.key, required this.pet, this.showPending = true});
+  final bool showPending;
   final Pet pet;
 
   @override
@@ -69,7 +71,8 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
               size: 20, color: AppColors.primary),
           const SizedBox(width: 8),
           Expanded(
-              child: Text(L.t('care.title'),
+              child: Text(
+                  L.t(widget.showPending ? 'care.title' : 'care.historyTitle'),
                   style: const TextStyle(fontWeight: FontWeight.w700))),
           IconButton(
               tooltip: L.t('care.refresh'),
@@ -91,33 +94,36 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
               style:
                   const TextStyle(fontSize: 11, color: AppColors.textTertiary)),
         const SizedBox(height: 12),
-        Text(L.t('care.pending'),
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-        if (pending.isEmpty)
-          Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(L.t('care.noPending'))),
-        for (final reminder in _expanded ? pending : pending.take(4))
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            leading: const Icon(Icons.radio_button_unchecked,
-                color: AppColors.primary, size: 20),
-            title: Text(reminderTitle(reminder)),
-            subtitle: Text(compactDateTime(reminder.nextAt)),
-            trailing: role?.canWrite == true
-                ? TextButton(
-                    onPressed: () =>
-                        showReminderDueSheet(context, reminderId: reminder.id),
-                    child: Text(L.t('today.done')),
-                  )
-                : null,
-          ),
-        if (pending.length > 4 && !_expanded)
-          TextButton(
-              onPressed: () => setState(() => _expanded = true),
-              child: Text(L.tp('care.showAll', {'count': pending.length}))),
-        const Divider(),
+        if (widget.showPending) ...[
+          Text(L.t('care.pending'),
+              style:
+                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          if (pending.isEmpty)
+            Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(L.t('care.noPending'))),
+          for (final reminder in _expanded ? pending : pending.take(4))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: const Icon(Icons.radio_button_unchecked,
+                  color: AppColors.primary, size: 20),
+              title: Text(reminderTitle(reminder)),
+              subtitle: Text(compactDateTime(reminder.nextAt)),
+              trailing: role?.canWrite == true
+                  ? TextButton(
+                      onPressed: () => showReminderDueSheet(context,
+                          reminderId: reminder.id),
+                      child: Text(L.t('today.done')),
+                    )
+                  : null,
+            ),
+          if (pending.length > 4 && !_expanded)
+            TextButton(
+                onPressed: () => setState(() => _expanded = true),
+                child: Text(L.tp('care.showAll', {'count': pending.length}))),
+          const Divider(),
+        ],
         Text(L.t('care.completed'),
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
         events.when(
@@ -129,7 +135,7 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
               Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text(L.t('care.empty'))),
-            for (final event in _expanded ? items : items.take(5))
+            for (final event in _expanded ? items : items.take(3))
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
@@ -147,20 +153,22 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
                 trailing: Text(
                     '${event.at.hour.toString().padLeft(2, '0')}:${event.at.minute.toString().padLeft(2, '0')}'),
               ),
-            if (items.length > 5 && !_expanded)
+            if (items.length > 3)
               TextButton(
-                  onPressed: () => setState(() => _expanded = true),
-                  child:
-                      Text(L.tp('care.showAll', {'count': '${items.length}'}))),
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  child: Text(_expanded
+                      ? L.t('care.collapse')
+                      : L.tp('care.showAll', {'count': '${items.length}'}))),
           ]),
         ),
-        Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-                onPressed: () =>
-                    showMedicationCourses(context, pet: widget.pet),
-                icon: const Icon(Icons.medication_outlined),
-                label: Text(L.t('med.title')))),
+        if (widget.showPending)
+          Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                  onPressed: () =>
+                      showMedicationCourses(context, pet: widget.pet),
+                  icon: const Icon(Icons.medication_outlined),
+                  label: Text(L.t('med.title')))),
       ]),
     );
   }

@@ -51,6 +51,11 @@ final backupServiceProvider = FutureProvider<BackupService>((ref) async {
   );
 });
 
+final backupInventoryProvider = FutureProvider<BackupInventory>((ref) async {
+  final service = await ref.watch(backupServiceProvider.future);
+  return service.inventory();
+});
+
 /// 未登录时的占位用户 id。登录后被 [UserRepository.adoptAccount] 换成账号 id。
 /// 保留这个名字是为了不让已有调用点（created_by 的赋值处）全改一遍。
 const String kCurrentUserId = UserRepository.localUserId;

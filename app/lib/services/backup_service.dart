@@ -52,6 +52,16 @@ class BackupPreview {
   final int pets, records, files;
 }
 
+class BackupInventory {
+  const BackupInventory(
+      {required this.pets,
+      required this.records,
+      required this.attachments,
+      this.lastGenerated});
+  final int pets, records, attachments;
+  final DateTime? lastGenerated;
+}
+
 /// Portable data, never session credentials, membership grants or sync cursors.
 /// Restores independent UUID copies so old snapshots cannot overwrite shared data.
 class BackupService {
@@ -63,6 +73,39 @@ class BackupService {
   final String documentsPath;
   final Region region;
   bool _running = false;
+
+  Future<BackupInventory> inventory() => db.transaction((txn) async {
+        Future<int> count(String sql) async =>
+            Sqflite.firstIntValue(await txn.rawQuery(sql)) ?? 0;
+        final pets = await count('SELECT COUNT(*) FROM pets');
+        final records = await count(
+            'SELECT COUNT(*) FROM records WHERE pet_id IN (SELECT id FROM pets)');
+        final attachments = await count(
+            'SELECT COUNT(*) FROM attachments WHERE record_id IN (SELECT id FROM records WHERE pet_id IN (SELECT id FROM pets))');
+        final rows = await txn.query('sync_meta',
+            where: 'key = ?', whereArgs: ['backup_last_generated']);
+        final time = rows.isEmpty
+            ? null
+            : int.tryParse(rows.first['value'] as String? ?? '');
+        return BackupInventory(
+            pets: pets,
+            records: records,
+            attachments: attachments,
+            lastGenerated: time == null
+                ? null
+                : DateTime.fromMillisecondsSinceEpoch(time));
+      });
+
+  // Generation is confirmed; the native share sheet cannot confirm file saving.
+  Future<void> markGenerated(BackupPreview preview) async {
+    await db.insert(
+        'sync_meta',
+        {
+          'key': 'backup_last_generated',
+          'value': preview.createdAt.millisecondsSinceEpoch.toString()
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
 
   Future<T> _exclusive<T>(Future<T> Function() action) async {
     if (_running) throw StateError('backup.busy');

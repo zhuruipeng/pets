@@ -654,8 +654,8 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
     final series = ref.watch(weightSeriesProvider(widget.petId)).valueOrNull;
     final lastKg = (series == null || series.isEmpty) ? null : series.last.kg;
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + bottom),
+    final body = SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -708,12 +708,6 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
           const SizedBox(height: 16),
 
           _typeFields(unit, lastKg),
-          if (_error != null && _type == RecordType.symptom)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_error!, style: const TextStyle(color: AppColors.danger)),
-            ),
-
           const SizedBox(height: 16),
           TextField(
             controller: _note,
@@ -735,22 +729,50 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
           ),
 
           const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: FilledButton(
-              onPressed: _submitting ? null : () => _submit(unit),
-              child: _submitting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(L.t('addRecord.save')),
-            ),
-          ),
         ],
       ),
+    );
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: (MediaQuery.sizeOf(context).height -
+                        bottom -
+                        MediaQuery.paddingOf(context).top -
+                        48)
+                    .clamp(120.0, double.infinity)),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: body),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  if (_error != null && _type == RecordType.symptom)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(_error!,
+                          style: const TextStyle(color: AppColors.danger)),
+                    ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: _submitting ? null : () => _submit(unit),
+                      child: _submitting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(L.t('addRecord.save')),
+                    ),
+                  ),
+                ]),
+              ),
+            ]),
+          )),
     );
   }
 

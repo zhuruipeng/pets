@@ -31,8 +31,8 @@ class AppColors {
 
   /// 文字三级。
   static const Color textPrimary = Color(0xFF1A1A1F);
-  static const Color textSecondary = Color(0xFF8A8A99);
-  static const Color textTertiary = Color(0xFFB4B4C2);
+  static const Color textSecondary = Color(0xFF656575);
+  static const Color textTertiary = Color(0xFF767686);
 
   /// 语义色。
   static const Color danger = Color(0xFFE5484D);
