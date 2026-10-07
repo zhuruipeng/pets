@@ -2752,7 +2752,12 @@ class _DocumentsCard extends ConsumerWidget {
         acceptedTypeGroups: [
           XTypeGroup(
             label: L.t('detail.documents'),
+            // extensions 给 macOS / Windows / Android；
+            // uniformTypeIdentifiers 给 iOS —— **漏了 iOS 会直接抛
+            // 「should have a non-empty uniformTypeIdentifiers」，
+            // 表现是选择器完全打不开**（详见 kDocumentUtis 的注释）。
             extensions: kDocumentExtensions,
+            uniformTypeIdentifiers: kDocumentUtis,
           ),
         ],
       );

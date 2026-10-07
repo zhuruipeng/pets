@@ -586,6 +586,39 @@ const List<String> kDocumentExtensions = [
   'webp',
 ];
 
+/// iOS / macOS 需要的 UTI（Uniform Type Identifier）。
+///
+/// ## ⚠️ iOS 上必须提供，否则文件选择器**完全打不开**
+///
+/// 只给 `extensions` 时 iOS 会直接抛：
+///
+///     Invalid argument(s): The provided type group should either allow
+///     all files, or have a non-empty "uniformTypeIdentifiers"
+///
+/// 注意这条错误的**误导性**：它说的是「参数不合法」，很容易让人以为
+/// 传错了什么；实际是「iOS 平台根本不看 extensions，只看 UTI」。
+/// 在 macOS / Windows / Android 上 `extensions` 是有效的，
+/// 所以只在一台 Mac 上试（甚至只跑测试）都不会暴露 —— 必须真机 iOS。
+///
+/// ## 为什么不用 `allowsAny: true` 图省事
+///
+/// 那等于把过滤去掉，用户在选择器里会看到照片、音乐、随便什么文件，
+/// 挑错的概率比现在高。多写十行 UTI 换一个干净的列表，值得。
+const List<String> kDocumentUtis = [
+  'com.adobe.pdf',
+  // Word：doc 是旧格式，docx 是 OOXML，两者的 UTI 完全不同
+  'com.microsoft.word.doc',
+  'org.openxmlformats.wordprocessingml.document',
+  // Excel：同上
+  'com.microsoft.excel.xls',
+  'org.openxmlformats.spreadsheetml.sheet',
+  'public.plain-text',
+  'public.jpeg',
+  'public.png',
+  'public.heic',
+  'org.webmproject.webp',
+];
+
 /// 单个文档的大小上限。
 ///
 /// 20 MB 的依据：一页扫描的化验单 300 KB - 2 MB，整本疫苗本扫描件也就
@@ -695,10 +728,11 @@ class _DocumentsSection extends ConsumerWidget {
         acceptedTypeGroups: [
           XTypeGroup(
             label: L.t('detail.documents'),
-            // ⚠️ 这个扩展名列表在 iOS 上是**硬过滤**：不在列表里的文件
-            // 在选择器里直接不显示。iOS 的「文件」App 里从 iCloud 下来的
-            // 化验单常常是 .heic / .webp，加白名单时要一起考虑。
+            // extensions 给 macOS / Windows / Android；
+            // uniformTypeIdentifiers 给 iOS（**不传 iOS 直接打不开选择器**）。
+            // 两者都传，各平台各取所需 —— 详见 kDocumentUtis 的注释。
             extensions: kDocumentExtensions,
+            uniformTypeIdentifiers: kDocumentUtis,
           ),
         ],
       );
