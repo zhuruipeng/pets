@@ -41,7 +41,11 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
   final TextEditingController _code = TextEditingController();
   final TextEditingController _password = TextEditingController();
 
-  String _channel = 'sms';
+  /// 默认取当前区域第一个（也是唯一）可用通道。
+  ///
+  /// **不能再写死 'sms'** —— 海外区没有这个通道，写死等于默认选中一个
+  /// 必然失败的选项（详见 `_channels` 的注释）。
+  late String _channel = _channels.first;
 
   /// 'password'（默认）或 'code'。
   String _mode = 'password';
@@ -352,11 +356,28 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
 
   /// 本区域可用的登录通道。
   ///
-  /// 中国区只有手机号：登录走官网统一账号（与官网 ERP / 商城同一个手机号），
-  /// 官网那边只有手机号这一种凭据。海外区仍保留邮箱兜底 —— 那边没有出岫账号，
-  /// 而且国际短信成本高、到达率不稳。
+  /// 当前区域真正**能用**的登录通道。
+  ///
+  /// - 中国区：只有手机号。登录走官网统一账号（与官网 ERP / 商城同一个手机号），
+  ///   官网那边只有手机号这一种凭据。
+  /// - 海外区：只有邮箱。服务端的 `SMS_PROVIDER` 是空的（国际短信成本高、
+  ///   到达率不稳），发短信必然返回「通道未配置」。
+  ///
+  /// ## ⚠️ 为什么海外区不再列出手機号（2026-10-08 修的）
+  ///
+  /// 原先海外区返回 `['sms', 'email']`，而且 `_channel` 默认值写死 `'sms'` ——
+  /// 于是用户一打开登录页，**默认选中的就是那个必然失败的通道**，
+  /// 点「发送验证码」直接报：
+  ///
+  ///     Sign-in is temporarily unavailable. The verification channel
+  ///     is not set up yet — please try again later.
+  ///
+  /// 真机截图确认了这个现象。给一个点了必然失败的选项，
+  /// 比不给更糟 —— 用户会以为「这个 App 登录坏了」，而不是「我选错了」。
+  ///
+  /// 以后海外区若真的配上短信，把 'sms' 加回来即可（服务端接口本来就支持）。
   List<String> get _channels =>
-      UnifiedAccountApi.isAvailable ? const ['sms'] : const ['sms', 'email'];
+      UnifiedAccountApi.isAvailable ? const ['sms'] : const ['email'];
 
   String? _validatedTarget() {
     final v = _target.text.trim();
