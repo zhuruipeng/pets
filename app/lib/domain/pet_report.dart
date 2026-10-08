@@ -76,9 +76,12 @@ class PetReport {
     required this.records,
     required this.generatedAt,
     required this.weightUnit,
+    this.recordsSectionKey = 'report.section.records',
+    this.footerKey = 'report.disclaimer',
   });
 
   final String petName;
+  final String recordsSectionKey, footerKey;
 
   /// 「狗 · 金毛 · 3岁2个月」这类一行简介。
   final String subtitle;

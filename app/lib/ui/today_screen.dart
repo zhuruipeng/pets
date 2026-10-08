@@ -3,10 +3,10 @@
 /// 版式（自上而下，别乱动顺序，这是留存的关键）：
 /// 1. 问候语 + 右上角铃铛 —— 每天打开的第一句话
 /// 2. 宠物主卡 —— 照片 + 名字 + 品种年龄 + 体重/最近记录，只放查得到的事实
-/// 3. 本周概览 —— 遛狗次数 / 记录条数 / 体重较上次，三格真实统计
-/// 4. 遛狗入口 —— 进行中时换成渐变大卡
-/// 5. 今日待办（横向滚动）—— 每格一张小卡，带类型色底和倒计时
-/// 6. 接下来 7 天 —— 预告即将到期的条目
+/// 3. 快捷记录与遛狗入口
+/// 4. 今日待办与操作条，查看全部可打开完整排期
+/// 5. 家庭照护历史（默认三条，不重复展示待办）
+/// 6. 本周概览与接下来 7 天
 /// 7. 多宠切换条（只有一只时不出现）
 ///
 /// 交互原则不变：待办卡上直接给「完成」，一键收工，完成后原地反馈「下次：X」。
@@ -26,6 +26,7 @@ import 'sheets.dart';
 import 'widgets.dart';
 import 'family_care_board.dart';
 import 'reminder_sheet.dart';
+import 'reminders_overview.dart';
 
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
@@ -72,10 +73,8 @@ class TodayScreen extends ConsumerWidget {
 
               if (currentPet != null) ...[
                 _PetHeroCard(pet: currentPet),
-                _WeekOverview(pet: currentPet),
-                _QuickAddRow(pet: currentPet),
-                FamilyCareBoard(pet: currentPet),
                 const SizedBox(height: AppSpace.gapL),
+                _QuickAddRow(pet: currentPet),
               ],
 
               // 遛狗入口见 feature_flags.dart：GPS 没接之前不能放出来。
@@ -91,10 +90,25 @@ class TodayScreen extends ConsumerWidget {
                   padding: const EdgeInsets.all(16),
                   child: Text(L.error(e)),
                 ),
-                data: (reminders) => _TodoSection(reminders: reminders),
+                data: (reminders) => _TodoSection(reminders: reminders, showUpcoming: false),
               ),
 
-              if (list.length > 1) _PetStrip(pets: list, current: currentPet),
+              if (currentPet != null) ...[
+                FamilyCareBoard(pet: currentPet, showPending: false),
+                _WeekOverview(pet: currentPet),
+              ],
+              upcoming.maybeWhen(
+                data: (reminders) {
+                  final now = DateTime.now();
+                  final tomorrow = DateTime(now.year, now.month, now.day + 1);
+                  final future = reminders.where((r) => !r.nextAt.isBefore(tomorrow)).toList()
+                    ..sort((a, b) => a.nextAt.compareTo(b.nextAt));
+                  return future.isEmpty ? const SizedBox.shrink() : _UpcomingSection(reminders: future);
+                },
+                orElse: () => const SizedBox.shrink(),
+              ),
+              if (list.length > 1)
+                _PetStrip(pets: list, current: currentPet),
             ],
           ),
         );
@@ -672,7 +686,9 @@ class _GenderMark extends StatelessWidget {
 /// 用横向滚动而不是竖列表，是因为待办常常有 8-10 条，
 /// 竖着排会把「接下来 7 天」挤出首屏 —— 那才是用户想看的新东西。
 class _TodoSection extends ConsumerWidget {
-  const _TodoSection({required this.reminders});
+  const _TodoSection({required this.reminders, this.showUpcoming = true});
+
+  final bool showUpcoming;
 
   final List<Reminder> reminders;
 
@@ -703,13 +719,11 @@ class _TodoSection extends ConsumerWidget {
       children: [
         SectionHeader(
           L.t('home.todo'),
-          trailing: Text(
-            L.t('home.viewAll'),
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.primary,
-              fontWeight: FontWeight.w500,
+          trailing: TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const RemindersOverviewPage()),
             ),
+            child: Text(L.t('home.viewAll')),
           ),
         ),
         if (visible.isEmpty)
@@ -759,7 +773,7 @@ class _TodoSection extends ConsumerWidget {
           )
         else
           SizedBox(
-            height: 132,
+            height: 132 + (MediaQuery.textScalerOf(context).scale(14) - 14).clamp(0.0, 40.0) * 5,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: EdgeInsets.zero,
@@ -781,7 +795,7 @@ class _TodoSection extends ConsumerWidget {
         ],
 
         // Upcoming 只在真的有未来的事时才出现，不摆空区块占位。
-        if (upcoming.isNotEmpty) _UpcomingSection(reminders: upcoming),
+        if (showUpcoming && upcoming.isNotEmpty) _UpcomingSection(reminders: upcoming),
       ],
     );
   }

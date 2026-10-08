@@ -1,6 +1,7 @@
 library;
 
 import '../data/models.dart';
+import 'symptom_observation.dart';
 
 class CareEvent {
   const CareEvent(
@@ -35,13 +36,21 @@ List<CareEvent> buildCareEvents({
         CareEvent(
             at: r.recordedAt,
             type: r.type,
-            actorId: r.createdBy,
-            detail: [
-              if (r.valueText != null) r.valueText!,
-              if (r.payload['dose'] is String) r.payload['dose'] as String,
-              if (r.valueNum != null) '${r.valueNum} ${r.unit ?? ''}'
-            ].join(' · '),
-            actorName: r.payload['actor_name'] as String?,
+            actorId:
+                r.payload['backup_actor_name'] is String ? null : r.createdBy,
+            detail: r.type == RecordType.symptom
+                ? [
+                    SymptomObservation.fromRecord(r)?.title ?? '',
+                    SymptomObservation.fromRecord(r)?.summary ?? '',
+                  ].where((s) => s.isNotEmpty).join(' · ')
+                : [
+                    if (r.valueText != null) r.valueText!,
+                    if (r.payload['dose'] is String)
+                      r.payload['dose'] as String,
+                    if (r.valueNum != null) '${r.valueNum} ${r.unit ?? ''}'
+                  ].join(' · '),
+            actorName: (r.payload['backup_actor_name'] ??
+                r.payload['actor_name']) as String?,
             recordId: r.id),
   ];
   final recordIds =

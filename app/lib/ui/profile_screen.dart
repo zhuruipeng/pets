@@ -49,7 +49,7 @@ import 'reminder_sheet.dart';
 import 'sheets.dart';
 import 'walk_detail.dart';
 import 'widgets.dart';
-import 'medication_courses.dart';
+import 'health_tools.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -720,7 +720,7 @@ class _HealthTab extends ConsumerWidget {
         AppSpace.pageBottom,
       ),
       children: [
-        MedicationCoursesLink(pet: pet),
+        HealthToolsCard(pet: pet),
         const SizedBox(height: AppSpace.gapL),
         _SectionTitle(L.t('profile.section.quick')),
         const SizedBox(height: AppSpace.gapM),

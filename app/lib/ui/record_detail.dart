@@ -22,6 +22,7 @@ import '../data/models.dart';
 import '../providers.dart';
 import '../services/share_helper.dart';
 import 'widgets.dart';
+import 'symptom_links.dart';
 
 /// 从列表进详情。返回被删/改后需要刷新哪些 provider 由列表自己处理，
 /// 所以这里只需要把记录传进去。
@@ -165,6 +166,7 @@ class _RecordDetailSheetState extends ConsumerState<_RecordDetailSheet> {
               ],
             ],
 
+            if (_record.type == RecordType.symptom) SymptomLinks(record: _record),
             if (summary.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(

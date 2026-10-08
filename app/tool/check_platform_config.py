@@ -112,11 +112,11 @@ def validate_configuration(app: Path) -> None:
             require(runner["buildSettings"]["APP_DISPLAY_NAME"] == ("我的宠物" if region == "cn" else "My Pet"),
                     f"Wrong display name for {name}")
             file_ref = objects[runner["baseConfigurationReference"]]
-            require(file_ref["path"] == f"{name}.xcconfig", f"Wrong base configuration for {name}")
+            require(file_ref["path"] == f"Flutter/{name}.xcconfig", f"Wrong base configuration for {name}")
             groups = [item for item in objects.values() if item.get("isa") == "PBXGroup"]
             require(any(item.get("name") == "Flutter" and runner["baseConfigurationReference"] in item.get("children", [])
                         for item in groups), f"Configuration outside Flutter group: {name}")
-            settings = (ios / "Flutter" / file_ref["path"]).read_text(encoding="utf-8")
+            settings = (ios / file_ref["path"]).read_text(encoding="utf-8")
             encoded = base64.b64encode(f"REGION={region}".encode()).decode()
             require(f"APP_MARKET = {region}" in settings and f"DART_DEFINES = $(inherited),{encoded}" in settings,
                     f"Missing market / Dart region in {name}")

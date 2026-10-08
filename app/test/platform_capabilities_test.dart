@@ -14,6 +14,9 @@ void main() {
         AppFeature.petProfiles,
         AppFeature.familyCareBoard,
         AppFeature.medicationCourses,
+        AppFeature.symptomObservations,
+        AppFeature.careHandoff,
+        AppFeature.localBackup,
         AppFeature.petDeletion,
       ]) {
         expect(capabilities.supports(feature), isTrue);

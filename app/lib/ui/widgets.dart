@@ -160,6 +160,9 @@ class SectionHeader extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Text(title, style: AppText.section)),
+          // Codex 加的：标题与右侧 trailing 之间留出间距，
+          // 否则长标题会和 trailing 贴在一起。
+          const SizedBox(width: 8),
           if (trailing != null) trailing!,
         ],
       ),
@@ -417,6 +420,7 @@ IconData recordTypeIcon(RecordType type) => switch (type) {
       RecordType.dewormExternal => Icons.bug_report_outlined,
       RecordType.medication => Icons.medication_liquid_outlined,
       RecordType.medical => Icons.local_hospital_outlined,
+      RecordType.symptom => Icons.health_and_safety_outlined,
       RecordType.grooming => Icons.shower_outlined,
       RecordType.feeding => Icons.restaurant_outlined,
       // 注意 toilet 已经占了 water_drop，饮水另用一个杯子图标。

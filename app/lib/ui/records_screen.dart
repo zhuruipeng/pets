@@ -289,6 +289,7 @@ class _FilterBar extends StatelessWidget {
     RecordType.dewormExternal,
     RecordType.medication,
     RecordType.medical,
+    RecordType.symptom,
     RecordType.feeding,
     RecordType.toilet,
     RecordType.note,

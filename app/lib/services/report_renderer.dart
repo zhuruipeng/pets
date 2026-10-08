@@ -518,7 +518,7 @@ class _ReportLayout {
 
   void _disclaimer() {
     _y += 10;
-    _text(L.t('report.disclaimer'), _foot);
+    _text(L.t(report.footerKey), _foot);
   }
 
   // ---------------------------------------------------------------- 入口
@@ -570,7 +570,7 @@ class _ReportLayout {
     }
 
     if (report.records.isNotEmpty) {
-      _sectionTitle(L.t('report.section.records'));
+      _sectionTitle(L.t(report.recordsSectionKey));
       for (var i = 0; i < report.records.length; i++) {
         _recordRow(report.records[i], first: i == 0);
       }
