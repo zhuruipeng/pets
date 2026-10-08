@@ -36,8 +36,7 @@ import '../data/repositories/member_repository.dart';
 import '../domain/expense_stats.dart';
 import '../domain/health_ledger.dart';
 // PlanItemTypeX 是 wireName 所在的扩展，`show` 列表里漏了它就用不了 wireName。
-import '../domain/immunization.dart'
-    show Species, ruleSetFor, PlanItemTypeX;
+import '../domain/immunization.dart' show Species, ruleSetFor, PlanItemTypeX;
 import '../providers.dart';
 import '../services/share_helper.dart';
 import 'avatar_sheet.dart';
@@ -111,6 +110,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
               controller: _tabs,
               isScrollable: true,
               tabAlignment: TabAlignment.start,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 12),
               labelColor: AppColors.primary,
               unselectedLabelColor: AppColors.textSecondary,
               indicatorColor: AppColors.primary,
@@ -185,123 +185,83 @@ class _HeroHeader extends ConsumerWidget {
     final reminders = ref.watch(petRemindersProvider(pet.id)).valueOrNull ??
         const <Reminder>[];
     final now = DateTime.now();
-    final hasOverdue = reminders.any((r) => r.enabled && r.nextAt.isBefore(now));
+    final hasOverdue =
+        reminders.any((r) => r.enabled && r.nextAt.isBefore(now));
 
     return Container(
       decoration: const BoxDecoration(
-        gradient: AppGradients.header,
-        borderRadius: BorderRadius.vertical(
-          bottom: Radius.circular(AppRadius.card),
-        ),
-      ),
-      padding: const EdgeInsets.fromLTRB(
-        AppSpace.page,
-        4,
-        AppSpace.page,
-        AppSpace.gapM,
-      ),
-      child: Column(
-        children: [
-          // 顶栏：返回位 + 编辑。
-          // 「返回位」那格 38px 是给以后真返回键留的对称位；现在只为
-          // 让「编辑」不贴左，顺手平衡视觉重量。
-          Row(
-            children: [
-              const SizedBox(width: 38),
-              const Spacer(),
-              TextButton(
-                onPressed: () => showEditPetSheet(context, pet: pet),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  minimumSize: const Size(0, AppSpace.tapTarget),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  visualDensity: VisualDensity.compact,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.chip),
-                  ),
-                ),
-                child: Text(
-                  L.t('profile.edit'),
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-
-          // 圆照片 + 相机角标
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              PetAvatar(pet: pet, size: 96, borderWidth: 4),
-              Positioned(
-                right: -8,
-                bottom: -8,
-                child: Material(
-                  color: Colors.transparent,
-                  shape: const CircleBorder(),
-                  clipBehavior: Clip.antiAlias,
-                  child: IconButton(
-                    onPressed: () => showAvatarSheet(context, ref, pet),
-                    tooltip: L.t('profile.edit'),
-                    constraints: const BoxConstraints(
-                      minWidth: AppSpace.tapTarget, minHeight: AppSpace.tapTarget,
-                    ),
-                    padding: const EdgeInsets.all(7),
-                    icon: Container(
-                      width: 30, height: 30,
+          gradient: AppGradients.header,
+          borderRadius:
+              BorderRadius.vertical(bottom: Radius.circular(AppRadius.card))),
+      padding: const EdgeInsets.all(AppSpace.page),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Stack(clipBehavior: Clip.none, children: [
+          PetAvatar(pet: pet, size: 64, borderWidth: 3),
+          Positioned(
+              right: -8,
+              bottom: -8,
+              child: Material(
+                color: Colors.transparent,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: IconButton(
+                  onPressed: () => showAvatarSheet(context, ref, pet),
+                  tooltip: L.t('profile.edit'),
+                  constraints: const BoxConstraints(
+                      minWidth: AppSpace.tapTarget,
+                      minHeight: AppSpace.tapTarget),
+                  padding: const EdgeInsets.all(7),
+                  icon: Container(
+                      width: 30,
+                      height: 30,
                       decoration: BoxDecoration(
-                        color: AppColors.primary, shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.surface, width: 2.5),
-                      ),
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: AppColors.surface, width: 2.5)),
                       child: const Icon(Icons.photo_camera_rounded,
-                          size: 14, color: AppColors.surface),
-                    ),
-                  ),
+                          size: 14, color: AppColors.surface)),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpace.gapXs),
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Flexible(
-                child: Text(
-                  pet.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  // Header 上最大的文字就是它 —— 名字是身份页的视觉中心。
-                  style: AppText.hero,
-                ),
-              ),
-              const SizedBox(width: 6),
-              _GenderMark(gender: pet.gender),
-            ],
-          ),
+              )),
+        ]),
+        const SizedBox(width: 12),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Flexible(
+                child: Text(pet.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.hero)),
+            const SizedBox(width: 6),
+            _GenderMark(gender: pet.gender),
+          ]),
           const SizedBox(height: 4),
-          Text(
-            _breedAgeLine(pet),
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: AppSpace.gapXs),
+          Text(_breedAgeLine(pet),
+              style: const TextStyle(
+                  fontSize: 12.5, color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
           SoftTag(
-            hasOverdue ? L.t('profile.healthAlert') : L.t('profile.healthGood'),
-            color: hasOverdue ? AppColors.warning : AppColors.success,
-            bg: hasOverdue ? AppColors.warningBg : AppColors.successBg,
-            icon: hasOverdue
-                ? Icons.error_outline_rounded
-                : Icons.verified_rounded,
-          ),
-        ],
-      ),
+              hasOverdue
+                  ? L.t('profile.healthAlert')
+                  : L.t('profile.healthGood'),
+              color: hasOverdue ? AppColors.warning : AppColors.success,
+              bg: hasOverdue ? AppColors.warningBg : AppColors.successBg,
+              icon: hasOverdue
+                  ? Icons.error_outline_rounded
+                  : Icons.verified_rounded),
+        ])),
+        const SizedBox(width: 4),
+        TextButton(
+            onPressed: () => showEditPetSheet(context, pet: pet),
+            style: TextButton.styleFrom(
+                minimumSize: const Size(0, AppSpace.tapTarget),
+                padding: const EdgeInsets.symmetric(horizontal: 8)),
+            child: Text(L.t('profile.edit'),
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600))),
+      ]),
     );
   }
 
@@ -378,7 +338,7 @@ class _InfoTab extends ConsumerWidget {
           L.t('profile.section.basic'),
           style: AppText.section,
         ),
-        const SizedBox(height: AppSpace.gapM),
+        const SizedBox(height: AppSpace.gapS),
         Container(
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpace.gapL,
@@ -410,18 +370,17 @@ class _InfoTab extends ConsumerWidget {
                   valueColor: AppColors.danger,
                 ),
               ],
-
             ],
           ),
         ),
 
         // ---- 个性特点 ----
-        const SizedBox(height: AppSpace.gapXl),
+        const SizedBox(height: AppSpace.gapL),
         Text(
           L.t('profile.section.traits'),
           style: AppText.section,
         ),
-        const SizedBox(height: AppSpace.gapM),
+        const SizedBox(height: AppSpace.gapS),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(AppSpace.gapL),
@@ -453,43 +412,43 @@ class _InfoTab extends ConsumerWidget {
         ),
 
         // ---- 家庭成员 ----
-        const SizedBox(height: AppSpace.gapXl),
+        const SizedBox(height: AppSpace.gapL),
         Text(
           L.t('profile.section.family'),
           style: AppText.section,
         ),
-        const SizedBox(height: AppSpace.gapM),
+        const SizedBox(height: AppSpace.gapS),
         _FamilyCard(pet: pet),
 
         // ---- 文档原件 ----
-        const SizedBox(height: AppSpace.gapXl),
+        const SizedBox(height: AppSpace.gapL),
         Text(
           L.t('profile.section.documents'),
           style: AppText.section,
         ),
-        const SizedBox(height: AppSpace.gapM),
+        const SizedBox(height: AppSpace.gapS),
         _DocumentsCard(pet: pet),
 
         // ---- 提醒计划（这个 App 的核心价值，不能因为改版就藏起来） ----
-        const SizedBox(height: AppSpace.gapXl),
+        const SizedBox(height: AppSpace.gapL),
         Text(
           L.t('profile.reminders'),
           style: AppText.section,
         ),
-        const SizedBox(height: AppSpace.gapM),
+        const SizedBox(height: AppSpace.gapS),
         _RemindersCard(pet: pet),
 
         // ---- 遛狗记录 ----
-        const SizedBox(height: AppSpace.gapXl),
+        const SizedBox(height: AppSpace.gapL),
         // 遛狗没开时整块不出现，见 feature_flags.dart。
         if (AppCapabilities.current.supports(AppFeature.walkTracking)) ...[
           Text(
             L.t('profile.section.walks'),
             style: AppText.section,
           ),
-          const SizedBox(height: AppSpace.gapM),
+          const SizedBox(height: AppSpace.gapS),
           _WalksCard(petId: pet.id, petName: pet.name),
-          const SizedBox(height: AppSpace.gapXl),
+          const SizedBox(height: AppSpace.gapL),
         ],
         // 导出健康报告：档案 + 台账 + 体重 + 最近记录画成一张彩色长图，
         // 分享给兽医。放在这一组是因为它同样是「低频但重要」的动作。
@@ -605,7 +564,8 @@ class _InfoTab extends ConsumerWidget {
   ///
   /// 侧载包在真机上跑，开发者不一定连着 Xcode —— 拿不到控制台日志。
   /// 让用户能自己把详情捞出来，这是唯一在没有 Xcode 的情况下拿到异常的办法。
-  static Future<void> _copyDetail(BuildContext context, Object e, StackTrace st) async {
+  static Future<void> _copyDetail(
+      BuildContext context, Object e, StackTrace st) async {
     final messenger = ScaffoldMessenger.of(context);
     await Clipboard.setData(
       ClipboardData(text: '[exportPetReport] $e\n\n$st'),
@@ -617,7 +577,8 @@ class _InfoTab extends ConsumerWidget {
   ///
   /// breed 是用户自填的自由文本（录入「疫苗」就是「疫苗」），这里不做
   /// 智能纠正 —— 数据修正交给 M2.2 的编辑功能，界面只负责不展示空值。
-  static List<Widget> _basicRows(Pet pet, double? latestWeight, WeightUnit unit) {
+  static List<Widget> _basicRows(
+      Pet pet, double? latestWeight, WeightUnit unit) {
     return [
       if ((pet.breed ?? '').trim().isNotEmpty)
         InfoRow(L.t('profile.field.breed'), pet.breed!.trim()),
@@ -658,9 +619,7 @@ class _InfoTab extends ConsumerWidget {
       _ => L.t('profile.gender.unknown'),
     };
     if (base == L.t('profile.gender.unknown')) return base;
-    return pet.neutered
-        ? '$base（${L.t('profile.neuteredSuffix')}）'
-        : base;
+    return pet.neutered ? '$base（${L.t('profile.neuteredSuffix')}）' : base;
   }
 
   /// 体型从体重基线推断。没有基线就不猜。
@@ -719,7 +678,7 @@ class _InfoTab extends ConsumerWidget {
       child: Column(
         children: [
           const Divider(),
-          const SizedBox(height: AppSpace.gapM),
+          const SizedBox(height: AppSpace.gapS),
           DeletePetButton(pet: pet),
         ],
       ),
@@ -874,8 +833,8 @@ class _CareLedgerCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final records =
-        ref.watch(petRecordsProvider(pet.id)).valueOrNull ?? const <PetRecord>[];
+    final records = ref.watch(petRecordsProvider(pet.id)).valueOrNull ??
+        const <PetRecord>[];
     final reminders = ref.watch(petRemindersProvider(pet.id)).valueOrNull ??
         const <Reminder>[];
 
@@ -1062,8 +1021,7 @@ class _CareLedgerRowView extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: overdue ? FontWeight.w600 : FontWeight.w400,
-                    color:
-                        overdue ? AppColors.danger : AppColors.textTertiary,
+                    color: overdue ? AppColors.danger : AppColors.textTertiary,
                   ),
                 ),
               ],
@@ -1295,8 +1253,8 @@ class _FamilyCard extends ConsumerWidget {
                       color: AppColors.primaryLight,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(rows[i].icon,
-                        size: 18, color: AppColors.primary),
+                    child:
+                        Icon(rows[i].icon, size: 18, color: AppColors.primary),
                   ),
                   const SizedBox(width: AppSpace.gapM),
                   Expanded(
@@ -1428,8 +1386,7 @@ class _RemindersCard extends ConsumerWidget {
                           .read(appActionsProvider)
                           .generatePlanFor(pet);
                       messenger.showSnackBar(SnackBar(
-                        content:
-                            Text(L.tp('reminder.fillPlanDone', {'n': n})),
+                        content: Text(L.tp('reminder.fillPlanDone', {'n': n})),
                       ));
                     },
                     icon: const Icon(Icons.auto_awesome_outlined, size: 16),
@@ -1505,12 +1462,15 @@ class _ReminderRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final manual = reminder.source == 'manual';
-    final canWrite = ref.watch(petRoleProvider(pet.id)).valueOrNull?.canWrite == true;
+    final canWrite =
+        ref.watch(petRoleProvider(pet.id)).valueOrNull?.canWrite == true;
 
     return InkWell(
       // 点进编辑，长按删除 —— 列表行放不下两个按钮，
       // 而「删除」是低频且危险的动作，长按是合适的门槛。
-      onTap: canWrite ? () => showReminderSheet(context, pet: pet, existing: reminder) : null,
+      onTap: canWrite
+          ? () => showReminderSheet(context, pet: pet, existing: reminder)
+          : null,
       onLongPress: canWrite ? () => _confirmDelete(context, ref) : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1556,9 +1516,8 @@ class _ReminderRow extends ConsumerWidget {
                     ].join(' · '),
                     style: TextStyle(
                       fontSize: 11.5,
-                      color: overdue
-                          ? AppColors.danger
-                          : AppColors.textSecondary,
+                      color:
+                          overdue ? AppColors.danger : AppColors.textSecondary,
                     ),
                   ),
                 ],
@@ -1566,22 +1525,26 @@ class _ReminderRow extends ConsumerWidget {
             ),
             Switch(
               value: reminder.enabled,
-              onChanged: !canWrite ? null : (v) async {
-                // 走 updateReminder 而不是只改库里的 enabled：它会顺带
-                // 撤掉/重排本地通知。只写数据的话，关掉的提醒照样会弹。
-                try {
-                  final actions = ref.read(appActionsProvider);
-                  if (reminder.rule['mode'] == 'medication') {
-                    await actions.toggleMedicationCourse(reminder, v);
-                  } else {
-                    await actions.updateReminder(reminder.copyWith(enabled: v));
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L.error(e))));
-                  }
-                }
-              },
+              onChanged: !canWrite
+                  ? null
+                  : (v) async {
+                      // 走 updateReminder 而不是只改库里的 enabled：它会顺带
+                      // 撤掉/重排本地通知。只写数据的话，关掉的提醒照样会弹。
+                      try {
+                        final actions = ref.read(appActionsProvider);
+                        if (reminder.rule['mode'] == 'medication') {
+                          await actions.toggleMedicationCourse(reminder, v);
+                        } else {
+                          await actions
+                              .updateReminder(reminder.copyWith(enabled: v));
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(L.error(e))));
+                        }
+                      }
+                    },
             ),
           ],
         ),
@@ -1612,8 +1575,7 @@ class _ReminderRow extends ConsumerWidget {
     await ref.read(appActionsProvider).deleteReminder(reminder);
   }
 
-  static String _short(DateTime d) =>
-      '${d.year}-${_p(d.month)}-${_p(d.day)}';
+  static String _short(DateTime d) => '${d.year}-${_p(d.month)}-${_p(d.day)}';
 
   static String _p(int v) => v.toString().padLeft(2, '0');
 }
@@ -1630,8 +1592,8 @@ class _WalksCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final walks = ref.watch(petWalksProvider(petId)).valueOrNull ??
-        const <WalkSession>[];
+    final walks =
+        ref.watch(petWalksProvider(petId)).valueOrNull ?? const <WalkSession>[];
     const region = AppRegion.current;
     final unit = Units.defaultDistanceUnit(region);
 
@@ -1667,64 +1629,64 @@ class _WalksCard extends ConsumerWidget {
                   petName: petName,
                 ),
                 child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Row(
-                  children: [
-                    const Icon(Icons.directions_walk_rounded,
-                        size: 17, color: AppColors.primary),
-                    const SizedBox(width: AppSpace.gapM),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  relativeDay(w.startedAt),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13.5,
-                                    color: AppColors.textPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.directions_walk_rounded,
+                          size: 17, color: AppColors.primary),
+                      const SizedBox(width: AppSpace.gapM),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    relativeDay(w.startedAt),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13.5,
+                                      color: AppColors.textPrimary,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              // 心情是结束后补填的，没填就不占位
-                              if ((w.mood ?? '').isNotEmpty) ...[
-                                const SizedBox(width: 6),
-                                Text(
-                                  walkMoodEmoji(w.mood!),
-                                  style: const TextStyle(fontSize: 13),
-                                ),
+                                // 心情是结束后补填的，没填就不占位
+                                if ((w.mood ?? '').isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    walkMoodEmoji(w.mood!),
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ],
                               ],
-                            ],
-                          ),
-                          if ((w.note ?? '').isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Text(
-                              w.note!,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: AppColors.textSecondary,
-                              ),
                             ),
+                            if ((w.note ?? '').isNotEmpty) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                w.note!,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                    Text(
-                      '${Units.formatDistance(w.distanceM, unit)} · $dur',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.primary,
+                      Text(
+                        '${Units.formatDistance(w.distanceM, unit)} · $dur',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.primary,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
                 ),
               );
             }),
@@ -1799,8 +1761,8 @@ class _MemoriesTab extends ConsumerWidget {
     final photos = ref.watch(petPhotosProvider(pet.id));
     // 记录也读一份，用来把格子映射回所属记录 —— 不然点开没东西可点。
     // 记录页签本来就在 watch 它，这里不额外查库。
-    final records =
-        ref.watch(petRecordsProvider(pet.id)).valueOrNull ?? const <PetRecord>[];
+    final records = ref.watch(petRecordsProvider(pet.id)).valueOrNull ??
+        const <PetRecord>[];
     final recordById = {for (final r in records) r.id: r};
 
     return photos.when(
@@ -2123,7 +2085,6 @@ class _ExpenseTab extends ConsumerWidget {
               label: Text(L.t('expense.add')),
             ),
           ),
-
           if (s.isEmpty) ...[
             const SizedBox(height: AppSpace.gapXl),
             _PlainHint(
@@ -2133,21 +2094,18 @@ class _ExpenseTab extends ConsumerWidget {
           ] else ...[
             const SizedBox(height: AppSpace.gapL),
             _ExpenseHeadCard(summary: s, currency: currency),
-
             if (s.months.any((m) => m.total > 0)) ...[
               const SizedBox(height: AppSpace.gapXl),
               _SectionTitle(L.t('expense.trend')),
               const SizedBox(height: AppSpace.gapM),
               _ExpenseTrendCard(summary: s, currency: currency),
             ],
-
             if (s.byCategory.isNotEmpty) ...[
               const SizedBox(height: AppSpace.gapXl),
               _SectionTitle(L.t('expense.byCategory')),
               const SizedBox(height: AppSpace.gapM),
               _ExpenseCategoryCard(summary: s, currency: currency),
             ],
-
             if (expenses.isNotEmpty) ...[
               const SizedBox(height: AppSpace.gapXl),
               _SectionTitle(L.t('expense.recent')),
@@ -2283,9 +2241,8 @@ class _ExpenseTrendCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxV = summary.months
-        .map((m) => m.total)
-        .fold(0.0, (a, b) => a > b ? a : b);
+    final maxV =
+        summary.months.map((m) => m.total).fold(0.0, (a, b) => a > b ? a : b);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(
@@ -2572,9 +2529,8 @@ class _ExpenseRow extends ConsumerWidget {
         ),
         const SizedBox(width: AppSpace.gapS),
         Text(
-          formatMoney(expense.amount, expense.currency.isEmpty
-              ? currency
-              : expense.currency),
+          formatMoney(expense.amount,
+              expense.currency.isEmpty ? currency : expense.currency),
           style: const TextStyle(
             fontSize: 13.5,
             fontWeight: FontWeight.w600,
@@ -2647,9 +2603,8 @@ class _DocumentsCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final docs =
-        ref.watch(petDocumentsProvider(pet.id)).valueOrNull ??
-            const <RecordAttachment>[];
+    final docs = ref.watch(petDocumentsProvider(pet.id)).valueOrNull ??
+        const <RecordAttachment>[];
 
     return Container(
       width: double.infinity,
@@ -2811,10 +2766,10 @@ class _DocumentLine extends StatelessWidget {
         final p = attachment.localPath;
         if (p == null) return;
         await shareFiles(
-        files: [XFile(p)],
-        subject: name,
-        context: context,
-      );
+          files: [XFile(p)],
+          subject: name,
+          context: context,
+        );
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpace.gapS),

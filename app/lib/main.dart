@@ -241,7 +241,7 @@ ThemeData buildAppTheme() {
       surfaceTintColor: Colors.transparent,
       indicatorColor: Colors.transparent,
       // 参考稿的底部栏没有胶囊底，靠图标与文字变色表示选中。
-      height: 68,
+      height: 62,
       elevation: 0,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       labelTextStyle: WidgetStateProperty.resolveWith((states) {

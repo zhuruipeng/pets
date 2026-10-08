@@ -57,7 +57,7 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
     final sync = ref.watch(syncControllerProvider);
 
     return Container(
-      margin: const EdgeInsets.only(top: AppSpace.gapL),
+      margin: const EdgeInsets.only(top: AppSpace.gapM),
       padding: const EdgeInsets.all(AppSpace.gapM),
       decoration: BoxDecoration(
           color: AppColors.surface,
@@ -100,6 +100,8 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
         for (final reminder in _expanded ? pending : pending.take(4))
           ListTile(
             contentPadding: EdgeInsets.zero,
+            minLeadingWidth: 20,
+            horizontalTitleGap: 8,
             dense: true,
             leading: const Icon(Icons.radio_button_unchecked,
                 color: AppColors.primary, size: 20),
@@ -132,6 +134,8 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
             for (final event in _expanded ? items : items.take(5))
               ListTile(
                 contentPadding: EdgeInsets.zero,
+                minLeadingWidth: 20,
+                horizontalTitleGap: 8,
                 dense: true,
                 leading: const Icon(Icons.check_circle_outline,
                     color: AppColors.primary, size: 20),

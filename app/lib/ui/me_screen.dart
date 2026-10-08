@@ -61,11 +61,9 @@ class MeScreen extends ConsumerWidget {
         _Card(
           title: L.t('me.section.pets'),
           icon: Icons.pets_rounded,
+          trailing: Text(L.isZh ? '共 ${pets.length} 只' : '${pets.length}',
+              style: AppText.caption),
           children: [
-            InfoRow(
-              L.t('me.section.pets'),
-              L.isZh ? '共 ${pets.length} 只' : '${pets.length}',
-            ),
             const RowDivider(),
             // 「添加宠物」的**常驻入口**。
             //
@@ -96,22 +94,10 @@ class MeScreen extends ConsumerWidget {
         const SizedBox(height: AppSpace.gapM),
 
         if (region.requiresIcpDisplay) ...[
-          _Card(
-            title: L.t('me.build.icp'),
-            icon: Icons.verified_outlined,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  L.t('me.icp'),
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-            ],
-          ),
+          _CompactEntryCard(
+              title: L.t('me.build.icp'),
+              icon: Icons.verified_outlined,
+              detail: L.t('me.icp')),
         ],
 
         const SizedBox(height: AppSpace.gapM),
@@ -125,47 +111,19 @@ class MeScreen extends ConsumerWidget {
 
         // ---- 联系方式（M5）。走失协查卡片要靠它，所以放在「我的」而不是
         // 藏在某个二级设置页里。 ----
-        _Card(
-          title: L.t('contact.title'),
-          icon: Icons.contact_phone_outlined,
-          children: [
-            Consumer(
-              builder: (context, ref, _) {
-                final user = ref.watch(currentUserProvider).valueOrNull;
-                final has = user?.hasContact ?? false;
-
-                return InkWell(
-                  onTap: user == null
-                      ? null
-                      : () => showContactSheet(context, user: user),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            has ? _contactSummary(user!) : L.t('contact.empty'),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13,
-                              height: 1.5,
-                              color: has
-                                  ? AppColors.textPrimary
-                                  : AppColors.textSecondary,
-                            ),
-                          ),
-                        ),
-                        const Icon(Icons.chevron_right_rounded,
-                            size: 18, color: AppColors.textTertiary),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
+        Consumer(builder: (context, ref, _) {
+          final user = ref.watch(currentUserProvider).valueOrNull;
+          final has = user?.hasContact ?? false;
+          return _CompactEntryCard(
+              title: L.t('contact.title'),
+              icon: Icons.contact_phone_outlined,
+              detail: has ? _contactSummary(user!) : L.t('contact.empty'),
+              trailing: const Icon(Icons.chevron_right_rounded,
+                  size: 18, color: AppColors.textTertiary),
+              onTap: user == null
+                  ? null
+                  : () => showContactSheet(context, user: user));
+        }),
 
         const SizedBox(height: AppSpace.gapM),
         _Card(
@@ -324,6 +282,19 @@ class _AccountCard extends ConsumerWidget {
     final user = ref.watch(currentUserProvider).valueOrNull;
     final controller = ref.read(syncControllerProvider.notifier);
 
+    if (!status.loggedIn) {
+      return _CompactEntryCard(
+          title: L.t('sync.title'),
+          icon: Icons.sync_rounded,
+          status: L.t('auth.notLoggedIn'),
+          detail: L.t('auth.notLoggedInHint'),
+          trailing: FilledButton(
+              onPressed: () => showAuthSheet(context),
+              style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, AppSpace.tapTarget),
+                  padding: const EdgeInsets.symmetric(horizontal: 12)),
+              child: Text(L.t('auth.title'))));
+    }
     return _Card(
       title: L.t('sync.title'),
       icon: Icons.sync_rounded,
@@ -636,11 +607,13 @@ class _Card extends StatelessWidget {
     required this.title,
     required this.icon,
     required this.children,
+    this.trailing,
   });
 
   final String title;
   final IconData icon;
   final List<Widget> children;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -648,9 +621,9 @@ class _Card extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
-          AppSpace.gapL,
           AppSpace.gapM,
-          AppSpace.gapL,
+          10,
+          AppSpace.gapM,
           AppSpace.gapS,
         ),
         child: Column(
@@ -660,14 +633,64 @@ class _Card extends StatelessWidget {
               children: [
                 Icon(icon, size: 17, color: AppColors.primary),
                 const SizedBox(width: AppSpace.gapS),
-                Expanded(child: Text(title, style: AppText.section)),
+                Expanded(
+                    child: Row(children: [
+                  Flexible(child: Text(title, style: AppText.section)),
+                  if (trailing != null) ...[const SizedBox(width: 8), trailing!]
+                ])),
               ],
             ),
-            const SizedBox(height: AppSpace.gapS),
+            const SizedBox(height: 6),
             ...children,
           ],
         ),
       ),
     );
   }
+}
+
+class _CompactEntryCard extends StatelessWidget {
+  const _CompactEntryCard(
+      {required this.title,
+      required this.icon,
+      required this.detail,
+      this.status,
+      this.trailing,
+      this.onTap});
+  final String title;
+  final IconData icon;
+  final String detail;
+  final String? status;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  @override
+  Widget build(BuildContext context) => Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(children: [
+            Icon(icon, size: 20, color: AppColors.primary),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(title, style: AppText.section),
+                        if (status != null)
+                          Text(status!, style: AppText.caption),
+                      ]),
+                  const SizedBox(height: 4),
+                  Text(detail, style: AppText.caption),
+                ])),
+            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+          ]),
+        ),
+      ));
 }

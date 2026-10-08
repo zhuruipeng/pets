@@ -76,9 +76,11 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
               controller: _search,
               onChanged: (v) => setState(() => _q = v),
             ),
-            _FilterBar(current: filter, onChanged: (t) {
-              ref.read(recordFilterProvider.notifier).state = t;
-            }),
+            _FilterBar(
+                current: filter,
+                onChanged: (t) {
+                  ref.read(recordFilterProvider.notifier).state = t;
+                }),
             Expanded(
               child: all.isEmpty
                   ? EmptyState(
@@ -108,8 +110,7 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
                             // 搜索时不画曲线 —— 曲线是全量的，跟搜索结果不匹配，
                             // 一起显示会让人误以为曲线也在跟着筛。
                             if (!searching &&
-                                (filter == null ||
-                                    filter == RecordType.weight))
+                                (filter == null || filter == RecordType.weight))
                               WeightChartCard(petId: pet.id),
                             if (visible.isEmpty)
                               Padding(
@@ -296,15 +297,15 @@ class _FilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 60 + (MediaQuery.textScalerOf(context).scale(13) - 13),
+      height: 56 + (MediaQuery.textScalerOf(context).scale(13) - 13),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpace.page,
-          vertical: AppSpace.gapS,
+          vertical: AppSpace.gapXs,
         ),
         itemCount: _options.length,
-        separatorBuilder: (_, __) => const SizedBox(width: AppSpace.gapS),
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (context, i) {
           final opt = _options[i];
           final selected = current == opt;
@@ -322,7 +323,7 @@ class _FilterBar extends StatelessWidget {
               fontWeight: FontWeight.w600,
               color: selected ? AppColors.primaryText : AppColors.textSecondary,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             side: BorderSide(
               color: selected ? AppColors.primaryLight : AppColors.border,
             ),
@@ -352,7 +353,7 @@ class WeightChartCard extends ConsumerWidget {
       data: (points) {
         if (points.length < 2) {
           return Container(
-            margin: const EdgeInsets.only(bottom: AppSpace.gapM),
+            margin: const EdgeInsets.only(bottom: AppSpace.gapS),
             padding: const EdgeInsets.all(AppSpace.gapL),
             decoration: BoxDecoration(
               color: AppColors.surface,
@@ -389,8 +390,8 @@ class WeightChartCard extends ConsumerWidget {
           margin: const EdgeInsets.only(bottom: AppSpace.gapM),
           padding: const EdgeInsets.fromLTRB(
             AppSpace.gapM,
-            AppSpace.gapL,
-            AppSpace.gapL,
+            AppSpace.gapM,
+            AppSpace.gapM,
             AppSpace.gapM,
           ),
           decoration: BoxDecoration(
@@ -405,7 +406,8 @@ class WeightChartCard extends ConsumerWidget {
                 padding: const EdgeInsets.only(left: 6),
                 child: Row(
                   children: [
-                    Expanded(child: Text(
+                    Expanded(
+                        child: Text(
                       L.t('records.weight.title'),
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
@@ -425,9 +427,9 @@ class WeightChartCard extends ConsumerWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: AppSpace.gapL),
+              const SizedBox(height: AppSpace.gapM),
               SizedBox(
-                height: 160,
+                height: 128,
                 child: LineChart(
                   LineChartData(
                     gridData: FlGridData(
@@ -536,8 +538,7 @@ class WeightChartCard extends ConsumerWidget {
     );
   }
 
-  static String _ds(DateTime d) =>
-      '${d.year}-${_p(d.month)}-${_p(d.day)}';
+  static String _ds(DateTime d) => '${d.year}-${_p(d.month)}-${_p(d.day)}';
 
   static String _p(int v) => v.toString().padLeft(2, '0');
 }
@@ -568,21 +569,21 @@ class RecordTimeline extends StatelessWidget {
           Card(
             clipBehavior: Clip.antiAlias,
             child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpace.gapL,
-              vertical: AppSpace.gapXs,
-            ),
-            child: Column(
-              children: [
-                for (var i = 0; i < entry.value.length; i++) ...[
-                  if (i > 0) const RowDivider(),
-                  RecordRow(
-                    record: entry.value[i],
-                    weightDelta: deltas[entry.value[i].id],
-                  ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpace.gapL,
+                vertical: AppSpace.gapXs,
+              ),
+              child: Column(
+                children: [
+                  for (var i = 0; i < entry.value.length; i++) ...[
+                    if (i > 0) const RowDivider(),
+                    RecordRow(
+                      record: entry.value[i],
+                      weightDelta: deltas[entry.value[i].id],
+                    ),
+                  ],
                 ],
-              ],
-            ),
+              ),
             ),
           ),
         ],
@@ -637,122 +638,126 @@ class RecordRow extends ConsumerWidget {
       borderRadius: AppRadius.tileBorder,
       onTap: () => showRecordDetailSheet(context, ref, record: r),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: AppColors.tileTints[r.type.index % AppColors.tileTints.length],
-              borderRadius: BorderRadius.circular(11),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: AppColors
+                    .tileTints[r.type.index % AppColors.tileTints.length],
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(recordTypeIcon(r.type),
+                  size: 17, color: AppColors.primary),
             ),
-            child: Icon(recordTypeIcon(r.type),
-                size: 17, color: AppColors.primary),
-          ),
-          const SizedBox(width: AppSpace.gapM),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 6, runSpacing: AppSpace.gapXs,
-                  children: [
-                    Text(
-                      recordTypeLabel(r.type),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13.5,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    if (backfilled) ...[
-                      SoftTag(
-                        L.t('timeline.backfilled'),
-                        color: AppColors.warning,
-                        bg: AppColors.warningBg,
-                      ),
-                    ],
-                  ],
-                ),
-                if (valueLine != null) ...[
-                  const SizedBox(height: 3),
+            const SizedBox(width: AppSpace.gapS),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Wrap(
-                    spacing: 6, runSpacing: AppSpace.gapXs,
+                    spacing: 6,
+                    runSpacing: AppSpace.gapXs,
                     children: [
                       Text(
-                        valueLine,
+                        recordTypeLabel(r.type),
                         style: const TextStyle(
-                          fontSize: 13.5,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.primary,
+                          fontSize: 13.5,
+                          color: AppColors.textPrimary,
                         ),
                       ),
-                      if (deltaLine != null) ...[
+                      if (backfilled) ...[
+                        SoftTag(
+                          L.t('timeline.backfilled'),
+                          color: AppColors.warning,
+                          bg: AppColors.warningBg,
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (valueLine != null) ...[
+                    const SizedBox(height: 3),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: AppSpace.gapXs,
+                      children: [
                         Text(
+                          valueLine,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        if (deltaLine != null) ...[
+                          Text(
                             deltaLine,
                             style: const TextStyle(
                               fontSize: 11.5,
                               color: AppColors.textSecondary,
                             ),
-                        ),
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
-                ],
-                if (summary.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    summary,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.textSecondary,
                     ),
-                  ),
-                ],
-                if ((r.note ?? '').isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    r.note!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
+                  ],
+                  if (summary.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      summary,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
-                  ),
+                  ],
+                  if ((r.note ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      r.note!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
                 ],
+              ),
+            ),
+            const SizedBox(width: AppSpace.gapS),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _hm(r.recordedAt),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.textTertiary,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: () => _delete(ref),
+                  tooltip: L.t('action.delete'),
+                  constraints: const BoxConstraints(
+                    minWidth: AppSpace.tapTarget,
+                    minHeight: AppSpace.tapTarget,
+                  ),
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.close_rounded,
+                      size: 18, color: AppColors.textSecondary),
+                ),
               ],
             ),
-          ),
-          const SizedBox(width: AppSpace.gapS),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                _hm(r.recordedAt),
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  color: AppColors.textTertiary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              IconButton(
-                onPressed: () => _delete(ref),
-                tooltip: L.t('action.delete'),
-                constraints: const BoxConstraints(
-                  minWidth: AppSpace.tapTarget, minHeight: AppSpace.tapTarget,
-                ),
-                padding: EdgeInsets.zero,
-                icon: const Icon(Icons.close_rounded,
-                    size: 18, color: AppColors.textSecondary),
-              ),
-            ],
-          ),
-        ],
+          ],
         ),
       ),
     );
@@ -779,8 +784,7 @@ class RecordRow extends ConsumerWidget {
     ref.invalidate(weightSeriesProvider(record.petId));
   }
 
-  static String _hm(DateTime d) =>
-      '${_p(d.hour)}:${_p(d.minute)}';
+  static String _hm(DateTime d) => '${_p(d.hour)}:${_p(d.minute)}';
 
   static String _p(int v) => v.toString().padLeft(2, '0');
 }

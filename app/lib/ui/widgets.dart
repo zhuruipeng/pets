@@ -156,7 +156,7 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, AppSpace.gapL, 4, AppSpace.gapM),
+      padding: const EdgeInsets.fromLTRB(4, AppSpace.gapM, 4, AppSpace.gapS),
       child: Row(
         children: [
           Expanded(child: Text(title, style: AppText.section)),
@@ -187,7 +187,7 @@ class InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpace.gapM),
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.gapS),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -196,7 +196,7 @@ class InfoRow extends StatelessWidget {
             child: Text(label,
                 style: AppText.body.copyWith(color: AppColors.textSecondary)),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           Expanded(
             flex: 3,
             child: Text(
@@ -246,52 +246,40 @@ class StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text.rich(
-          TextSpan(
-            text: value,
-            children: [
-              if (unit != null) TextSpan(
-                text: ' $unit',
-                style: AppText.caption,
-              ),
-            ],
-          ),
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
-            height: 1.25,
-          ),
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+              color: tint ?? AppColors.primaryLight,
+              borderRadius: BorderRadius.circular(8)),
+          child: Icon(icon, size: 16, color: AppColors.primary),
         ),
-        const SizedBox(height: 5),
-        Row(
+        const SizedBox(width: 8),
+        Expanded(
+            child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 15,
-              height: 15,
-              decoration: BoxDecoration(
-                color: tint ?? AppColors.primaryLight,
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Icon(icon, size: 10, color: AppColors.primary),
-            ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                label,
+            Text.rich(
+                TextSpan(text: value, children: [
+                  if (unit != null)
+                    TextSpan(text: ' $unit', style: AppText.caption),
+                ]),
+                style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                    height: 1.25)),
+            const SizedBox(height: 3),
+            Text(label,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
+                    fontSize: 12, color: AppColors.textSecondary, height: 1.4)),
           ],
-        ),
+        )),
       ],
     );
   }
@@ -328,7 +316,8 @@ class SoftTag extends StatelessWidget {
             Icon(icon, size: 12, color: fg),
             const SizedBox(width: 4),
           ],
-          Flexible(child: Text(
+          Flexible(
+              child: Text(
             text,
             style: TextStyle(
               fontSize: 11.5,

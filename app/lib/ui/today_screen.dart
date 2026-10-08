@@ -247,7 +247,7 @@ class _PetHeroCard extends ConsumerWidget {
     final weightUnit = Units.weightUnitLabel(unit);
 
     return Container(
-      padding: const EdgeInsets.all(AppSpace.gapL),
+      padding: const EdgeInsets.all(AppSpace.gapM),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: AppRadius.cardBorder,
@@ -258,7 +258,7 @@ class _PetHeroCard extends ConsumerWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              PetAvatar(pet: pet, size: 58),
+              PetAvatar(pet: pet, size: 48),
               const SizedBox(width: AppSpace.gapM),
               Expanded(
                 child: Column(
@@ -296,7 +296,7 @@ class _PetHeroCard extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpace.gapL),
+          const SizedBox(height: AppSpace.gapM),
           Row(
             children: [
               Expanded(
@@ -437,8 +437,8 @@ class _WeekOverview extends ConsumerWidget {
         SectionHeader(L.t('home.weekOverview')),
         Container(
           padding: const EdgeInsets.symmetric(
-            horizontal: AppSpace.gapL,
-            vertical: AppSpace.gapL,
+            horizontal: AppSpace.gapM,
+            vertical: AppSpace.gapM,
           ),
           decoration: BoxDecoration(
             color: AppColors.surface,
@@ -556,43 +556,34 @@ class _QuickAddRow extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHeader(L.t('today.quickAdd')),
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpace.gapS,
-            vertical: AppSpace.gapS,
-          ),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: AppRadius.cardBorder,
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: [
-              for (var i = 0; i < _quick.length; i++)
-                Expanded(
+        LayoutBuilder(builder: (context, constraints) {
+          final width = ((constraints.maxWidth - 24) / 4).clamp(0.0, 68.0);
+          final types = [..._quick, null];
+          return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            for (var i = 0; i < types.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              SizedBox(
+                  width: width,
                   child: _QuickAddTile(
-                    icon: recordTypeIcon(_quick[i]),
-                    label: recordTypeLabel(_quick[i]),
-                    tint: AppColors.tileTints[i],
-                    onTap: () => showAddRecordSheet(
-                      context,
-                      ref,
-                      petId: pet.id,
-                      initialType: _quick[i],
-                    ),
-                  ),
-                ),
-              Expanded(
-                child: _QuickAddTile(
-                  icon: Icons.grid_view_rounded,
-                  label: L.t('today.quickAdd.more'),
-                  tint: AppColors.tileTints[1],
-                  onTap: () => showAddRecordSheet(context, ref, petId: pet.id),
-                ),
-              ),
+                    icon: types[i] == null
+                        ? Icons.grid_view_rounded
+                        : recordTypeIcon(types[i]!),
+                    label: types[i] == null
+                        ? L.t('today.quickAdd.more')
+                        : recordTypeLabel(types[i]!),
+                    tint: AppColors.tileTints[i == 3 ? 1 : i],
+                    onTap: () {
+                      if (types[i] == null) {
+                        showAddRecordSheet(context, ref, petId: pet.id);
+                      } else {
+                        showAddRecordSheet(context, ref,
+                            petId: pet.id, initialType: types[i]!);
+                      }
+                    },
+                  )),
             ],
-          ),
-        ),
+          ]);
+        }),
       ],
     );
   }
@@ -619,25 +610,25 @@ class _QuickAddTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: AppRadius.tileBorder,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpace.gapXs),
+          padding: const EdgeInsets.symmetric(vertical: 2),
           child: Column(
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
                   color: tint,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, size: 19, color: AppColors.primary),
+                child: Icon(icon, size: 22, color: AppColors.primary),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w500,
                   color: AppColors.textSecondary,
                 ),
