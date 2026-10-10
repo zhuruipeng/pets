@@ -39,7 +39,9 @@ import 'package:sqflite_common/sqlite_api.dart';
 /// Dart 就不再强制（成员调用会转发过去），所以没用到的方法一律抛 ——
 /// **这是有意的**：万一以后 SyncEngine 用了新方法，脚本会立刻报出来，
 /// 而不是悄悄用假实现算出个好看的结果。
-class _MemDb implements Database {
+class _MemDb implements Database, Transaction {
+  @override
+  Future<T> transaction<T>(Future<T> Function(Transaction txn) action, {bool? exclusive}) => action(this);
   final Map<String, Map<String, Object?>> rows = {};
 
   @override

@@ -74,6 +74,11 @@ def visible_to(
             visible.append(change)
         elif pet_id is None and change.get("user_id") == user_id:
             visible.append(change)
+        elif (change.get("table") == "members" and change.get("op") == "delete"
+              and (change.get("payload") or {}).get("user_id") == user_id):
+            # Removing access must itself reach the removed device. This grants
+            # no access to other members or to the pet's business data.
+            visible.append(change)
     return visible
 
 

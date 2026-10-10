@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .changes import record_change
+from .changes import lock_sync_writes, record_change
 from .config import Settings, get_settings
 from .db import get_session
 from .models import AuthToken, User, VerifyCode
@@ -661,7 +661,9 @@ def patch_me(
     session: Session = Depends(get_session),
 ) -> dict:
     """改资料。只改传上来的字段。"""
-    now = now_ms()
+    lock_sync_writes(session)
+    session.refresh(user)  # Authentication may have read this row before waiting for the lock.
+    now = max(now_ms(), user.updated_at + 1)
     updates = payload.model_dump(exclude_unset=True)
 
     # 联系方式要做和登录一样的归一化：如果这里存 +8613800138000、注册流程存

@@ -142,6 +142,7 @@ class PushResult {
     required this.applied,
     required this.rejected,
     this.serverSeq,
+    this.canonical = const [],
   });
 
   /// 已被服务端接受（含 delete）。
@@ -151,6 +152,9 @@ class PushResult {
   final List<({SyncChange change, String reason})> rejected;
 
   final int? serverSeq;
+
+  /// Authoritative snapshots returned for authorized stale conflicts.
+  final List<SyncChange> canonical;
 }
 
 class PullResult {
@@ -190,7 +194,8 @@ class RemoteMember {
         nickname: j['nickname'] as String?,
         joinedAt: (j['joined_at'] as num?) == null
             ? null
-            : DateTime.fromMillisecondsSinceEpoch((j['joined_at'] as num).toInt()),
+            : DateTime.fromMillisecondsSinceEpoch(
+                (j['joined_at'] as num).toInt()),
         isMe: j['is_me'] == true,
       );
 }
@@ -218,7 +223,8 @@ class RemoteInvite {
         petName: j['pet_name'] as String?,
         invitedAt: (j['invited_at'] as num?) == null
             ? null
-            : DateTime.fromMillisecondsSinceEpoch((j['invited_at'] as num).toInt()),
+            : DateTime.fromMillisecondsSinceEpoch(
+                (j['invited_at'] as num).toInt()),
       );
 }
 
@@ -372,13 +378,17 @@ class SyncApi {
     String? wechat,
     String? contactNote,
   }) async {
-    final j = await _send('PATCH', '/me', {
-      if (nickname != null) 'nickname': nickname,
-      if (phone != null) 'phone': phone,
-      if (email != null) 'email': email,
-      if (wechat != null) 'wechat': wechat,
-      if (contactNote != null) 'contact_note': contactNote,
-    }, token: token);
+    final j = await _send(
+        'PATCH',
+        '/me',
+        {
+          if (nickname != null) 'nickname': nickname,
+          if (phone != null) 'phone': phone,
+          if (email != null) 'email': email,
+          if (wechat != null) 'wechat': wechat,
+          if (contactNote != null) 'contact_note': contactNote,
+        },
+        token: token);
     final body = (j['user'] as Map?)?.cast<String, dynamic>() ?? j;
     return RemoteUser.fromJson(body);
   }
@@ -397,14 +407,18 @@ class SyncApi {
     if (changes.isEmpty) {
       return const PushResult(applied: [], rejected: []);
     }
-    final j = await _post('/sync/push', {
-      'device_id': deviceId,
-      'changes': [for (final c in changes) c.toPushJson()],
-    }, token: token);
+    final j = await _post(
+        '/sync/push',
+        {
+          'device_id': deviceId,
+          'changes': [for (final c in changes) c.toPushJson()],
+        },
+        token: token);
 
     final byKey = {for (final c in changes) '${c.table}#${c.rowId}': c};
     final applied = <SyncChange>[];
     final rejected = <({SyncChange change, String reason})>[];
+    final canonical = <SyncChange>[];
 
     for (final raw in (j['applied'] as List?) ?? const []) {
       final m = (raw as Map).cast<String, dynamic>();
@@ -415,13 +429,22 @@ class SyncApi {
       final m = (raw as Map).cast<String, dynamic>();
       final c = byKey['${m['table']}#${m['row_id']}'];
       if (c != null) {
-        rejected.add((change: c, reason: '${m['result'] ?? m['reason'] ?? 'rejected'}'));
+        rejected.add(
+            (change: c, reason: '${m['result'] ?? m['reason'] ?? 'rejected'}'));
+        if (m['result'] == 'stale' && m['canonical'] is Map) {
+          final winner = SyncChange.fromJson(
+              (m['canonical'] as Map).cast<String, dynamic>());
+          if (winner.table == c.table && winner.rowId == c.rowId) {
+            canonical.add(winner);
+          }
+        }
       }
     }
     return PushResult(
       applied: applied,
       rejected: rejected,
       serverSeq: (j['server_seq'] as num?)?.toInt(),
+      canonical: canonical,
     );
   }
 
@@ -462,11 +485,14 @@ class SyncApi {
     required String target,
     required String role,
   }) async {
-    await _post('/pets/$petId/members/invite', {
-      'channel': channel,
-      'target': target,
-      'role': role,
-    }, token: token);
+    await _post(
+        '/pets/$petId/members/invite',
+        {
+          'channel': channel,
+          'target': target,
+          'role': role,
+        },
+        token: token);
   }
 
   Future<void> acceptInvite(String token, String inviteId) async {
@@ -487,7 +513,8 @@ class SyncApi {
   }
 
   Future<void> removeMember(String token, String petId, String userId) async {
-    await _send('DELETE', '/pets/$petId/members/$userId', const {}, token: token);
+    await _send('DELETE', '/pets/$petId/members/$userId', const {},
+        token: token);
   }
 
   // ---------------------------------------------------------------- 内部

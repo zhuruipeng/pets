@@ -319,6 +319,16 @@ void main() {
         [now.millisecondsSinceEpoch]);
   });
 
+  test('revoked membership cancels notifications and prevents rescheduling', () async {
+    await reminders.createInterval(petId: pet.id, type: 'vaccine', title: 'Due',
+        everyDays: 30, firstAt: DateTime(2030, 1, 1));
+    await db.insert('members', {'id': 'removed', 'pet_id': pet.id, 'user_id': 'u1',
+      'role': 'editor', 'status': 'active', 'joined_at': 1, 'updated_at': 2, 'deleted_at': 2});
+    await container.read(appActionsProvider).refreshNotifications();
+    expect(notifications.resets, 1);
+    expect(notifications.scheduled, isEmpty);
+  });
+
   test(
       'late confirmation advances past elapsed slots without logging unadministered doses',
       () async {

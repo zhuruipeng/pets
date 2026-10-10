@@ -8,7 +8,7 @@ library;
 
 import 'dart:convert';
 
-import '../../core/species.dart';
+import '../core/species.dart';
 
 // ---------------------------------------------------------------- 转换助手
 

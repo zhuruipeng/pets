@@ -13,10 +13,30 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .models import Member, Pet, SyncChange
+
+
+# One transaction lock for every log writer. BIGSERIAL allocates before commit;
+# without serialization a later seq can become visible before an earlier seq.
+_SYNC_WRITE_LOCK = 0x50455453594E43
+
+
+def lock_sync_writes(session: Session) -> None:
+    """Serialize conflict reads and log allocation through transaction commit.
+
+    Production uses PostgreSQL READ COMMITTED. SQLite test databases already
+    serialize writes and do not provide PostgreSQL advisory locks.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    transaction = session.get_transaction()
+    if transaction is not None and session.info.get("sync_write_transaction") is transaction:
+        return
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SYNC_WRITE_LOCK})
+    session.info["sync_write_transaction"] = session.get_transaction()
 
 
 def record_change(
@@ -40,6 +60,7 @@ def record_change(
     updated_at 比大小决定跳不跳；若填服务端时间，离线补传的旧数据会被
     当成「刚刚发生」而覆盖掉本地的新编辑。
     """
+    lock_sync_writes(session)
     change = SyncChange(
         table_name=table_name,
         row_id=row_id,

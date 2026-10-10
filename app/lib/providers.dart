@@ -11,7 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart' show XFile;
 import 'package:uuid/uuid.dart';
-import '../services/share_helper.dart';
+import 'services/share_helper.dart';
 
 import 'core/region.dart';
 import 'core/l10n.dart';
@@ -413,7 +413,9 @@ class AppActions {
 
   Future<void> refreshNotifications() async {
     await _notify.cancelAll();
+    final userId = await _currentUserId();
     for (final pet in await _pets.listAll()) {
+      if (await ref.read(memberRepositoryProvider).roleFor(pet.id, userId) == null) continue;
       await _notify.rescheduleAll(await _reminders.listForPet(pet.id, onlyEnabled: true),
           petName: pet.name);
     }
@@ -1012,21 +1014,41 @@ class AppActions {
   Future<LocalUser> _finishLogin(AuthSession session) async {
     final engine = ref.read(syncEngineProvider);
 
-    await _users.adoptAccount(
+    await engine.saveSession(session, accountRegion: AppRegion.current.name,
+      prepareAccount: (txn) => _users.adoptAccountIn(txn,
       accountId: session.user.id,
       region: session.user.region ?? AppRegion.current.name,
       nickname: session.user.nickname,
       phone: session.user.phone,
       email: session.user.email,
-    );
-    await engine.saveSession(session, accountRegion: AppRegion.current.name);
+    ));
 
+    ref.read(activeWalkProvider.notifier).state = null;
+    ref.read(selectedPetIdProvider.notifier).state = null;
+    ref.invalidate(backupInventoryProvider);
+    ref.invalidate(petWalksProvider);
+    ref.invalidate(walkPointsProvider);
+    ref.invalidate(petExpensesProvider);
+    ref.invalidate(expenseSummaryProvider);
+    ref.invalidate(recordPhotosProvider);
+    ref.invalidate(recordDocumentsProvider);
+    ref.invalidate(petPhotosProvider);
+    ref.invalidate(petDocumentsProvider);
+    ref.invalidate(careEventsProvider);
     ref.invalidate(currentUserProvider);
+    ref.invalidate(petRoleProvider);
+    ref.invalidate(petRecordsProvider);
+    ref.invalidate(petRemindersProvider);
+    ref.invalidate(petMembersProvider);
+    ref.invalidate(careLogsProvider);
+    ref.invalidate(upcomingRemindersProvider);
+    ref.invalidate(weightSeriesProvider);
     ref.invalidate(petsProvider);
     ref.invalidate(myInvitesProvider);
 
     // 登录后立刻同步一次：把本地已有数据推上去、把账号里已有的拉下来。
     // 失败也不影响登录成功 —— 用户在设置页能看到「上次同步」是错的。
+    await refreshNotifications();
     await ref.read(syncControllerProvider.notifier).runSync();
 
     return (await _users.current())!;
@@ -1244,7 +1266,8 @@ class SyncController extends Notifier<SyncStatus> {
       lastSyncAt: await _engine.lastSyncAt(),
       pending: await _engine.pendingCount(),
     );
-    // Shared records must update immediately after a manual sync.
+    // Shared records and the canonical user profile update after manual sync.
+    ref.invalidate(currentUserProvider);
     ref.invalidate(petsProvider);
     ref.invalidate(petRecordsProvider);
     ref.invalidate(petRemindersProvider);

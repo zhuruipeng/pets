@@ -23,6 +23,7 @@ from .changes import (
     active_member_pet_ids,
     has_any_member,
     latest_change,
+    lock_sync_writes,
     member_payload,
     record_change,
     resolve_role,
@@ -152,8 +153,16 @@ def _action_for(change: PushChangeIn) -> str:
     return _TABLE_ACTION.get(change.table, "write_data")
 
 
-def _rejected(change: PushChangeIn, result: str) -> dict:
-    return {"table": change.table, "row_id": change.row_id, "result": result}
+def _rejected(change: PushChangeIn, result: str, current: SyncChange | None = None) -> dict:
+    response = {"table": change.table, "row_id": change.row_id, "result": result}
+    # Only authorized stale writes return a canonical snapshot. Forbidden
+    # responses must never disclose data from another user's pet.
+    if current is not None:
+        response["canonical"] = {
+            "seq": current.seq, "table": current.table_name, "row_id": current.row_id,
+            "op": current.op, "payload": dict(current.payload), "changed_at": current.changed_at,
+        }
+    return response
 
 
 # pets 实体表需要哪些列。落实体表时按这份白名单从 payload 里取，
@@ -292,6 +301,7 @@ def sync_push(
     返回里 rejected 与 applied 一样重要：客户端要据此清 outbox ——
     stale 也删（服务端已有更新的版本，本地这条推不上去，留着只会卡住队列）。
     """
+    lock_sync_writes(session)
     applied: list[dict] = []
     rejected: list[dict] = []
     valid_changes: list[PushChangeIn] = []
@@ -361,7 +371,7 @@ def sync_push(
             # A scheduled occurrence is completed once, even if two offline
             # devices submit it. Preserve the first accepted caregiver and dose.
             if current is not None:
-                rejected.append(_rejected(change, "stale"))
+                rejected.append(_rejected(change, "stale", current))
                 continue
             record_id = change.payload.get("record_id")
             record = latest_change(session, "records", record_id) if isinstance(record_id, str) else None
@@ -390,7 +400,7 @@ def sync_push(
                     if (current.op == "delete" or type(original.get("created_at")) is not int
                             or change.payload.get("created_at") != original["created_at"]
                             or change.payload.get("created_by") != original.get("created_by")):
-                        rejected.append(_rejected(change, "stale"))
+                        rejected.append(_rejected(change, "stale", current))
                         continue
                 else:
                     dose_details = {**details, "actor_name": user.nickname}
@@ -402,7 +412,7 @@ def sync_push(
                 continue
         current_ts = current.changed_at if current is not None else None
         if not is_newer(change.updated_at, current_ts):
-            rejected.append(_rejected(change, "stale"))
+            rejected.append(_rejected(change, "stale", current))
             continue
 
         # payload 原样存：walk_sessions 的轨迹点就在 payload["points"] 里，
@@ -496,9 +506,9 @@ def sync_pull(
     if rows:
         next_since = rows[-1].seq
     else:
-        # 没有变更时也要推进游标，否则客户端会永远从旧位置重拉，
-        # 每次同步都白跑一趟。
-        next_since = int(session.execute(select(func.max(SyncChange.seq))).scalar() or since)
+        # Advance only past rows actually examined. A separate MAX query could
+        # see a writer that committed after this empty page and skip it forever.
+        next_since = since
 
     # 语义是「可能还有」：被可见性过滤掉的行也占用了一页的名额，
     # 所以用「原始页是否取满」判断，客户端据此继续拉即可。

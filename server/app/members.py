@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .auth import current_user
-from .changes import member_payload, record_change, resolve_role
+from .changes import lock_sync_writes, member_payload, record_change, resolve_role
 from .db import get_session
 from .models import Member, Pet, SyncChange, User
 from .sync_logic import normalize_target, now_ms, role_can
@@ -50,6 +50,7 @@ def invite_member(
     session: Session = Depends(get_session),
 ) -> dict:
     """邀请一个已注册用户共养。"""
+    lock_sync_writes(session)
     _require_role(session, pet_id, user, "invite")
 
     target = normalize_target(payload.channel, payload.target)
@@ -181,6 +182,7 @@ def accept_invite(
     session: Session = Depends(get_session),
 ) -> dict:
     """接受邀请：pending → active。"""
+    lock_sync_writes(session)
     member = session.get(Member, invite_id)
     if member is None or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="invite not found")
@@ -232,6 +234,7 @@ def remove_member(
     session: Session = Depends(get_session),
 ) -> dict:
     """移除成员。只有 owner 能做（协议权限矩阵）。"""
+    lock_sync_writes(session)
     _require_role(session, pet_id, user, "invite")
 
     member = (

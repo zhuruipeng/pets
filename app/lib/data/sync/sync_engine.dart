@@ -10,6 +10,7 @@
 /// 3. **被拒的变更也要从 outbox 删掉**（否则队列永远卡在那一条上）
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 // 注意这里引的是**接口包**（sqflite_common），不是 package:sqflite。
@@ -110,6 +111,24 @@ class SyncEngine {
 
   /// 防止并发同步：定时器、前台恢复、手动按钮可能同时触发。
   bool _running = false;
+  Completer<void>? _syncFinished;
+  int _sessionChanges = 0;
+  Future<void> _sessionTail = Future.value();
+
+  Future<void> _changeSession(Future<void> Function() action) async {
+    _sessionChanges++;
+    final previous = _sessionTail;
+    final finished = Completer<void>();
+    _sessionTail = finished.future;
+    try {
+      await previous;
+      if (_running) await _syncFinished!.future;
+      await action();
+    } finally {
+      _sessionChanges--;
+      finished.complete();
+    }
+  }
 
   Database get _db => _dbProvider();
 
@@ -159,6 +178,18 @@ class SyncEngine {
 
   Future<String?> _readToken() async {
     if (_tokenLoaded) return _cachedToken;
+    // SQLite and the platform key store cannot share a transaction. If the
+    // process stopped between their commits, discard ambiguous credentials
+    // before any account's working set can be uploaded with another token.
+    if (await _meta('session_pending') != null) {
+      await _tokens.clear();
+      await _setMeta(_legacyTokenKey, null);
+      // Keep the journal until a fresh login commits. Platform clear() can
+      // fail silently, so a restart must continue to reject the old token.
+      _cachedToken = null;
+      _tokenLoaded = true;
+      return null;
+    }
     var value = await _tokens.read();
     value ??= await _migrateLegacyToken();
     _cachedToken = value;
@@ -219,41 +250,77 @@ class SyncEngine {
   /// （会抛 [TokenStoreException]），那时元数据要是已经写下去了，
   /// 库里就留下「有 account_id、没有可用令牌」的半截状态，
   /// 下次启动会以「未登录但有账号」的样子出现。
-  Future<void> saveSession(AuthSession session,
-      {required String accountRegion}) async {
-    await _tokens.write(session.token);
-    _cachedToken = session.token;
-    _tokenLoaded = true;
-    // 顺手再清一次废弃的明文行。**不能省**：如果这台机器当初迁移失败过，
-    // 密钥库里没值、库里留着一条明文；用户现在重新登录，密钥库有了值，
-    // 那条明文就再也不会被读、也就永远删不掉了 —— 等于明文一直躺在库里。
-    await _setMeta(_legacyTokenKey, null);
-    await _setMeta('account_id', session.user.id);
-    await _setMeta('account_region', accountRegion);
-  }
+  Future<void> saveSession(
+    AuthSession session, {
+    required String accountRegion,
+    Future<void> Function(DatabaseExecutor txn)? prepareAccount,
+  }) =>
+      _changeSession(() async {
+        final previousToken = await _readToken();
+        await _setMeta('session_pending', session.user.id);
+        var tokenWritten = false;
+        try {
+          await _tokens.write(session.token);
+          tokenWritten = true;
+          await _db.transaction((txn) async {
+            if (prepareAccount != null) await prepareAccount(txn);
+            await txn.delete('sync_meta',
+                where: 'key = ?', whereArgs: [_legacyTokenKey]);
+            for (final entry in {
+              'account_id': session.user.id,
+              'account_region': accountRegion
+            }.entries) {
+              await txn.insert(
+                  'sync_meta', {'key': entry.key, 'value': entry.value},
+                  conflictAlgorithm: ConflictAlgorithm.replace);
+            }
+            await txn.delete('sync_meta',
+                where: 'key = ?', whereArgs: ['session_pending']);
+          });
+        } catch (_) {
+          try {
+            if (tokenWritten) {
+              if (previousToken == null) {
+                await _tokens.clear();
+              } else {
+                await _tokens.write(previousToken);
+              }
+            }
+            if (previousToken != null) {
+              await _setMeta('session_pending', null);
+            }
+          } catch (_) {
+            // Leave the journal for the next launch and fail closed now.
+            _cachedToken = null;
+            _tokenLoaded = true;
+            rethrow;
+          }
+          rethrow;
+        }
+        _cachedToken = session.token;
+        _tokenLoaded = true;
+      });
 
-  Future<void> signOut() async {
-    final t = await _readToken();
-    if (t != null) {
-      try {
-        await _api.logout(t);
-      } catch (_) {
-        // 服务端不可达也要允许本地退出 —— 否则用户被卡在登录态里出不来。
-        // 本地清干净后，万一服务端那份令牌还活着，它也只是个用不到的孤儿：
-        // 客户端手里没有它了。
-      }
-    }
-    // 只清登录态，**不动 outbox 与 last_seq**：
-    // 下次登录同一个账号能接着推，不用从头再来。
-    await _clearToken();
-  }
+  Future<void> signOut() => _changeSession(() async {
+        final t = await _readToken();
+        if (t != null) {
+          try {
+            await _api.logout(t);
+          } catch (_) {
+            // Offline sign-out still clears this device's credentials.
+          }
+        }
+        // Preserve this account's working set for same-account reconnection.
+        await _clearToken();
+      });
 
   // ---------------------------------------------------------------- 同步
 
   /// 跑一次完整同步。任何异常都被兜住并写进 [SyncReport.error]。
   Future<SyncReport> sync() async {
-    if (_running) return SyncReport.skipped;
+    if (_running || _sessionChanges > 0) return SyncReport.skipped;
     _running = true;
+    _syncFinished = Completer<void>();
     try {
       final t = await token();
       if (t == null || t.isEmpty) return SyncReport.skipped;
@@ -288,6 +355,7 @@ class SyncEngine {
       return SyncReport(pushed: 0, pulled: 0, rejected: 0, error: e);
     } finally {
       _running = false;
+      _syncFinished!.complete();
     }
   }
 
@@ -341,6 +409,7 @@ class SyncEngine {
         ...result.rejected.map((r) => r.change)
       ];
       await _db.transaction((txn) async {
+        final cleared = <String>{};
         for (final c in acknowledged) {
           final pending = await txn.query('sync_outbox',
               where: 'table_name = ? AND row_id = ?',
@@ -354,7 +423,20 @@ class SyncEngine {
             await txn.delete('sync_outbox',
                 where: 'table_name = ? AND row_id = ?',
                 whereArgs: [c.table, c.rowId]);
+            cleared.add('${c.table}#${c.rowId}');
           }
+        }
+        if (result.canonical.isNotEmpty) {
+          await txn.insert('sync_meta', {'key': 'applying', 'value': '1'},
+              conflictAlgorithm: ConflictAlgorithm.replace);
+          for (final c in result.canonical) {
+            if (kSyncableTables.contains(c.table) &&
+                cleared.contains('${c.table}#${c.rowId}')) {
+              await _applyOne(txn, c, authoritative: true);
+            }
+          }
+          await txn
+              .delete('sync_meta', where: 'key = ?', whereArgs: ['applying']);
         }
       });
 
@@ -431,7 +513,8 @@ class SyncEngine {
           await _api.pull(token: token, since: since, limit: _pullLimit);
 
       // 传入本批的 nextSince：应用与游标推进同一个事务，要么都成、要么都退。
-      appliedCount += await _applyRemote(result.changes, advanceSeq: result.nextSince);
+      appliedCount +=
+          await _applyRemote(result.changes, advanceSeq: result.nextSince);
 
       since = result.nextSince;
       if (!result.hasMore) break;
@@ -462,8 +545,7 @@ class SyncEngine {
       }
 
       // 游标与应用同事务：任何一条应用失败都会连游标一起回滚。
-      // 即使本页没有变更也要落 —— 服务端在空页时返回当前最大 seq，
-      // 存下来下次就不用从头扫。
+      // 空页仍保存服务端返回的已扫描位置；原始空页保持原游标。
       if (advanceSeq != null) {
         await txn.insert(
           'sync_meta',
@@ -477,7 +559,8 @@ class SyncEngine {
     return n;
   }
 
-  Future<bool> _applyOne(DatabaseExecutor txn, SyncChange c) async {
+  Future<bool> _applyOne(DatabaseExecutor txn, SyncChange c,
+      {bool authoritative = false}) async {
     final payload = Map<String, dynamic>.from(c.payload);
     payload.remove('points'); // 轨迹点是子资源，单独处理
     if (c.table == 'attachments') payload.remove('pet_id');
@@ -502,16 +585,33 @@ class SyncEngine {
     // The server keeps the first completion of an occurrence. Its canonical
     // timestamp can be older than this device's duplicate offline completion.
     final isCompletion = c.table == 'reminder_logs' ||
-        (c.table == 'records' && c.rowId.startsWith('dose_') && c.op == 'upsert');
-    final pending = isCompletion ? await txn.query('sync_outbox',
-        where: 'table_name = ? AND row_id = ?', whereArgs: [c.table, c.rowId], limit: 1) : null;
-    final canonicalCompletion = isCompletion && pending!.isEmpty;
-
-    // 远端不比本地新就跳过。**不抛异常、不记录**：这是正常情况
-    // （同一行两处都改过，本地那份更新）。
-    if (!canonicalCompletion && localUpdatedAt != null &&
+        (c.table == 'records' &&
+            c.rowId.startsWith('dose_') &&
+            c.op == 'upsert');
+    final pending = await txn.query('sync_outbox',
+        where: 'table_name = ? AND row_id = ?',
+        whereArgs: [c.table, c.rowId],
+        limit: 1);
+    final canonicalCompletion = isCompletion && pending.isEmpty;
+    final account = c.table == 'members' && c.isDelete
+        ? await txn.query('sync_meta',
+            where: 'key = ?', whereArgs: ['account_id'], limit: 1)
+        : const <Map<String, Object?>>[];
+    final ownRevocation =
+        account.isNotEmpty && payload['user_id'] == account.first['value'];
+    if (ownRevocation) {
+      await txn.delete('sync_outbox',
+          where: 'pet_id = ?', whereArgs: [payload['pet_id']]);
+    }
+    // Equal timestamps converge to the server's winner once the local edit is
+    // acknowledged. An in-flight new edit remains protected by its outbox row.
+    if (!ownRevocation &&
+        !canonicalCompletion &&
+        !(authoritative && pending.isEmpty) &&
+        localUpdatedAt != null &&
         remoteUpdatedAt != null &&
-        remoteUpdatedAt <= localUpdatedAt) {
+        (remoteUpdatedAt < localUpdatedAt ||
+            (remoteUpdatedAt == localUpdatedAt && pending.isNotEmpty))) {
       return false;
     }
 
@@ -526,17 +626,30 @@ class SyncEngine {
     // 这里把墓碑落成「写入 deleted_at 的最小更新」，与 payload 内容解耦。
     if (c.isDelete) {
       final stamp = remoteUpdatedAt ?? DateTime.now().millisecondsSinceEpoch;
+      payload['deleted_at'] = payload['deleted_at'] ?? stamp;
+      payload['updated_at'] = remoteUpdatedAt ?? stamp;
       if (local.isEmpty) {
-        // 本地没有这行：补一条最小墓碑，否则下次又会被当作「新行」拉回来。
+        payload['id'] = c.rowId;
+        // Full snapshots can seed a tombstone (including a first-seen
+        // membership revocation). Thin deletes of absent rows are already
+        // satisfied; inserting only an id would violate required columns.
+        final columns = await txn.rawQuery('PRAGMA table_info(${c.table})');
+        if (columns.any((column) =>
+            column['notnull'] == 1 &&
+            column['dflt_value'] == null &&
+            payload[column['name']] == null)) {
+          return false;
+        }
         await txn.insert(
           c.table,
-          {'id': c.rowId, 'deleted_at': stamp},
+          payload,
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       } else {
+        payload.remove('id');
         await txn.update(
           c.table,
-          {'deleted_at': stamp},
+          payload,
           where: 'id = ?',
           whereArgs: [c.rowId],
         );

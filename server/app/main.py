@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from . import auth, feedback, members, sync, unified
 from .config import Settings, get_settings
-from .changes import active_member_pet_ids, member_payload, pet_payload, record_change
+from .changes import lock_sync_writes, active_member_pet_ids, member_payload, pet_payload, record_change
 from .db import get_session, init_db
 from .models import Member, Pet, User
 
@@ -329,6 +329,7 @@ def create_pet(
     owner: str | None = Query(default=None, description="当前用户 id（兼容旧客户端）"),
     user: User = Depends(auth.current_user),
 ) -> PetOut:
+    lock_sync_writes(session)
     if owner is not None and owner != user.id:
         raise HTTPException(status_code=403, detail="forbidden")
     now = _now_ms()
@@ -366,6 +367,7 @@ def update_pet(
     session: Session = Depends(get_session),
     user: User = Depends(auth.current_user),
 ) -> PetOut:
+    lock_sync_writes(session)
     members._require_role(session, pet_id, user, "edit_profile")
     pet = session.get(Pet, pet_id)
     if pet is None or pet.deleted_at is not None:
@@ -402,6 +404,7 @@ def update_pet(
 def delete_pet(pet_id: str, session: Session = Depends(get_session),
                user: User = Depends(auth.current_user)):
     """软删除。同步场景下硬删会丢数据，务必保持这个行为。"""
+    lock_sync_writes(session)
     members._require_role(session, pet_id, user, "delete_pet")
     pet = session.get(Pet, pet_id)
     if pet is None:

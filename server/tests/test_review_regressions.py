@@ -393,3 +393,53 @@ def test_profile_patch_keeps_normalized_identifiers_and_updates_contact(client, 
     assert response.status_code == 200
     assert db.get(User, "owner").email == "owner@example.com"
     assert db.get(User, "owner").nickname == "New"
+
+
+@pytest.mark.parametrize("timestamp", [100, 99])
+def test_stale_response_contains_authoritative_snapshot(db, timestamp):
+    owner = db.get(User, "owner")
+    winner = PushChangeIn(table="records", row_id="tie", updated_at=100,
+                          payload={"pet_id": "pet", "note": "winner"})
+    sync_push(PushIn(changes=[winner]), user=owner, session=db)
+    loser = winner.model_copy(update={"updated_at": timestamp,
+                                     "payload": {"pet_id": "pet", "note": "loser"}})
+    result = sync_push(PushIn(changes=[loser]), user=owner, session=db)
+    canonical = result["rejected"][0]["canonical"]
+    assert canonical["payload"]["note"] == "winner"
+    assert canonical["changed_at"] == 100
+    assert canonical["table"] == "records" and canonical["row_id"] == "tie"
+    assert canonical["seq"] > 0
+    denied = sync_push(PushIn(changes=[loser]), user=db.get(User, "outsider"), session=db)
+    assert "canonical" not in denied["rejected"][0]
+
+
+def test_empty_pull_does_not_skip_a_commit_between_page_and_visibility(db, monkeypatch):
+    from app import sync
+    original = sync.active_member_pet_ids
+    def commit_after_page(session, user_id):
+        session.add(SyncChange(table_name="records", row_id="late", op="upsert",
+                               pet_id="pet", user_id="owner", changed_at=100,
+                               payload={"id": "late", "pet_id": "pet"}))
+        session.commit()
+        return original(session, user_id)
+    monkeypatch.setattr(sync, "active_member_pet_ids", commit_after_page)
+    owner = db.get(User, "owner")
+    page = sync_pull(since=0, limit=200, table=None, user=owner, session=db)
+    assert page["changes"] == [] and page["next_since"] == 0
+    monkeypatch.setattr(sync, "active_member_pet_ids", original)
+    next_page = sync_pull(since=page["next_since"], limit=200, table=None, user=owner, session=db)
+    assert next_page["changes"][0]["row_id"] == "late"
+
+
+def test_removed_member_receives_only_own_revocation(db):
+    owner, editor = db.get(User, "owner"), db.get(User, "editor")
+    sync_push(PushIn(changes=[PushChangeIn(table="records", row_id="secret", updated_at=100,
+              payload={"pet_id": "pet", "note": "private"})]), user=owner, session=db)
+    remove_member("pet", "editor", user=owner, session=db)
+    remove_member("pet", "viewer", user=owner, session=db)
+    page = sync_pull(since=0, limit=200, table=None, user=editor, session=db)
+    assert len(page["changes"]) == 1
+    tombstone = page["changes"][0]
+    assert tombstone["table"] == "members" and tombstone["op"] == "delete"
+    assert tombstone["payload"]["user_id"] == "editor"
+    assert tombstone["payload"]["deleted_at"] is not None
