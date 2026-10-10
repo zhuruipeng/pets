@@ -309,8 +309,26 @@ class ReminderRepository {
   }
 
   /// 完成率 = 已完成的到期项 / 全部到期项。这是 MVP 的生死线指标之一。
+  ///
+  /// ⚠️ **必须排除软删日志**（2026-10-10 代码审查 P1 修）。
+  ///
+  /// 原先这条查询没有任何 `deleted_at` 条件，而同一个文件里其他所有日志
+  /// 查询（`logsForPet`、`_nextUncompleted`、`tick` 的去重）**都带**
+  /// `deleted_at IS NULL`。口径不一致的后果很具体：
+  ///
+  /// - 用户把一条给药记录删掉（`record_repository.softDelete` 只改 records，
+  ///   日志行原样留着）⇒ 完成率分子分母**都不减**，界面显示「8/10 已完成」，
+  ///   但时间线上那条记录已经没了。
+  /// - 更糟的是 `_nextUncompleted` 认 `deleted_at`，于是**同一个到期时刻**
+  ///   在一处算「已完成」、在另一处算「未完成」—— 排期会被跳过，但统计说
+  ///   已经做过了，两个功能互相打架。
+  ///
+  /// 两条查询口径统一到 `deleted_at IS NULL` 之后，删记录 = 撤销完成，
+  /// 完成率会如实回落。
   Future<double> completionRate({DateTime? since}) async {
-    final where = <String>[];
+    // 软删条件放在 WHERE 里而不是拼进 SELECT：参数顺序要跟占位符一一对应，
+    // 分开写容易错位（`since` 那条是带参数的）。
+    final where = <String>['deleted_at IS NULL'];
     final args = <Object?>[];
     if (since != null) {
       where.add('due_at >= ?');
@@ -321,7 +339,7 @@ class ReminderRepository {
       'SELECT COUNT(*) AS total,'
       ' SUM(CASE WHEN done_at IS NOT NULL THEN 1 ELSE 0 END) AS done'
       ' FROM $_logs'
-      '${where.isEmpty ? '' : ' WHERE ${where.join(' AND ')}'}',
+      ' WHERE ${where.join(' AND ')}',
       args,
     );
     final total = (rows.first['total'] as num?)?.toInt() ?? 0;

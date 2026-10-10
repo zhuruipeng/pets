@@ -21,18 +21,25 @@
 from __future__ import annotations
 
 import json
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .auth import DEFAULT_NICKNAME, user_out
+from .auth import (
+    CODE_HOURLY_LIMIT,
+    DEFAULT_NICKNAME,
+    _client_ip,
+    _prune_tokens,
+    user_out,
+)
 from .config import Settings, get_settings
 from .db import get_session
 from .models import AuthToken, User
@@ -45,6 +52,24 @@ ME_PATH = "/api/auth/me"
 # 请求官网的超时。取 5 秒：换票是用户在登录界面上等着的**同步**操作，
 # 卡太久不如早点告诉他「服务暂时不可用，稍后再试」。
 DEFAULT_TIMEOUT_SECONDS = 5.0
+
+# 换票接口每 IP 每小时的调用上限（2026-10-10 代码审查 P1 补）。
+#
+# 为什么必须限：这个接口**自己不校验任何凭据** —— 它把 `unified_token`
+# 原样转发给官网，由官网判断有效性。于是它天然是一个「拿我们当代理去
+# 试探官网」的放大器：攻击者可以拿随机令牌刷，每次都会让我们的两个
+# gunicorn worker 各占一条出网连接 + 一个 5 秒超时窗口。
+#
+# 两个 worker 意味着并发只有 2，几十个并发请求就能把登录接口整体堵死
+# （换票是同步阻塞的 urllib 调用，不是 async），这就是一个低成本的
+# 拒绝服务入口，而且被当成攻击源的是**我们的服务器 IP**，不是攻击者的。
+#
+# 额度取 20：正常用户一天换票不了几次（换手机、重装、多设备），
+# 20 次/小时对一家人共用出口 IP 也够。与短信验证码用同一个常量，
+# 因为两者的攻击面同源（都是「无凭据的对外转发」）。
+UNIFIED_HOURLY_LIMIT = CODE_HOURLY_LIMIT
+
+ONE_HOUR_MS = 3600 * 1000
 
 
 class UnifiedAccountError(Exception):
@@ -188,9 +213,31 @@ class UnifiedExchangeIn(BaseModel):
     device_id: str | None = Field(default=None, max_length=64)
 
 
+# 按 IP 的滑动窗口：{ip: [时间戳, ...]}，时间戳递增。
+_RATE_WINDOW: dict[str, list[int]] = {}
+_RATE_LOCK = threading.Lock()
+
+
+def _enforce_unified_rate_limit(ip: str) -> None:
+    """按 IP 的滑动窗口限流。见调用处的长注释（讲清了为什么不用落库计数）。"""
+    now = now_ms()
+    window_start = now - ONE_HOUR_MS
+    with _RATE_LOCK:
+        stamps = _RATE_WINDOW.setdefault(ip, [])
+        # 只留窗口内的；stamps 是递增 append 的，从头删即可。
+        while stamps and stamps[0] <= window_start:
+            stamps.pop(0)
+        if len(stamps) >= UNIFIED_HOURLY_LIMIT:
+            raise HTTPException(
+                status_code=429, detail="too many token exchanges from this address"
+            )
+        stamps.append(now)
+
+
 @router.post("/auth/unified")
 def exchange_unified_token(
     payload: UnifiedExchangeIn,
+    request: Request,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> dict:
@@ -203,6 +250,18 @@ def exchange_unified_token(
         # 能力不存在（而不是「你没权限」），所以 404 比 403 准确：
         # 海外节点上这个接口就是没接，客户端不该把它当成一个可重试的失败。
         raise HTTPException(status_code=404, detail="unified account not enabled")
+
+    # ⚠️ 限流必须在**任何出网动作之前**（2026-10-10 代码审查 P1 补）。
+    #
+    # 这个接口是「无凭据的对外转发」：拿任意字符串都能让我们去请求官网。
+    # 放在 `fetch_unified_account` 之后限流等于没限 —— 请求已经发出去了，
+    # 攻击者要消耗的出网连接和 worker 时间都已经消耗掉了。
+    #
+    # 为什么不用短信那套「落库计数」：换票不产生任何可计数的数据库行，
+    # 失败的尝试更是一条都不该落库（那是另一种写入放大），专门为限流建表
+    # 成本高于收益。代价是**多 worker 时额度按 worker 翻倍**、重启清零 ——
+    # 够用来防「单点刷爆」，不够用来精确计费。
+    _enforce_unified_rate_limit(_client_ip(request))
 
     try:
         account = fetch_unified_account(
@@ -238,6 +297,9 @@ def exchange_unified_token(
 
     raw_token = new_token()
     expires_at = now + settings.token_ttl_days * 24 * 60 * 60 * 1000
+    # ⚠️ 令牌清理要和 auth.py 的两条签发路径保持一致（2026-10-10 P1）。
+    # 三处签发如果有一处漏了，那条路径上 `auth_tokens` 就会只增不减。
+    _prune_tokens(session, user.id)
     session.add(
         AuthToken(
             token=hash_token(raw_token),

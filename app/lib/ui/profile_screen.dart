@@ -1726,14 +1726,24 @@ class _RecordsTab extends ConsumerWidget {
         }
         final sorted = [...list]
           ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpace.page,
-            AppSpace.gapL,
-            AppSpace.page,
-            AppSpace.pageBottom,
-          ),
-          children: [RecordTimeline(records: sorted)],
+        // ⚠️ [RecordTimeline] 是 sliver（2026-10-10 P1 改），不能再塞进
+        // `ListView(children:)`。这里的 padding 拆成 SliverPadding 的两端：
+        // 顶部 gapL 由外层 CustomScrollView 的 padding 给，底部由这里补。
+        return CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.page,
+                AppSpace.gapL,
+                AppSpace.page,
+                0,
+              ),
+              sliver: RecordTimeline(records: sorted),
+            ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: AppSpace.pageBottom),
+            ),
+          ],
         );
       },
     );

@@ -14,7 +14,7 @@ import math
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -60,20 +60,76 @@ _TABLE_ACTION = {
 PULL_DEFAULT_LIMIT = 200
 PULL_MAX_LIMIT = 500
 
+# push 的规模上限（2026-10-10 代码审查 P1 补）。
+#
+# 原先 `changes` 是裸的 `list[PushChangeIn]`，一条变更的 `payload` 也没有
+# 任何约束 —— 一个登录用户可以 POST 一个几百 MB 的 JSON，服务器要完整
+# 读进内存、反序列化成成百上千个 Pydantic 对象、再逐条进 LWW 比较。
+# 免费额度级别的资源耗尽，而且**不需要任何特殊权限**。
+#
+# 上限怎么定的：
+# - `PUSH_MAX_CHANGES = 500`：客户端 `SyncEngine._pushBatch` 是 200，
+#   给到 500 留出余量（老客户端、未来的批量导入），同时把单次请求的
+#   行数钉死在可控范围。超了会被 FastAPI 直接 422，不会进业务逻辑。
+# - `PUSH_MAX_PAYLOAD_BYTES = 512 * 1024`：单行快照最大 512KB。
+#   已知最大的合法 payload 是 `walk_sessions.points`（一条会话的整段轨迹）。
+#   两小时的遛狗按 5 秒一点算约 1440 点，每点约 40 字节 ⇒ 约 60KB，
+#   512KB 有 8 倍余量。真正离谱的轨迹应该分片或另走接口，而不是靠
+#   无限大的单行快照硬塞。
+#
+# ⚠️ 这两个值必须**大于等于**客户端实际会发的量，否则正常同步会开始
+# 报 422 —— 改客户端 `_pushBatch` 时同步改这里（见 `docs/同步协议.md`）。
+PUSH_MAX_CHANGES = 500
+PUSH_MAX_PAYLOAD_BYTES = 512 * 1024
+
+# 其余自由文本字段的长度上限。这些列在库里是 Text，不约束不会报错，
+# 只会静默吃掉内存和磁盘。取值与 REST 路径（main.PetIn）对齐。
+_MAX_ROW_ID = 128
+_MAX_TEXT = 4096
+
 
 class PushChangeIn(BaseModel):
-    table: str
-    row_id: str
-    op: str = "upsert"
+    table: str = Field(max_length=32)
+    row_id: str = Field(min_length=1, max_length=_MAX_ROW_ID)
+    op: str = Field(default="upsert", max_length=16)
     # 客户端本地的 LWW 时间戳。服务端不信任它的「真实性」，但必须用它做比较：
     # 换成服务端接收时间会把离线补传的旧数据判成新数据。
     updated_at: int
     payload: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("payload")
+    @classmethod
+    def _payload_within_budget(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """把单行快照的大小按住。
+
+        在**解析后**再序列化一次量体积，比在路由里量更早、也更可靠 ——
+        路由里拿到的已经是解析完的对象，那时内存早就吃进去了。
+        用 `separators` 去掉多余空格，与客户端实际发送形态接近。
+
+        `default=str` 兜住 datetime 这类不可直接序列化的值：这些值本来
+        也会被后面 `json.dumps` 干掉，这里只需量个大概。
+        """
+        try:
+            size = len(
+                json.dumps(value, ensure_ascii=False, default=str,
+                           separators=(",", ":")).encode("utf-8")
+            )
+        except (TypeError, ValueError):
+            # 量不出来（畸形结构）就不在这里拦，交给后续逻辑按 invalid 拒。
+            return value
+        if size > PUSH_MAX_PAYLOAD_BYTES:
+            raise ValueError(
+                f"payload too large: {size} bytes > {PUSH_MAX_PAYLOAD_BYTES}"
+            )
+        return value
+
 
 class PushIn(BaseModel):
     device_id: str | None = Field(default=None, max_length=64)
-    changes: list[PushChangeIn] = Field(default_factory=list)
+    # max_length 作用在**列表长度**上（Pydantic v2 对 list 支持），
+    # 所以这一行就挡住了「一次塞十万条变更」。
+    changes: list[PushChangeIn] = Field(default_factory=list,
+                                        max_length=PUSH_MAX_CHANGES)
 
 
 def _pet_id_of(change: PushChangeIn) -> str | None:

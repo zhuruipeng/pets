@@ -99,35 +99,70 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
                     )
                   : Stack(
                       children: [
-                        ListView(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpace.page,
-                            AppSpace.gapXs,
-                            AppSpace.page,
-                            96,
-                          ),
-                          children: [
-                            // 搜索时不画曲线 —— 曲线是全量的，跟搜索结果不匹配，
-                            // 一起显示会让人误以为曲线也在跟着筛。
-                            if (!searching &&
-                                (filter == null || filter == RecordType.weight))
-                              WeightChartCard(petId: pet.id),
+                        // ⚠️ 必须用 CustomScrollView + SliverList，**不能**用
+                        // `ListView(children: [...])`（2026-10-10 P1 修）。
+                        //
+                        // 原先是 `ListView(children: [<曲线>, RecordTimeline(...)])`，
+                        // 而 `RecordTimeline` 内部把所有记录按天分组后一次性
+                        // 构建成嵌套的 `Column`。`ListView(children:)` 会把
+                        // **整个 children 列表**先建出来（它只是代理了滚动，
+                        // 不做 lazy），所以「N 条记录」等价于「N 个 Row widget
+                        // 在首帧全部 build」。
+                        //
+                        // 具体后果：养了两年、记了 3000 条的家庭（每天 4 条：
+                        // 喂食/体重/散步/备忘，两年就是约 2900 条）打开记录页
+                        // 会卡住几百毫秒到数秒，而且**内存里常驻全部 widget**。
+                        // 首屏可见的其实只有七八条。
+                        //
+                        // 改成 sliver 后由 viewport 按需构建。分组头（日期）
+                        // 和记录行都作为独立的 sliver child，滚动时自然回收。
+                        CustomScrollView(
+                          slivers: [
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpace.page,
+                                AppSpace.gapXs,
+                                AppSpace.page,
+                                0,
+                              ),
+                              // 曲线是固定高度的单块，不该被当成一个巨大的
+                              // 列表项参与懒加载计算，所以单独占一个 sliver。
+                              sliver: SliverList.list(
+                                children: [
+                                  // 搜索时不画曲线 —— 曲线是全量的，跟搜索结果
+                                  // 不匹配，一起显示会让人误以为曲线也在跟着筛。
+                                  if (!searching &&
+                                      (filter == null ||
+                                          filter == RecordType.weight))
+                                    WeightChartCard(petId: pet.id),
+                                ],
+                              ),
+                            ),
                             if (visible.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 48),
-                                child: Center(
-                                  child: Text(
-                                    searching
-                                        ? L.t('records.search.none')
-                                        : L.t('records.empty.title'),
-                                    style: const TextStyle(
-                                      color: AppColors.textSecondary,
+                              SliverFillRemaining(
+                                hasScrollBody: false,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 48),
+                                  child: Center(
+                                    child: Text(
+                                      searching
+                                          ? L.t('records.search.none')
+                                          : L.t('records.empty.title'),
+                                      style: const TextStyle(
+                                        color: AppColors.textSecondary,
+                                      ),
                                     ),
                                   ),
                                 ),
                               )
                             else
                               RecordTimeline(records: visible),
+                            // 底部留白：部分机型（带手势条）会把最后一条压在
+                            // 系统指示器下面。原先挂在 ListView 的 padding 上，
+                            // 拆成 sliver 后单独用一块占位补齐。
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 96),
+                            ),
                           ],
                         ),
                         Positioned(
@@ -546,6 +581,22 @@ class WeightChartCard extends ConsumerWidget {
 
 // ------------------------------------------------------------------ 时间线
 
+/// 记录时间线。**这是一个 sliver**，必须挂在 [CustomScrollView.slivers] 下。
+///
+/// 2026-10-10 从 `StatelessWidget`（返回 `Column`）改成 `StatelessWidget`
+/// 返回 `SliverMainAxisGroup`：
+///
+/// 原先它把所有记录分组后一次性构建成嵌套 `Column`。父级是
+/// `ListView(children: [...])`，而那个构造器**会把 children 全部建出来**
+/// （只代理滚动，不做懒加载），于是 2900 条记录 = 首帧 2900 个 widget。
+/// 首屏可见的只有七八条，剩下全是白烧的 CPU 和常驻内存。
+///
+/// 现在改成 sliver：viewport 只构建可见的那几条，滚出屏幕的立刻回收。
+/// **分组结构（日期头 + 一张卡片装当天所有行）保持不变** —— 这是刻意的，
+/// 因为卡片把同一天的行视觉上括在一起，是设计的一部分。
+/// 代价是「一天之内」的行仍然在同一个 sliver child 里，所以极端情况下
+/// （某一天记了 500 条）那一天的卡片还是会一次建完。这可以接受：
+/// 单日条目数天然是小数字，而「总条数」才是会随时间无限增长的那个维度。
 class RecordTimeline extends StatelessWidget {
   const RecordTimeline({super.key, required this.records});
 
@@ -562,33 +613,43 @@ class RecordTimeline extends StatelessWidget {
     // 体重差值：相邻两条体重相减，挂到后一条上。
     final deltas = _weightDeltas(records);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final entry in groups.entries) ...[
-          SectionHeader(entry.key),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpace.gapL,
-                vertical: AppSpace.gapXs,
+    // 每个「日期」是 sliver 列表里的一个 child：内部包含日期头 + 卡片。
+    // 用 SliverList.builder 才能真正懒加载 —— SliverList.list 会把
+    // children 列表先建好（那就退化成原来的问题了）。
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.page),
+      sliver: SliverList.builder(
+        itemCount: groups.length,
+        itemBuilder: (context, index) {
+          final entry = groups.entries.elementAt(index);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionHeader(entry.key),
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpace.gapL,
+                    vertical: AppSpace.gapXs,
+                  ),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < entry.value.length; i++) ...[
+                        if (i > 0) const RowDivider(),
+                        RecordRow(
+                          record: entry.value[i],
+                          weightDelta: deltas[entry.value[i].id],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-              child: Column(
-                children: [
-                  for (var i = 0; i < entry.value.length; i++) ...[
-                    if (i > 0) const RowDivider(),
-                    RecordRow(
-                      record: entry.value[i],
-                      weightDelta: deltas[entry.value[i].id],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ],
+            ],
+          );
+        },
+      ),
     );
   }
 

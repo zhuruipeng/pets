@@ -149,11 +149,58 @@ def verify_password(plain: str, hashed: str | None) -> bool:
         return False
 
 
+# 每个用户最多保留多少个「还有用」的令牌行（2026-10-10 代码审查 P1 补）。
+#
+# 问题：`auth_tokens` 原先**只增不减** —— 每次登录都插一行，登出只写
+# `revoked_at` 不删，过期也只是不认。一个人天天登录，一年就是 365 行，
+# 十年 3650 行；这张表还带一个 `idx_auth_tokens_user` 索引，所以
+# 每次 `_resolve_token` 的 `session.get(AuthToken, hash)` 虽然走主键，
+# 但表的体积和索引维护成本是无谓的。
+#
+# 保留 20 个活跃令牌：正常用户手上不会同时有 20 台设备。超出的按
+# 「已失效优先、其次最旧」清理，**不会踢掉正在用的设备**。
+#
+# ⚠️ 清理只在签发时顺带做（不是定时任务）：签发是低频动作，代价可以
+# 忽略；而引入定时任务要多一套调度和运维。代价是「一个用户彻底不登录
+# 了，他那堆令牌就永远留着」—— 但那种行的 `expires_at` 已经过期，
+# 不再构成安全面，只是占体积。真要清理，运维侧加一条 cron 即可。
+MAX_TOKENS_PER_USER = 20
+
+
+def _prune_tokens(session: Session, user_id: str) -> int:
+    """清掉该用户多余的令牌行，返回删除条数。
+
+    保留策略：按 `created_at` 从新到旧排序，**留下最新的
+    `MAX_TOKENS_PER_USER - 1` 行**（第 20 个位置留给即将签发的新令牌），
+    其余全部删除。
+
+    为什么不留「未过期优先」而要按时间硬删：一个用户手上同时有 20 个
+    未过期令牌，本身就说明这不是正常使用（正常人到不了 20 台设备）。
+    而且把「已撤销的排在新令牌前面」不会带来任何好处 —— 已撤销的行
+    本来就没有安全价值，留着只是占体积，不如按时间一刀切、逻辑单一。
+    """
+    stale = session.execute(
+        select(AuthToken)
+        .where(AuthToken.user_id == user_id)
+        .order_by(AuthToken.created_at.desc())
+        .offset(MAX_TOKENS_PER_USER - 1)
+    ).scalars().all()
+
+    for row in stale:
+        session.delete(row)
+    return len(stale)
+
+
 def _issue_token(
     session: Session, user: User, device_id: str | None, settings: Settings
 ) -> dict:
-    """给 user 签发一个新令牌，返回与 verify_code 一致的响应体。"""
+    """给 user 签发一个新令牌，返回与 verify_code 一致的响应体。
+
+    所有签发路径（验证码登录、密码登录、CN 区官网换票）都要走这里 ——
+    走别的路会绕过令牌清理，让 `auth_tokens` 重新变成只增不减。
+    """
     now = now_ms()
+    _prune_tokens(session, user.id)
     raw_token = new_token()
     expires_at = now + settings.token_ttl_days * 24 * 60 * 60 * 1000
     session.add(
@@ -528,6 +575,7 @@ def verify_code(
 
     raw_token = new_token()
     expires_at = now + settings.token_ttl_days * 24 * 60 * 60 * 1000
+    _prune_tokens(session, user.id)
     session.add(
         AuthToken(
             token=hash_token(raw_token),

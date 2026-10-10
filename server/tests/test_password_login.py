@@ -81,6 +81,10 @@ class TestPasswordLogin:
         user = _user()
         user.password_hash = hash_password("secret123")
         session.execute.return_value.scalars.return_value.first.return_value = user
+        # 签发前会跑一次令牌清理（`_prune_tokens`），它走 `.all()`。
+        # Mock 默认返回的 Mock 不可迭代，这里显式给空列表 —— 表示
+        # 「这个用户手上还没有多余令牌」，是签发的正常路径。
+        session.execute.return_value.scalars.return_value.all.return_value = []
         settings = Mock()
         settings.token_ttl_days = 30
 

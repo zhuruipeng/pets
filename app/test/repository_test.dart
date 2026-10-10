@@ -404,6 +404,71 @@ void main() {
       expect(await reminders.completionRate(), 0.0);
     });
 
+    // ------------------------------------------------ P1-9 软删日志口径
+    //
+    // 这条守的是「删掉一条给药记录 ⇒ 完成率必须回落」。
+    //
+    // 原先 `completionRate` 的 SQL 没有任何 `deleted_at` 条件，而同文件里
+    // `logsForPet` / `_nextUncompleted` / `tick` 的去重**都带**这个条件。
+    // 口径不一致的具体后果：用户删掉记录后时间线上那条没了，但完成率
+    // 分子分母都不减 —— 界面显示「已做过」，实际记录已被撤销。
+    test('完成率必须排除软删的日志（删记录 = 撤销完成）', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final first = DateTime(2026, 9, 28, 9);
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'deworm_internal',
+        title: 'x',
+        everyDays: 30,
+        firstAt: first,
+      );
+
+      await reminders.completeOnce(r.id, at: first);
+      expect(await reminders.completionRate(), 1.0);
+
+      // 日志 id 是可推导的：log_{reminderId}_{dueAt 毫秒}。
+      // 直接按这个规则软删，模拟「用户把这条记录删了」。
+      final logId = 'log_${r.id}_${first.millisecondsSinceEpoch}';
+      await db.update('reminder_logs', {'deleted_at': 1},
+          where: 'id = ?', whereArgs: [logId]);
+
+      expect(
+        await reminders.completionRate(),
+        0.0,
+        reason: '日志已软删，完成率必须回落 —— 否则界面显示的完成数和'
+            '时间线上实际存在的记录对不上',
+      );
+    });
+
+    test('完成率与 _nextUncompleted 对软删的口径必须一致', () async {
+      // 这条防的是「两处口径打架」：`_nextUncompleted` 认 deleted_at、
+      // `completionRate` 不认，会导致同一个到期时刻在一处算已完成、
+      // 在另一处算未完成 —— 排期被跳过，统计却说做过了。
+      await pets.create(_pet('p1', '豆豆'));
+      final first = DateTime(2026, 9, 28, 9);
+      final r = await reminders.createInterval(
+        petId: 'p1',
+        type: 'deworm_internal',
+        title: 'x',
+        everyDays: 30,
+        firstAt: first,
+      );
+
+      await reminders.completeOnce(r.id, at: first);
+      final logId = 'log_${r.id}_${first.millisecondsSinceEpoch}';
+
+      // 软删日志后，_nextUncompleted 不再把这次算作已完成 ⇒ 排期会回到 first。
+      await db.update('reminder_logs', {'deleted_at': 1},
+          where: 'id = ?', whereArgs: [logId]);
+      final again = await reminders.completeOnce(r.id, at: first);
+      expect(again.alreadyCompleted, isFalse,
+          reason: '日志已软删，这一次不该被判为「已完成」');
+
+      // 上面这次 completeOnce 又写了一条**新的**日志（同 id，覆盖），
+      // 所以完成率回到 1。两处口径此时应当一致。
+      expect(await reminders.completionRate(), 1.0);
+    });
+
     test('upcoming 按时间窗口筛选且排除已停用', () async {
       await pets.create(_pet('p1', '豆豆'));
       final base = DateTime(2026, 9, 28, 9);
