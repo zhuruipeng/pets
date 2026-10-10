@@ -549,6 +549,54 @@ void main() {
       expect(sw1.elapsedMilliseconds <= sw2.elapsedMilliseconds + 50, isTrue,
           reason: '批量 ${sw1.elapsedMilliseconds}ms vs 逐条 ${sw2.elapsedMilliseconds}ms');
     });
+
+    // 回归：Batch 在 commit() 之后即被消费，复用会抛
+    // `Batch already committed` 并让整个事务回滚、轨迹全丢。
+    // 原来这条路径零覆盖 —— 旧测试只喂 400 点，而 batchChunkSize = 500，
+    // 分批提交那条分支从未执行过。这里刻意跨过 chunk 边界。
+    test('超过 batchChunkSize 的批量写入要跨 chunk 且不丢点', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final s = await walks.startSession(petId: 'p1', createdBy: 'u1');
+
+      const total = WalkRepository.batchChunkSize * 2 + 137; // 跨 3 段
+      final points = [
+        for (var i = 0; i < total; i++)
+          WalkPoint(
+            id: 'chunk$i',
+            sessionId: s.id,
+            lat: 35 + i * 0.0001,
+            lng: 118 + i * 0.0001,
+            accuracy: 5,
+            recordedAt: DateTime(2026, 9, 28).add(Duration(seconds: i)),
+          ),
+      ];
+
+      final written = await walks.appendPoints(s.id, points);
+
+      expect(written, total);
+      expect(await walks.pointsOf(s.id), hasLength(total));
+    });
+
+    test('恰好等于 batchChunkSize 时也能正确提交', () async {
+      await pets.create(_pet('p1', '豆豆'));
+      final s = await walks.startSession(petId: 'p1', createdBy: 'u1');
+
+      const total = WalkRepository.batchChunkSize;
+      final points = [
+        for (var i = 0; i < total; i++)
+          WalkPoint(
+            id: 'exact$i',
+            sessionId: s.id,
+            lat: 35 + i * 0.0001,
+            lng: 118 + i * 0.0001,
+            accuracy: 5,
+            recordedAt: DateTime(2026, 9, 28).add(Duration(seconds: i)),
+          ),
+      ];
+
+      expect(await walks.appendPoints(s.id, points), total);
+      expect(await walks.pointsOf(s.id), hasLength(total));
+    });
   });
 
   group('遛狗仓储 · 结束后补录心情', () {

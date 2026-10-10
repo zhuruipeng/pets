@@ -97,7 +97,12 @@ class SyncChange {
 
   final String? petId;
 
-  /// 客户端本地时间（毫秒），LWW 的比较基准。pull 回来的可能没有。
+  /// 该变更的 LWW 比较基准（毫秒）。
+  ///
+  /// push 方向：客户端本地时间，来自 outbox 的 `updated_at`。
+  /// pull 方向：服务端 `sync_changes.changed_at`（**不是** `updated_at`——
+  ///   服务端 pull 响应里根本没有 `updated_at` 这个字段，见 `docs/同步协议.md` 第 241 行）。
+  ///   若读错字段名会恒为 null，进而让 LWW 退化，远端更新永远应用不进来。
   final int? updatedAt;
 
   final Map<String, dynamic> payload;
@@ -112,7 +117,12 @@ class SyncChange {
         rowId: '${j['row_id']}',
         op: '${j['op'] ?? 'upsert'}',
         petId: j['pet_id'] as String?,
-        updatedAt: (j['updated_at'] as num?)?.toInt(),
+        // pull 返回的是 `changed_at`（协议 241 行）。这里**不能再读 `updated_at`**
+        // ——服务端不返回该字段，读了会恒为 null，导致 LWW 比较退化、
+        // 远端所有「更新」和「删除」都同步不过来（只有新增能进来）。
+        // 仍保留 payload.updated_at 作为兜底（老服务端可能把时间戳放在快照里）。
+        updatedAt: (j['changed_at'] as num?)?.toInt() ??
+            ((j['payload'] as Map?)?['updated_at'] as num?)?.toInt(),
         payload: (j['payload'] as Map?)?.cast<String, dynamic>() ?? const {},
         seq: (j['seq'] as num?)?.toInt(),
       );

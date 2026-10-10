@@ -78,6 +78,10 @@ class WalkRepository {
   /// 批量写入轨迹点。整个批次在一个事务里提交。
   ///
   /// 返回实际入库的点数（已剔除漂移点）。
+  ///
+  /// ⚠️ `Batch` 在 `commit()` 之后即被消费，**不能再往里 insert**（会抛
+  /// `Batch already committed` 并让整个事务回滚）。所以分批时每个 chunk
+  /// 都必须**新建**一个 Batch，绝不能复用一个。
   Future<int> appendPoints(String sessionId, List<WalkPoint> points) async {
     if (points.isEmpty) return 0;
 
@@ -86,26 +90,22 @@ class WalkRepository {
         .toList();
     if (usable.isEmpty) return 0;
 
-    var written = 0;
     await _db.transaction((txn) async {
-      final batch = txn.batch();
-      for (var i = 0; i < usable.length; i++) {
-        batch.insert(
-          _points,
-          usable[i].toMap(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-        // 分批提交，避免单个 batch 过大占用内存。
-        if ((i + 1) % batchChunkSize == 0) {
-          await batch.commit(noResult: true);
-          written += batchChunkSize;
+      for (var start = 0; start < usable.length; start += batchChunkSize) {
+        final end = (start + batchChunkSize).clamp(0, usable.length);
+        final batch = txn.batch(); // 每个 chunk 一个全新 Batch
+        for (var i = start; i < end; i++) {
+          batch.insert(
+            _points,
+            usable[i].toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
         }
+        await batch.commit(noResult: true);
       }
-      await batch.commit(noResult: true);
     });
 
-    written = usable.length;
-    return written;
+    return usable.length;
   }
 
   /// 结束一次遛狗，回算距离与时长并落库。

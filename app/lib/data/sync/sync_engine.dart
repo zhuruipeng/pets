@@ -415,6 +415,13 @@ class SyncEngine {
   }
 
   /// 拉到看到的最末。返回应用条数。
+  ///
+  /// ⚠️ 游标推进（`last_seq`）必须和「本批变更应用成功」**原子绑定**：
+  /// 同一条事务里，变更应用不成功就一起回滚，游标不动。
+  ///
+  /// 否则会出现：某条远端数据格式异常 → `_applyRemote` 抛 → 外层 catch 兜住
+  /// → 但 `last_seq` 已经推进到本批末尾 → 下一轮从新游标开始，
+  /// **这批没应用成功的数据被永久跳过，且用户完全无感知**（同步失败不弹窗）。
   Future<int> _pullAll(String token) async {
     var since = int.tryParse(await _meta('last_seq') ?? '') ?? 0;
     var appliedCount = 0;
@@ -422,13 +429,11 @@ class SyncEngine {
     for (var round = 0; round < 200; round++) {
       final result =
           await _api.pull(token: token, since: since, limit: _pullLimit);
-      if (result.changes.isNotEmpty) {
-        appliedCount += await _applyRemote(result.changes);
-      }
-      // 即使没有变更也要落游标：服务端会在空页时返回当前最大 seq，
-      // 存下来下次就不用从头扫。
+
+      // 传入本批的 nextSince：应用与游标推进同一个事务，要么都成、要么都退。
+      appliedCount += await _applyRemote(result.changes, advanceSeq: result.nextSince);
+
       since = result.nextSince;
-      await _setMeta('last_seq', '$since');
       if (!result.hasMore) break;
     }
     return appliedCount;
@@ -438,7 +443,10 @@ class SyncEngine {
   ///
   /// 整段包在 `applying = 1` 里，让 outbox 触发器哑火 —— 否则刚应用完
   /// 就又变成待推送变更，推上去、再拉下来，无限循环。
-  Future<int> _applyRemote(List<SyncChange> changes) async {
+  ///
+  /// [advanceSeq] 非空时，在同一事务里把 `last_seq` 推进到该值。
+  /// 这样「应用成功」与「游标前进」是原子的：应用抛异常 → 游标不推进。
+  Future<int> _applyRemote(List<SyncChange> changes, {int? advanceSeq}) async {
     var n = 0;
     await _db.transaction((txn) async {
       await txn.insert(
@@ -451,6 +459,17 @@ class SyncEngine {
         if (!kSyncableTables.contains(c.table)) continue;
         final ok = await _applyOne(txn, c);
         if (ok) n++;
+      }
+
+      // 游标与应用同事务：任何一条应用失败都会连游标一起回滚。
+      // 即使本页没有变更也要落 —— 服务端在空页时返回当前最大 seq，
+      // 存下来下次就不用从头扫。
+      if (advanceSeq != null) {
+        await txn.insert(
+          'sync_meta',
+          {'key': 'last_seq', 'value': '$advanceSeq'},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
 
       await txn.delete('sync_meta', where: 'key = ?', whereArgs: ['applying']);
@@ -473,8 +492,13 @@ class SyncEngine {
     );
     final localUpdatedAt =
         local.isEmpty ? null : (local.first['updated_at'] as num?)?.toInt();
+    // LWW 基准。**绝不能用 `c.seq` 兜底**：seq 是服务端自增序号（量级 1e3），
+    // 而本地 updated_at 是毫秒时间戳（量级 1.7e12）——两者不可比。
+    // 用 seq 兜底会让「远端更旧」恒成立，远端变更（尤其 delete 墓碑）
+    // 永远应用不进来，本地会一直显示已删数据。
+    // 取不到时间戳时返回 null，由下面的判空走「采用远端」分支。
     final remoteUpdatedAt =
-        c.updatedAt ?? (payload['updated_at'] as num?)?.toInt() ?? c.seq;
+        c.updatedAt ?? (payload['updated_at'] as num?)?.toInt();
     // The server keeps the first completion of an occurrence. Its canonical
     // timestamp can be older than this device's duplicate offline completion.
     final isCompletion = c.table == 'reminder_logs' ||
@@ -489,6 +513,35 @@ class SyncEngine {
         remoteUpdatedAt != null &&
         remoteUpdatedAt <= localUpdatedAt) {
       return false;
+    }
+
+    // 删除墓碑：**显式写 `deleted_at` 墓碑**，不依赖 payload 里带没带这个字段。
+    //
+    // 协议第 228 行说墓碑推的是行快照（含 deleted_at），所以只靠 payload
+    // 走下面的通用路径「通常」也能工作。但只要服务端某次只推了 `op=delete`
+    // 而 payload 为空（精简响应、老版本服务端），下面的通用路径会：
+    //   local 非空 → payload 去掉 id 后为空 → `payload.isNotEmpty` 为假 → 什么都不做
+    // ⇒ 远端删除在本地**永远不生效**，本地一直显示已删数据。
+    //
+    // 这里把墓碑落成「写入 deleted_at 的最小更新」，与 payload 内容解耦。
+    if (c.isDelete) {
+      final stamp = remoteUpdatedAt ?? DateTime.now().millisecondsSinceEpoch;
+      if (local.isEmpty) {
+        // 本地没有这行：补一条最小墓碑，否则下次又会被当作「新行」拉回来。
+        await txn.insert(
+          c.table,
+          {'id': c.rowId, 'deleted_at': stamp},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      } else {
+        await txn.update(
+          c.table,
+          {'deleted_at': stamp},
+          where: 'id = ?',
+          whereArgs: [c.rowId],
+        );
+      }
+      return true;
     }
 
     if (local.isEmpty) {
