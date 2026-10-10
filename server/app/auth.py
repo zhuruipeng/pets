@@ -107,7 +107,10 @@ class ProfilePatchIn(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
     email: str | None = Field(default=None, max_length=128)
     wechat: str | None = Field(default=None, max_length=64)
-    contact_note: str | None = None
+    # ⚠️ 原先唯独这个字段是裸的 `str | None = None`（2026-10-10 补）。
+    # 它会被 `record_change` 写进 sync_changes 的 payload，
+    # 所以超大值不仅撑爆 users 表，还会在变更日志里**放大一倍**。
+    contact_note: str | None = Field(default=None, max_length=1000)
 
 
 def user_out(user: User) -> dict:

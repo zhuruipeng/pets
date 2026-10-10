@@ -10,18 +10,37 @@
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Region = Literal["cn", "intl"]
 
+# `.env` 用**绝对路径**解析，不用 `".env"` 相对路径。
+#
+# 相对路径取决于进程启动时的工作目录：systemd 里设了 WorkingDirectory
+# 所以生产没事，但手工用别的 CWD 启动时会**静默读不到 .env** ——
+# Settings 全部落默认值，其中 dev_echo_code 默认 True（回显验证码）、
+# region 默认 intl、database_url 默认指向 `pet` 库，
+# 等于「配置没生效但服务照常起来了」，最难发现的一类事故。
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
     # 部署区域。决定合规行为与默认数据域，不决定业务逻辑。
     region: Region = "intl"
+
+    # 是否生产环境。只影响「要不要对外暴露 API 文档」这类运维开关，
+    # **不参与任何业务判断**（业务分支一律看 region）。
+    #
+    # 默认 False 是为了本地开发（连 `uvicorn --reload` 也要能看 /docs）。
+    # 生产部署时在 .env 里显式置 true —— 与 dev_echo_code 相反，
+    # 这一个的默认值朝「方便开发」倒，因为它泄的是接口结构不是登录凭据，
+    # 且漏配的后果是「文档多开着」而不是「谁都能登录」。
+    is_production: bool = False
 
     # 数据库。两区各自独立，绝不互连。
     database_url: str = "postgresql+psycopg://pet:pet@localhost:5432/pet"
@@ -71,10 +90,17 @@ class Settings(BaseSettings):
     # 顺带把短信费用按住。调大不影响正常用户（重发一次就够）。
     code_resend_seconds: int = 60
 
-    # 是否在响应里回显验证码。**只能在开发/联调环境开启** ——
-    # 默认 True 是为了「不接短信服务商也能把整条登录链路跑通」；
-    # 上线前必须置 false，否则任何人都能拿别人的手机号直接登录。
-    dev_echo_code: bool = True
+    # 是否在响应里回显验证码。
+    #
+    # ⚠️ **默认必须是 False**（2026-10-10 从 True 改过来）。
+    # 这个开关一开，接口会把验证码直接回给调用方 —— 等于任何人拿任意
+    # 手机号都能登录，是**最严重**的一类配置事故。
+    #
+    # 原先默认 True 的理由是「不接短信服务商也能把整条登录链路跑通」，
+    # 但那个便利应该由**本地开发在自己的 .env 里显式打开**来提供，
+    # 而不是把「生产是否安全」押在「运维有没有正确加载 .env」上。
+    # 安全开关的默认值只能朝安全方向倒。
+    dev_echo_code: bool = False
 
     # 短信/邮件服务商标识。留空表示「没有配置真实通道」，此时只写库不发码，
     # 依赖 dev_echo_code 回显。中国区短信需模板报备，海外区可用邮件兜底。

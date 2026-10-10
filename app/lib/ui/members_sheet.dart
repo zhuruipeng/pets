@@ -16,6 +16,7 @@ import '../core/theme.dart';
 import '../data/models.dart';
 import '../data/sync/sync_api.dart';
 import '../data/sync/sync_engine.dart';
+import '../data/sync/unified_api.dart';
 import '../providers.dart';
 import 'auth_sheet.dart';
 import 'widgets.dart';
@@ -403,7 +404,22 @@ class _InviteSheet extends ConsumerStatefulWidget {
 class _InviteSheetState extends ConsumerState<_InviteSheet> {
   final TextEditingController _target = TextEditingController();
 
-  String _channel = 'sms';
+  /// 可用的邀请通道。与 `auth_sheet.dart` 的 `_channels` **必须一致**，
+  /// 理由见那里的长注释：
+  ///
+  /// - 中国区：只有手机号（走官网统一账号，官网只有手机号凭据）
+  /// - 海外区：只有邮箱（服务端 `SMS_PROVIDER` 为空，发短信必然返回
+  ///   「通道未配置」）
+  ///
+  /// ⚠️ 这里原先写死 `String _channel = 'sms'` 且列表硬编码
+  /// `const ['sms', 'email']` —— 海外区用户一打开邀请弹层，默认选中的
+  /// 就是那个**必然失败**的通道，点「邀请」直接报错。
+  /// `auth_sheet` 2026-10-08 已修过同样的问题，但这份是复制的副本、没同步改。
+  /// **两处都是同一份逻辑的拷贝，改一处必须改另一处。**
+  List<String> get _channels =>
+      UnifiedAccountApi.isAvailable ? const ['sms'] : const ['email'];
+
+  late String _channel = _channels.first;
   String _role = 'editor';
   bool _sending = false;
 
@@ -463,21 +479,25 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
                   ),
                   const SizedBox(height: AppSpace.gapL),
 
-                  Row(
-                    children: [
-                      for (final c in const ['sms', 'email'])
-                        Padding(
-                          padding: const EdgeInsets.only(right: AppSpace.gapS),
-                          child: ChoiceChip(
-                            label: Text(L.t('auth.channel.$c')),
-                            selected: _channel == c,
-                            onSelected: (_) => setState(() => _channel = c),
-                            showCheckmark: false,
+                  // 只有一个可用通道时不必显示选择器 —— 给一个点了必然失败的
+                  // 选项比不给更糟（用户会以为 App 坏了，而不是自己选错了）。
+                  if (_channels.length > 1) ...[
+                    Row(
+                      children: [
+                        for (final c in _channels)
+                          Padding(
+                            padding: const EdgeInsets.only(right: AppSpace.gapS),
+                            child: ChoiceChip(
+                              label: Text(L.t('auth.channel.$c')),
+                              selected: _channel == c,
+                              onSelected: (_) => setState(() => _channel = c),
+                              showCheckmark: false,
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpace.gapM),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpace.gapM),
+                  ],
 
                   TextField(
                     controller: _target,
@@ -545,6 +565,15 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
   Future<void> _send() async {
     final target = _target.text.trim();
     if (target.isEmpty) return;
+    // 只做最轻的形态检查，真正的校验在服务端（客户端校验挡不住任何人）。
+    // 海外区只有邮箱通道，填错形态会被服务端以「未注册」拒掉，
+    // 而那个提示会误导用户以为是对方的问题。
+    if (_channel == 'email' && !target.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(L.t('auth.target.email'))),
+      );
+      return;
+    }
 
     setState(() => _sending = true);
     final messenger = ScaffoldMessenger.of(context);

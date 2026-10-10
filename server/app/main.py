@@ -41,11 +41,28 @@ async def lifespan(_: FastAPI):
     yield
 
 
+def _docs_enabled() -> bool:
+    """生产环境关闭 API 文档。
+
+    2026-10-10 实测：`https://api.pet.weiyuantool.com/docs` 与 `/openapi.json`
+    都是 200 —— 任何人都能拿到完整接口清单、字段名和 schema，
+    显著降低攻击成本（相当于把路由表送出去）。
+
+    nginx 的 `location /` 是全量代理，不会替我们挡这两个路径，
+    所以必须在应用层关掉。配置见 `Settings.is_production`。
+    """
+    return not get_settings().is_production
+
+
+_DOCS = _docs_enabled()
+
 app = FastAPI(
     title="Pet API",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/docs",
+    docs_url="/docs" if _DOCS else None,
+    redoc_url="/redoc" if _DOCS else None,
+    openapi_url="/openapi.json" if _DOCS else None,
 )
 
 # 账号 / 同步 / 共养三组路由都挂在 /api/v1 下（协议第五节）。
@@ -211,22 +228,46 @@ def app_version(settings: Settings = Depends(get_settings)) -> dict:
 # --------------------------------------------------------------- 数据模型
 
 
+# 毫秒时间戳的合理区间：1970-01-01 ~ 2100-01-01。
+# 挡掉负数、秒级混入、以及明显离谱的值（后者会让「年龄」显示成几万岁）。
+_TS_MIN = 0
+_TS_MAX = 4_102_444_800_000  # 2100-01-01
+
+
 class PetIn(BaseModel):
+    """宠物档案的写入模型。
+
+    ⚠️ 自由文本字段**必须带 max_length**（2026-10-10 补）。
+    原先除 name 外全部无约束，而这些列在库里是 `Text`（不报错），
+    于是任何登录用户传 100MB 的 `note` 都会被完整读进内存再落库 ——
+    免费额度级别的存储/内存攻击。
+
+    同一个项目里 `/sync/push` 那条路径反而有严谨校验
+    （`math.isfinite(stock_used)` 等），说明作者意识到了问题、
+    只是 REST 这条路径漏了。两条路径的约束应当对齐。
+
+    时间戳用毫秒（与客户端 `millisecondsSinceEpoch` 一致）。
+    """
+
     name: str = Field(min_length=1, max_length=64)
     species: str = Field(pattern="^(dog|cat|other)$")
-    breed: str | None = None
+    breed: str | None = Field(default=None, max_length=64)
     gender: str | None = Field(default=None, pattern="^(male|female|unknown)$")
-    birthday: int | None = None
+    birthday: int | None = Field(default=None, ge=_TS_MIN, le=_TS_MAX)
     birthday_estimated: bool = False
-    adopt_date: int | None = None
-    weight_baseline: float | None = None
+    adopt_date: int | None = Field(default=None, ge=_TS_MIN, le=_TS_MAX)
+    # 体重基准。gt=0 挡掉 0 与负数，le=1000 挡掉明显笔误（吨位）；
+    # NaN/Inf 由 allow_inf_nan=False 挡掉 —— 否则会污染后续所有计算。
+    weight_baseline: float | None = Field(
+        default=None, gt=0, le=1000, allow_inf_nan=False
+    )
     neutered: bool = False
-    chip_no: str | None = None
-    color: str | None = None
-    allergy: str | None = None
-    note: str | None = None
+    chip_no: str | None = Field(default=None, max_length=64)
+    color: str | None = Field(default=None, max_length=64)
+    allergy: str | None = Field(default=None, max_length=4096)
+    note: str | None = Field(default=None, max_length=4096)
     # 个性特点：与客户端一致的 JSON 数组字符串。
-    personality: str | None = None
+    personality: str | None = Field(default=None, max_length=2048)
 
 
 class PetOut(PetIn):
