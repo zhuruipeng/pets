@@ -435,24 +435,14 @@ class _AccountCard extends ConsumerWidget {
     WidgetRef ref,
     SyncController controller,
   ) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('auth.logoutConfirm')),
-        content: Text(L.t('auth.logoutHint')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(L.t('auth.logout')),
-          ),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: L.t('auth.logoutConfirm'),
+      hint: L.t('auth.logoutHint'),
+      confirmLabel: L.t('auth.logout'),
+      danger: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     // 引擎侧撤令牌 + 本地动作层清理，两件事都要做，顺序无所谓。
     await ref.read(appActionsProvider).logout();
     await controller.refresh();
@@ -558,7 +548,7 @@ class _InviteRowState extends ConsumerState<_InviteRow> {
         SnackBar(content: Text(L.t('members.invites.accepted'))),
       );
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      showErrorSnackVia(messenger, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

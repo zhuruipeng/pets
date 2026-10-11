@@ -28,12 +28,28 @@ class _FamilyCareBoardState extends ConsumerState<FamilyCareBoard> {
   Timer? _clock;
   bool _expanded = false;
 
+  /// 定时器上一次看到的那一天（本地 00:00）。
+  ///
+  /// 为什么记这个（2026-10-11 P2 修）：原实现每分钟无条件 `setState({})`，
+  /// 整块看板（含 `ref.watch` 的 provider 订阅、几十个 widget）每分钟重建一次。
+  /// 而分钟级重算**没有任何用处** —— 这块看板的输入只有「今天」这个日期，
+  /// 一天之内结果完全不变。改成「日期真的翻了才 setState」后，一天最多重建一次。
+  late DateTime _seenDay;
+
   @override
   void initState() {
     super.initState();
-    // Local clock only: change the day without adding background network sync.
+    final now = DateTime.now();
+    _seenDay = DateTime(now.year, now.month, now.day);
+    // 本地时钟，只为跨天刷新，不引入后台网络同步。
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      final n = DateTime.now();
+      final day = DateTime(n.year, n.month, n.day);
+      if (day != _seenDay) {
+        _seenDay = day;
+        setState(() {});
+      }
     });
   }
 

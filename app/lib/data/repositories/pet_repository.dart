@@ -78,9 +78,29 @@ class PetRepository {
     ));
   }
 
+  /// 全量覆写档案字段。
+  ///
+  /// ⚠️ **刻意不写三个「生命周期」列**（2026-10-11 P2 修）：
+  /// `archived_at` / `deleted_at` / `tier`。它们有各自的专用方法
+  /// （[archive] / [unarchive] / [softDelete]），不该被一次普通编辑连带改写。
+  ///
+  /// 原实现直接 `pet.toMap()..['updated_at'] = ...` 全量写入，风险在于：
+  /// 调用方若传进来一个**来源不完整或已过期**的 Pet（比如从旧 provider 快照
+  /// `copyWith` 出来的），`toMap()` 会把 `archived_at`/`deleted_at` 写成 null ——
+  /// 一个已归档的宠物会被一次改名悄悄「复活」，而且不报任何错。
+  /// 当前两个调用方恰好都从库里读的新鲜行派生，所以没炸；但这是运气不是保证。
+  /// 这里把「改档案」和「改生命周期」在 SQL 层面分开，消除这个隐患。
+  ///
+  /// 另有 `created_by` / `created_at`：它们由 [createSimple] 写入后就是不可变的，
+  /// 同样不该被编辑流程覆盖。
   Future<int> update(Pet pet) async {
     final next = pet.toMap()
-      ..['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+      ..['updated_at'] = DateTime.now().millisecondsSinceEpoch
+      ..remove('archived_at')
+      ..remove('deleted_at')
+      ..remove('tier')
+      ..remove('created_by')
+      ..remove('created_at');
     return _db.update(_table, next, where: 'id = ?', whereArgs: [pet.id]);
   }
 

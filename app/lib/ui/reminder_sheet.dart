@@ -16,6 +16,7 @@ import '../core/l10n.dart';
 import '../core/theme.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import 'sheet_scaffold.dart';
 import 'widgets.dart';
 import 'medication_courses.dart';
 import '../domain/medication_course.dart';
@@ -102,59 +103,21 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const _Handle(),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                0,
-                AppSpace.page,
-                AppSpace.gapS,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      L.t(_isEdit ? 'reminder.edit' : 'reminder.new'),
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _saving ? null : _save,
-                    child: Text(
-                      L.t('reminder.save'),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                AppSpace.gapL,
-                AppSpace.page,
-                AppSpace.gapXl,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _Label(L.t('reminder.type')),
+    // 骨架（横条 / 标题 / 键盘避让 / 边距）全交给 [SheetScaffold]。
+    // 改之前这些是每个弹层各写一遍的，P1-1 的「修一处漏一处」就发生在这里。
+    return SheetScaffold(
+      title: L.t(_isEdit ? 'reminder.edit' : 'reminder.new'),
+      action: TextButton(
+        onPressed: _saving ? null : _save,
+        child: Text(
+          L.t('reminder.save'),
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _Label(L.t('reminder.type')),
                   const SizedBox(height: AppSpace.gapS),
                   Wrap(
                     spacing: AppSpace.gapS,
@@ -264,11 +227,7 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
                       ),
                     ),
                   ],
-                ],
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -287,7 +246,7 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
   }
 
   static String _fmt(DateTime d) =>
-      '${d.year}-${_p(d.month)}-${_p(d.day)} ${_p(d.hour)}:${_p(d.minute)}';
+      '${d.year}-${pad2(d.month)}-${pad2(d.day)} ${pad2(d.hour)}:${pad2(d.minute)}';
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
@@ -350,25 +309,13 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
     final existing = widget.existing;
     if (existing == null) return;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('reminder.deleteConfirm')),
-        content: Text(L.t('reminder.deleteConfirm.hint')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: Text(L.t('reminder.delete')),
-          ),
-        ],
-      ),
+    final ok = await confirmDelete(
+      context,
+      title: L.t('reminder.deleteConfirm'),
+      hint: L.t('reminder.deleteConfirm.hint'),
+      confirmLabel: L.t('reminder.delete'),
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
@@ -378,7 +325,6 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
     messenger.showSnackBar(SnackBar(content: Text(L.t('reminder.deleted'))));
   }
 
-  static String _p(int v) => v.toString().padLeft(2, '0');
 }
 
 // ------------------------------------------------------------------ 通知直达
@@ -556,23 +502,6 @@ class _ReminderDueSheetState extends ConsumerState<_ReminderDueSheet> {
 
 // ------------------------------------------------------------------ 小组件
 
-class _Handle extends StatelessWidget {
-  const _Handle();
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Container(
-          width: 36,
-          height: 4,
-          margin: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.divider,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-      );
-}
-
 class _Label extends StatelessWidget {
   const _Label(this.text);
 
@@ -670,7 +599,7 @@ class _DateRow extends StatelessWidget {
               ),
             ),
             Text(
-              '${value.year}-${_p(value.month)}-${_p(value.day)}',
+              '${value.year}-${pad2(value.month)}-${pad2(value.day)}',
               style: const TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
@@ -683,5 +612,4 @@ class _DateRow extends StatelessWidget {
     );
   }
 
-  static String _p(int v) => v.toString().padLeft(2, '0');
 }

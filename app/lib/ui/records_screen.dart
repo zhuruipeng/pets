@@ -60,7 +60,7 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
 
     return records.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
+      error: (e, _) => errorPlaceholder(e),
       data: (all) {
         final visible = all.where((r) {
           if (filter != null && r.type != filter) return false;
@@ -574,9 +574,8 @@ class WeightChartCard extends ConsumerWidget {
     );
   }
 
-  static String _ds(DateTime d) => '${d.year}-${_p(d.month)}-${_p(d.day)}';
+  static String _ds(DateTime d) => '${d.year}-${pad2(d.month)}-${pad2(d.day)}';
 
-  static String _p(int v) => v.toString().padLeft(2, '0');
 }
 
 // ------------------------------------------------------------------ 时间线
@@ -846,7 +845,6 @@ class RecordRow extends ConsumerWidget {
     ref.invalidate(weightSeriesProvider(record.petId));
   }
 
-  static String _hm(DateTime d) => '${_p(d.hour)}:${_p(d.minute)}';
+  static String _hm(DateTime d) => '${pad2(d.hour)}:${pad2(d.minute)}';
 
-  static String _p(int v) => v.toString().padLeft(2, '0');
 }

@@ -19,6 +19,7 @@ import '../core/l10n.dart';
 import '../core/theme.dart';
 import '../data/sync/unified_api.dart';
 import '../providers.dart';
+import 'sheet_scaffold.dart';
 
 Future<void> showAuthSheet(BuildContext context) {
   return showModalBottomSheet<void>(
@@ -82,53 +83,11 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpace.page),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      L.t('auth.title'),
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpace.gapS),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                0,
-                AppSpace.page,
-                AppSpace.gapXl,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+    return SheetScaffold(
+      title: L.t('auth.title'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
                   Text(
                     L.t('auth.why'),
                     style: const TextStyle(
@@ -347,10 +306,6 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 

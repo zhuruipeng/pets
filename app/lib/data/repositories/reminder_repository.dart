@@ -13,6 +13,7 @@ import 'package:uuid/uuid.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../../domain/medication_course.dart';
+import '../../domain/sync_ids.dart';
 
 /// 完成一次提醒后的结果。
 class ReminderTickResult {
@@ -169,11 +170,14 @@ class ReminderRepository {
           course.nextAt(now.isAfter(due) ? now : due, inclusive: false);
       final timestamp = now.millisecondsSinceEpoch > reminder.updatedAt.millisecondsSinceEpoch
           ? now.millisecondsSinceEpoch : reminder.updatedAt.millisecondsSinceEpoch + 1;
-      final doseRecordId = course == null ? recordId :
-          'dose_${reminder.id}_${due.millisecondsSinceEpoch}';
+      // 注意命名：局部变量叫 courseDoseId，不叫 doseRecordId ——
+      // 后者是 domain/sync_ids.dart 里的函数名，同名会遮蔽函数（编译报错）。
+      final courseDoseId = course == null
+          ? recordId
+          : doseRecordId(reminderId: reminder.id, dueAt: due);
       if (course != null) {
         await txn.insert('records', PetRecord(
-          id: doseRecordId!, petId: reminder.petId, type: RecordType.medication,
+          id: courseDoseId!, petId: reminder.petId, type: RecordType.medication,
           recordedAt: now, valueText: course.name,
           payload: {'dose': course.dose, 'route': course.route,
             'course_id': reminder.id, 'due_at': due.millisecondsSinceEpoch,
@@ -185,7 +189,7 @@ class ReminderRepository {
       await txn.insert(_logs, {
         'id': logId, 'pet_id': reminder.petId, 'reminder_id': reminder.id,
         'due_at': due.millisecondsSinceEpoch, 'done_at': now.millisecondsSinceEpoch,
-        'record_id': doseRecordId, 'action': 'done', 'created_by': createdBy,
+        'record_id': courseDoseId, 'action': 'done', 'created_by': createdBy,
         'actor_name': actorName, 'created_at': now.millisecondsSinceEpoch,
         'updated_at': timestamp, 'stock_used': course?.unitsPerDose ?? 0,
       });

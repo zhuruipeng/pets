@@ -18,6 +18,7 @@ import '../core/theme.dart';
 import '../core/traits.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import 'sheet_scaffold.dart';
 
 Future<void> showEditPetSheet(BuildContext context, {required Pet pet}) {
   return showModalBottomSheet<void>(
@@ -101,62 +102,28 @@ class _EditPetSheetState extends ConsumerState<_EditPetSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets),
-      child: DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.9,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        builder: (_, controller) => Column(
+    // 固定高度可拖拽形态：骨架交给 [SheetScaffold]，把 DraggableScrollableSheet
+    // 的 controller 透传下去 —— 不接的话拖拽手柄和列表滚动会各走各的。
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.9,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, controller) => SheetScaffold(
+        title: L.t('editPet.title'),
+        scrollable: false,
+        bodyController: controller,
+        action: TextButton(
+          onPressed: _saving ? null : _save,
+          child: Text(
+            L.t('editPet.save'),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _Handle(),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                0,
-                AppSpace.page,
-                AppSpace.gapS,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      L.t('editPet.title'),
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _saving ? null : _save,
-                    child: Text(
-                      L.t('editPet.save'),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView(
-                controller: controller,
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpace.page,
-                  AppSpace.gapL,
-                  AppSpace.page,
-                  AppSpace.gapXl,
-                ),
-                children: [
-                  _SectionLabel(L.t('editPet.section.basic')),
+            _SectionLabel(L.t('editPet.section.basic')),
                   const SizedBox(height: AppSpace.gapM),
 
                   TextField(
@@ -330,9 +297,6 @@ class _EditPetSheetState extends ConsumerState<_EditPetSheet> {
                     maxLines: 3,
                     decoration: InputDecoration(labelText: L.t('editPet.note')),
                   ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
@@ -404,29 +368,12 @@ class _EditPetSheetState extends ConsumerState<_EditPetSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      showErrorSnack(context, e);
     }
   }
 }
 
 // ------------------------------------------------------------------ 小组件
-
-class _Handle extends StatelessWidget {
-  const _Handle();
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Container(
-          width: 36,
-          height: 4,
-          margin: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.divider,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-      );
-}
 
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel(this.text);
@@ -561,7 +508,7 @@ class _BirthdayField extends StatelessWidget {
   Widget build(BuildContext context) {
     final has = birthday != null;
     final label = has
-        ? '${birthday!.year}-${_p(birthday!.month)}-${_p(birthday!.day)}'
+        ? '${birthday!.year}-${pad2(birthday!.month)}-${pad2(birthday!.day)}'
         : L.t('editPet.birthdayPick');
 
     return Column(
@@ -626,7 +573,6 @@ class _BirthdayField extends StatelessWidget {
     );
   }
 
-  static String _p(int v) => v.toString().padLeft(2, '0');
 }
 
 class _SwitchRow extends StatelessWidget {

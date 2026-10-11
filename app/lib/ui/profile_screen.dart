@@ -235,7 +235,7 @@ class _HeroHeader extends ConsumerWidget {
                     overflow: TextOverflow.ellipsis,
                     style: AppText.hero)),
             const SizedBox(width: 6),
-            _GenderMark(gender: pet.gender),
+            GenderMark(gender: pet.gender),
           ]),
           const SizedBox(height: 4),
           Text(_breedAgeLine(pet),
@@ -284,28 +284,6 @@ class _HeroHeader extends ConsumerWidget {
         Species.cat => L.t('addPet.species.cat'),
         Species.other => L.t('addPet.species.other'),
       };
-}
-
-/// 性别符号。与今日页保持同一套绘制。
-class _GenderMark extends StatelessWidget {
-  const _GenderMark({required this.gender});
-
-  final String? gender;
-
-  @override
-  Widget build(BuildContext context) {
-    final g = (gender ?? '').trim().toLowerCase();
-    final (symbol, color) = switch (g) {
-      'female' || 'f' || '母' || '雌' => ('♀', const Color(0xFFEC4899)),
-      'male' || 'm' || '公' || '雄' => ('♂', const Color(0xFF3B82F6)),
-      _ => ('', AppColors.textTertiary),
-    };
-    if (symbol.isEmpty) return const SizedBox.shrink();
-    return Text(
-      symbol,
-      style: TextStyle(fontSize: 17, height: 1, color: color),
-    );
-  }
 }
 
 // ------------------------------------------------------------------ 资料页签
@@ -633,29 +611,17 @@ class _InfoTab extends ConsumerWidget {
   }
 
   Future<void> _archive(BuildContext context, WidgetRef ref, Pet pet) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('action.archive')),
-        content: Text(
-          L.isZh
-              ? '归档后 ${pet.name} 不再出现在列表里，但记录会保留，可以随时恢复。'
-              : '${pet.name} will be hidden from the list. Records are kept and can be restored.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(L.t('action.archive')),
-          ),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: L.t('action.archive'),
+      hint: L.isZh
+          ? '归档后 ${pet.name} 不再出现在列表里，但记录会保留，可以随时恢复。'
+          : '${pet.name} will be hidden from the list. Records are kept and can be restored.',
+      confirmLabel: L.t('action.archive'),
+      danger: true,
     );
 
-    if (ok != true) return;
+    if (!ok) return;
     await ref.read(petRepositoryProvider).archive(pet.id);
     ref.invalidate(petsProvider);
     ref.invalidate(upcomingRemindersProvider);
@@ -1366,7 +1332,7 @@ class _RemindersCard extends ConsumerWidget {
 
     return reminders.when(
       loading: () => const SizedBox.shrink(),
-      error: (e, _) => Text('$e'),
+      error: (e, _) => errorPlaceholder(e),
       data: (list) {
         // 规则集排了、但这条宠物还没有的项（例如这次新增的洗澡美容）。
         // 存量宠物不会自动拥有，给一个**显式**的补全入口 —— 不做静默重建，
@@ -1553,31 +1519,18 @@ class _ReminderRow extends ConsumerWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('reminder.deleteConfirm')),
-        content: Text(L.t('reminder.deleteConfirm.hint')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: Text(L.t('reminder.delete')),
-          ),
-        ],
-      ),
+    final ok = await confirmDelete(
+      context,
+      title: L.t('reminder.deleteConfirm'),
+      hint: L.t('reminder.deleteConfirm.hint'),
+      confirmLabel: L.t('reminder.delete'),
     );
-    if (ok != true) return;
+    if (!ok) return;
     await ref.read(appActionsProvider).deleteReminder(reminder);
   }
 
-  static String _short(DateTime d) => '${d.year}-${_p(d.month)}-${_p(d.day)}';
+  static String _short(DateTime d) => '${d.year}-${pad2(d.month)}-${pad2(d.day)}';
 
-  static String _p(int v) => v.toString().padLeft(2, '0');
 }
 
 // ------------------------------------------------------------------ 遛狗记录
@@ -1715,7 +1668,7 @@ class _RecordsTab extends ConsumerWidget {
 
     return records.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
+      error: (e, _) => errorPlaceholder(e),
       data: (list) {
         if (list.isEmpty) {
           return const _TabEmpty(
@@ -1777,7 +1730,7 @@ class _MemoriesTab extends ConsumerWidget {
 
     return photos.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
+      error: (e, _) => errorPlaceholder(e),
       data: (list) {
         // 只留**本地文件真的在**的那些 —— 附件行可能在（同步过来的、
         // 或者用户清过存储），文件却没了，那种格子只会是一块灰。
@@ -1896,7 +1849,7 @@ Future<void> _addMemoryPhoto(
       SnackBar(content: Text(L.t('profile.memory.added'))),
     );
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    showErrorSnackVia(messenger, e);
   }
 }
 
@@ -2076,7 +2029,8 @@ class _ExpenseTab extends ConsumerWidget {
       ),
       error: (e, _) => Padding(
         padding: const EdgeInsets.all(AppSpace.page),
-        child: _PlainHint(icon: Icons.error_outline_rounded, text: '$e'),
+        child: _PlainHint(
+            icon: Icons.error_outline_rounded, text: L.error(e)),
       ),
       data: (s) => ListView(
         padding: const EdgeInsets.fromLTRB(
@@ -2564,28 +2518,14 @@ class _ExpenseRow extends ConsumerWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('expense.delete')),
-        content: Text(
-          '${expenseCategoryLabel(expense.category)} '
+    final ok = await confirmDelete(
+      context,
+      title: L.t('expense.delete'),
+      hint: '${expenseCategoryLabel(expense.category)} '
           '${formatMoney(expense.amount, currency)}',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: Text(L.t('expense.delete')),
-          ),
-        ],
-      ),
+      confirmLabel: L.t('expense.delete'),
     );
-    if (ok != true) return;
+    if (!ok) return;
 
     await ref.read(appActionsProvider).deleteExpense(petId, expense.id);
     if (!context.mounted) return;
@@ -2718,7 +2658,7 @@ class _DocumentsCard extends ConsumerWidget {
         SnackBar(
           content: Text(isCancel
               ? L.t('doc.pickCancelled')
-              : L.tp('doc.pickError', {'e': '$e'})),
+              : L.tp('doc.pickError', {'e': L.error(e)})),
         ),
       );
       return;
@@ -2752,9 +2692,7 @@ class _DocumentsCard extends ConsumerWidget {
       );
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      showErrorSnack(context, e);
     }
   }
 }

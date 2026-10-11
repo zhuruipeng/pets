@@ -213,3 +213,58 @@ def test_long_message_is_truncated_by_validation():
     """超长消息应该在 Pydantic 层被拒，不进到发信逻辑。"""
     with pytest.raises(Exception):
         FeedbackIn(message="x" * 9000)
+
+
+# ---------------------------------------------------------------- P2 修复（2026-10-11）
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        smtplib.SMTPAuthenticationError(535, b"auth failed"),
+        smtplib.SMTPServerDisconnected("closed"),
+        TimeoutError("timed out"),
+    ],
+)
+def test_failed_send_is_also_deduped(exc):
+    """**发送失败也要记进去重表** —— 否则 SMTP 挂掉时会无限重试。
+
+    修之前的实现只在成功后才 `_seen[key] = now`，于是：
+
+      SMTP 持续失败 + 用户在「没发出去」的界面上反复点重试
+      ⇒ 每次都是一轮完整的握手 + 认证失败
+      ⇒ 白白拖慢响应、反复累加服务商的失败计数
+        （可能把发信账号临时封禁），而收件方一封也收不到。
+
+    这条断言锁的是「失败的尝试同样计入去重窗口」。
+    """
+    with patch("app.feedback.smtplib.SMTP_SSL", side_effect=exc):
+        first = submit_feedback(_payload(), settings=_settings())
+        second = submit_feedback(_payload(), settings=_settings())
+
+    assert first["received"] is True
+    assert first["delivered"] is False
+    # 第二次应当被判为重复，而不是再试一次发信。
+    assert second.get("deduped") is True, (
+        "发送失败后同内容再提交必须被去重，否则 SMTP 挂了会无限重试"
+    )
+
+
+def test_failed_send_does_not_block_changed_content():
+    """失败去重**不能把人堵死** —— 改了内容仍然要能重新提交。
+
+    指纹只覆盖 kind + 归一化后的前 200 字，所以补了新信息就是新一份。
+    如果没有这条断言，把 `_seen[key] = now` 挪到更早的位置就没人发现。
+    """
+    with patch("app.feedback.smtplib.SMTP_SSL") as mock_ssl:
+        mock_ssl.side_effect = smtplib.SMTPServerDisconnected("closed")
+        first = submit_feedback(_payload(message="第一次的报错"), settings=_settings())
+        # 用户补充了信息再发一次
+        second = submit_feedback(
+            _payload(message="补充：只在选完图片后出现"), settings=_settings()
+        )
+
+    assert first["delivered"] is False
+    assert second.get("deduped") is not True, (
+        "内容变了就必须允许重新提交，去重只针对同一条内容"
+    )

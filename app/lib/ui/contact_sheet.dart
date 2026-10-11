@@ -11,6 +11,7 @@ import '../core/l10n.dart';
 import '../core/theme.dart';
 import '../data/models.dart';
 import '../providers.dart';
+import 'sheet_scaffold.dart';
 
 Future<void> showContactSheet(BuildContext context, {required LocalUser user}) {
   return showModalBottomSheet<void>(
@@ -57,70 +58,21 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
     final loginIdentifiersLocked = widget.user.region != 'local';
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                0,
-                AppSpace.page,
-                AppSpace.gapS,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      L.t('contact.title'),
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _saving ? null : _save,
-                    child: Text(
-                      L.t('contact.save'),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                AppSpace.gapM,
-                AppSpace.page,
-                AppSpace.gapXl,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+    return SheetScaffold(
+      title: L.t('contact.title'),
+      action: TextButton(
+        onPressed: _saving ? null : _save,
+        child: Text(
+          L.t('contact.save'),
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
                     L.t('contact.hint'),
                     style: const TextStyle(
                       fontSize: 12,
@@ -174,10 +126,6 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -215,7 +163,7 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      showErrorSnack(context, e);
     }
   }
 }

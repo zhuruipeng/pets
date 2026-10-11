@@ -115,12 +115,24 @@ def submit_feedback(
     """
     now = datetime.now(timezone.utc)
 
-    # 顺手清掉过期项：即使没到上限，也不让过期内容一直占着内存。
+    # 过期项清理。
+    #
+    # ⚠️ 注释与实现必须一致（2026-10-11 P2 修正）：
+    # 原注释写的是「顺手清掉过期项：即使没到上限，也不让过期内容一直占着内存」，
+    # 而代码是 `if len(_seen) > _DEDUP_MAX:` —— **只有超上限才清**。
+    # 一个「顺手」的清理听起来无害，但读代码的人会因此相信
+    # 「过期项不会留」，从而在别处依赖这个假设（比如估算内存占用）。
+    # 要么改注释、要么改代码；这里选择**改注释说清真实行为**，
+    # 因为「每次请求都遍历一遍 dict」在反馈接口上没必要。
+    #
+    # 真实的界：`_seen` 最多长到 _DEDUP_MAX 稍多一点点就被清一次，
+    # 所以它的内存上界就是 _DEDUP_MAX 量级，与「过期项是否及时清」无关。
     if len(_seen) > _DEDUP_MAX:
         cutoff = now - _DEDUP_WINDOW
         for k in [k for k, t in _seen.items() if t < cutoff]:
             del _seen[k]
-        # 还是太多（说明短时间内大量重复提交）就整体清空。
+        # 还是太多（说明短时间内大量重复提交，且都是「新鲜」的）
+        # 就整体清空 —— 宁可少去重一次，也不让内存无限涨。
         if len(_seen) > _DEDUP_MAX:
             _seen.clear()
 
@@ -163,6 +175,18 @@ def submit_feedback(
             "feedback email failed (version=%s region=%s)",
             payload.app_version, payload.region,
         )
+        # ⚠️ **失败也要记进去重表**（2026-10-11 P2 修）。
+        #
+        # 原先只在成功后才 `_seen[key] = now`，于是 SMTP 持续失败时：
+        # 用户在那个「反馈没发出去」的界面上反复点重试，
+        # 每次都是一次完整的 SMTP 握手 + 认证失败 —— 白白拖慢响应、
+        # 反复触发服务商的失败计数（可能把发信账号临时封掉），
+        # 而收件方一封也收不到。
+        #
+        # 记进去之后，同一条内容在一个 _DEDUP_WINDOW 内只尝试发一次。
+        # 内容是「指纹」决定的（kind + 归一化后的前 200 字），
+        # 所以用户改了内容仍然能重新提交 —— 不会把人堵死。
+        _seen[key] = now
         return {"received": True, "delivered": False}
 
     _seen[key] = now
@@ -205,14 +229,14 @@ def _send_to_dev(payload: FeedbackIn, settings: Settings) -> None:
             settings.smtp_host, settings.smtp_port, timeout=25,
             context=ssl.create_default_context(),
         ) as srv:
-            srv.login(settings.smtp_user, settings.smtp_password)
+            srv.login(settings.smtp_user, settings.smtp_password.get_secret_value())
             srv.send_message(msg)
     else:
         with smtplib.SMTP(
             settings.smtp_host, settings.smtp_port, timeout=25
         ) as srv:
             srv.starttls()
-            srv.login(settings.smtp_user, settings.smtp_password)
+            srv.login(settings.smtp_user, settings.smtp_password.get_secret_value())
             srv.send_message(msg)
 
 

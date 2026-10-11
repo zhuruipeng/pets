@@ -13,6 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Region = Literal["cn", "intl"]
@@ -129,7 +130,15 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     # ⚠️ 必须是**授权码**不是登录密码。企业邮箱的 SMTP 密码在后台单独生成，
     # 用登录密码会认证失败。
-    smtp_password: str = ""
+    #
+    # ## 为什么是 SecretStr 而不是 str（2026-10-11 P2）
+    #
+    # 用 `str` 的话，任何一次 `logger.info(settings)` / `repr(settings)` /
+    # `model_dump()`，甚至 FastAPI 把 settings 塞进某个调试响应，
+    # 都会把授权码**完整打印出来**。授权码 = 用你公司域名发信的权限。
+    # `SecretStr` 的 `repr()` 是 `SecretStr('**********')`，
+    # 把「不小心打日志」这条最常见的泄露路径堵死。
+    smtp_password: SecretStr = SecretStr("")
     # 发件人显示名与地址。腾讯企业版要求 From 与已验证的发件地址一致，
     # 否则进垃圾箱 —— 表现为「服务端说发出去了，用户收不到」。
     smtp_from_name: str = "My Pet"
@@ -175,6 +184,29 @@ class Settings(BaseSettings):
     @property
     def requires_icp_display(self) -> bool:
         return self.region == "cn"
+
+    @property
+    def smtp_configured(self) -> bool:
+        """SMTP 三要素是否齐备（能真的发信）。
+
+        ## 为什么不直接写 `bool(self.smtp_password)`
+
+        实测 pydantic 2.x 的 `bool(SecretStr(""))` 是 `False`（按底层字符串判），
+        所以那个写法**在当前版本上恰好是对的**。但仍然不用它：
+
+        1. `SecretStr.__bool__` 是**实现细节**而非接口承诺，
+           改成「对象非空即真」也不会有人报错，而判据会静默反过来 ——
+           表现为「授权码没填却走了真实发信路径」。
+        2. 两个判据**不等价**：host / user 缺失时同样发不出去，
+           但 `bool(password)` 会说「已配置」。
+
+        显式取 `.get_secret_value()` 不依赖任何库行为约定。
+        """
+        return bool(
+            self.smtp_host
+            and self.smtp_user
+            and self.smtp_password.get_secret_value()
+        )
 
     @property
     def allows_cross_border(self) -> bool:

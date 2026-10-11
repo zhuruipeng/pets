@@ -27,6 +27,7 @@ import '../core/units.dart';
 import '../data/models.dart';
 import '../providers.dart';
 import '../services/share_helper.dart';
+import 'sheet_scaffold.dart';
 import 'widgets.dart';
 
 Future<void> showLostCardSheet(BuildContext context, Pet pet) {
@@ -73,59 +74,21 @@ class _LostCardSheetState extends ConsumerState<_LostCardSheet> {
     final user = ref.watch(currentUserProvider).valueOrNull;
     final series = ref.watch(weightSeriesProvider(pet.id)).valueOrNull;
     final latestWeight = (series == null || series.isEmpty) ? null : series.last.kg;
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpace.page),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      L.t('lost.title'),
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: _sharing ? null : _share,
-                    icon: const Icon(Icons.ios_share_rounded, size: 17),
-                    label: Text(L.t('lost.share')),
-                  ),
-                ],
-              ),
-            ),
-
-            // ---- 卡片本体。截图截的就是这块。 ----
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                AppSpace.gapS,
-                AppSpace.page,
-                AppSpace.gapL,
-              ),
-              child: RepaintBoundary(
-                key: _cardKey,
-                child: _LostCard(
+    return SheetScaffold(
+      title: L.t('lost.title'),
+      action: TextButton.icon(
+        onPressed: _sharing ? null : _share,
+        icon: const Icon(Icons.ios_share_rounded, size: 17),
+        label: Text(L.t('lost.share')),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ---- 卡片本体。截图截的就是这块。 ----
+          RepaintBoundary(
+            key: _cardKey,
+            child: _LostCard(
                   pet: pet,
                   lostAt: _lostAt,
                   where: _where.text.trim().isEmpty
@@ -140,20 +103,12 @@ class _LostCardSheetState extends ConsumerState<_LostCardSheet> {
                   user: user,
                 ),
               ),
-            ),
 
-            // ---- 可填的两项。默认值就是能用的，不强迫用户填。 ----
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                0,
-                AppSpace.page,
-                AppSpace.gapXl,
-              ),
-              child: Column(
-                children: [
-                  InkWell(
-                    onTap: _pickDate,
+          // ---- 可填的两项。默认值就是能用的，不强迫用户填。 ----
+          Column(
+            children: [
+              InkWell(
+                onTap: _pickDate,
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -172,7 +127,7 @@ class _LostCardSheetState extends ConsumerState<_LostCardSheet> {
                           Expanded(
                             child: Text(
                               '${L.t('lost.since').replaceAll('{n}', '${_daysSinceLost()}')}'
-                              ' · ${_lostAt.year}-${_p(_lostAt.month)}-${_p(_lostAt.day)}',
+                              ' · ${_lostAt.year}-${pad2(_lostAt.month)}-${pad2(_lostAt.day)}',
                               style: const TextStyle(
                                 fontSize: 13,
                                 color: AppColors.textSecondary,
@@ -220,10 +175,8 @@ class _LostCardSheetState extends ConsumerState<_LostCardSheet> {
                   ],
                 ],
               ),
-            ),
           ],
         ),
-      ),
     );
   }
 
@@ -285,7 +238,6 @@ class _LostCardSheetState extends ConsumerState<_LostCardSheet> {
     }
   }
 
-  static String _p(int v) => v.toString().padLeft(2, '0');
 }
 
 /// 卡片本体。**尺寸固定**（屏幕宽 - 页边距），因为它要被截图 ——

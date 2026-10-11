@@ -18,7 +18,7 @@
 /// 老用户升级时会按版本顺序重放，改一句就会在别人手机上错位。
 library;
 
-const int kSchemaVersion = 7;
+const int kSchemaVersion = 8;
 
 const String createUsers = '''
 CREATE TABLE users (
@@ -138,9 +138,9 @@ CREATE TABLE attachments (
 /// record_id 可选：想的话能把一笔支出挂到具体那条记录上，不挂也不影响统计。
 const String createExpenses = '''
 CREATE TABLE expenses (
-  id          TEXT PRIMARY KEY,
-  pet_id      TEXT NOT NULL,
-  amount      REAL NOT NULL,
+  id             TEXT PRIMARY KEY,
+  pet_id         TEXT NOT NULL,
+  amount_cents   INTEGER NOT NULL,
   currency    TEXT NOT NULL,
   category    TEXT NOT NULL,
   spent_at    INTEGER NOT NULL,
@@ -340,6 +340,17 @@ const List<({String table, String petExpr, bool hasDeletedAt})> kSyncedTables = 
   (table: 'walk_sessions', petExpr: 'NEW.pet_id', hasDeletedAt: true),
 ];
 
+/// 参与同步的**表名**清单（[kSyncedTables] 的投影）。
+///
+/// 同步引擎的 `kSyncableTables` 直接引用它 —— 这样「谁产生变更」
+/// 与「谁能被应用」永远是同一份真值，不会出现加表只改一处、
+/// 导致某类数据静默不同步的问题。
+///
+/// 是 `final` 而不是 `const`：Dart 的 const 集合不支持 `for` 元素。
+final List<String> kSyncedTableNames = [
+  for (final t in kSyncedTables) t.table,
+];
+
 /// 逐个生成 INSERT / UPDATE 触发器。
 ///
 /// **为什么用触发器而不是在仓储里手动记一笔**：仓储有六个、写方法二十多个，
@@ -496,5 +507,84 @@ final Map<int, List<String>> migrations = {
     "INSERT OR REPLACE INTO sync_outbox(table_name,row_id,pet_id,op,updated_at) "
         "SELECT 'reminder_logs',id,pet_id,'upsert',updated_at FROM reminder_logs "
         'WHERE pet_id IS NOT NULL',
+  ],
+
+  // v8：费用金额改存**整数分**（2026-10-11 P2，数据正确性）。
+  //
+  // ## 为什么要改
+  //
+  // 原先 `amount REAL` 存元（如 12.35）。浮点累加会出真真切切的误差 ——
+  // 本机实测：
+  //
+  //     100 × 12.35 = 1234.9999999999998   （期望 1235）
+  //     1000 × 0.07 = 69.99999999999966    （期望 70）
+  //     0.1 + 0.2   = 0.30000000000000004
+  //
+  // 目前界面上看不出来，因为 `formatMoney` 的判零阈值是 0.005，
+  // 而这类误差在 1e-13 量级 —— **恰好**被吸收了。但「恰好」不是设计，
+  // 它有三个前提同时成立：误差小、累加次数少、展示前必过 formatMoney。
+  // 任何一条被破坏（比如将来做「导出对账 CSV」直接输出原始值、
+  // 或者做「两笔账是否相等」的判断）误差就会露出来。
+  // 金额这种东西不该靠巧合正确。
+  //
+  // ## 为什么不只改代码不改库
+  //
+  // 只把 Dart 侧换成 int 而库里还是 REAL，每次读写都要 ×100/÷100，
+  // 那些除法本身又引入浮点误差 —— 等于把问题从「存的时候」挪到
+  // 「每次取的时候」，还多了一处容易忘的换算。
+  //
+  // ## 迁移内容
+  //
+  // SQLite 不支持 ALTER COLUMN，标准做法是「建新表 → 搬运 → 删旧 → 改名」。
+  // 换算用 `CAST(ROUND(amount * 100) AS INTEGER)`：
+  // - `ROUND` 不是可选的。直接 `CAST(12.35*100 AS INTEGER)` 在
+  //   12.349999... 上会截断成 1234，**每笔少一分钱**，而且只在
+  //   特定金额上出现（本地实测 12.35*100 = 1234.9999999999998）。
+  // - 币种不参与换算：日元/韩元没有小数位，但它们在本 App 里同样
+  //   按「分」口径存（最小单位的 1/100），展示层按 currency 决定
+  //   显示几位。这样存储口径只有一种，不用按币种分支。
+  8: [
+    // 1) 新表：amount_cents INTEGER NOT NULL
+    '''
+CREATE TABLE expenses_new (
+  id             TEXT PRIMARY KEY,
+  pet_id         TEXT NOT NULL,
+  amount_cents   INTEGER NOT NULL,
+  currency       TEXT NOT NULL,
+  category       TEXT NOT NULL,
+  spent_at       INTEGER NOT NULL,
+  note           TEXT,
+  record_id      TEXT,
+  created_by     TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  deleted_at     INTEGER
+);
+''',
+    // 2) 搬运并换算。ROUND 必须有，理由见上面的注释。
+    '''
+INSERT INTO expenses_new
+  (id, pet_id, amount_cents, currency, category, spent_at,
+   note, record_id, created_by, created_at, updated_at, deleted_at)
+SELECT
+  id, pet_id, CAST(ROUND(amount * 100) AS INTEGER), currency, category,
+  spent_at, note, record_id, created_by, created_at, updated_at, deleted_at
+FROM expenses;
+''',
+    // 3) 旧表及其索引、触发器一起清掉。
+    //    触发器不删的话，下面重建同名触发器会报 already exists，
+    //    而迁移跑在一个事务里 —— 整次升级卡死、App 起不来。
+    'DROP TRIGGER IF EXISTS trg_expenses_outbox_ins',
+    'DROP TRIGGER IF EXISTS trg_expenses_outbox_upd',
+    'DROP TABLE expenses',
+    // 4) 改名与重建索引 / 触发器。
+    'ALTER TABLE expenses_new RENAME TO expenses',
+    ...createExpenseIndexes,
+    ..._triggersFor('expenses', 'NEW.pet_id', hasDeletedAt: true),
+    // 5) 金额口径变了 ⇒ 所有费用行都要重新推给服务端，
+    //    否则别的设备拉到的是旧本地缓存的「元」值。
+    //    直接塞 outbox 比等下一次本地改动可靠（用户可能再也不改这笔账）。
+    "INSERT OR REPLACE INTO sync_outbox(table_name,row_id,pet_id,op,updated_at) "
+        "SELECT 'expenses',id,pet_id,'upsert',updated_at FROM expenses",
   ],
 };

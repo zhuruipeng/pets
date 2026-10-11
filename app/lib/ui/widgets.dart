@@ -11,11 +11,26 @@ import '../core/theme.dart';
 import '../core/units.dart';
 import '../data/models.dart';
 import '../domain/immunization.dart';
+// 本文件自己也要用 pad2 / GenderMark 等 —— `export ... show` 只对
+// **导入本文件的人**生效，不会把名字带进本文件的作用域，所以这里要真 import。
+import 'sheet_scaffold.dart';
 
 // 提醒文案的解析与类型表在 core 里（通知服务也要用），
 // 这里再导出一次，免得所有界面文件都要多 import 一个。
 export '../core/reminder_text.dart'
     show kManualReminderTypes, reminderTypeLabel;
+
+// 错误展示的两个 helper 定义在 sheet_scaffold.dart，但用法遍布所有界面。
+// 从这里再导出一次：绝大多数界面本来就 import 了 widgets.dart，
+// 不必为了 `errorPlaceholder` 再补一行 import。
+export 'sheet_scaffold.dart'
+    show
+        confirmAction,
+        confirmDelete,
+        errorPlaceholder,
+        pad2,
+        showErrorSnack,
+        showErrorSnackVia;
 
 // 类型 → 文案的纯映射搬去了 domain/labels.dart（那边不引 Flutter，
 // 纯逻辑层如「导出报告」的内容组装也能用）。这里转发一次，界面文件不必改 import。
@@ -228,6 +243,38 @@ class RowDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       const Divider(height: 1, thickness: 1, color: AppColors.divider);
+}
+
+/// 性别符号 ♀ / ♂。
+///
+/// 抽之前 `profile_screen` 与 `today_screen` 各有一份 `_GenderMark`，
+/// **逐字相同**，只有 `fontSize` 差 1（17 vs 16）—— 这种「只差一个字面量」
+/// 的拷贝是最难发现的：改配色时改一份，另一份就悄悄留旧色。
+///
+/// 未知性别返回空盒子。**不要凭空画一个符号出来 —— 那是编数据。**
+///
+/// 配色有意写在这里而不是主题里：粉色/蓝色是符号自身的通用语义
+/// （♡ ♀ 粉、♡ ♂ 蓝），不是 App 的语义色，换成主题色反而认不出来。
+class GenderMark extends StatelessWidget {
+  const GenderMark({super.key, required this.gender, this.fontSize = 17});
+
+  final String? gender;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final g = (gender ?? '').trim().toLowerCase();
+    final (symbol, color) = switch (g) {
+      'female' || 'f' || '母' || '雌' => ('♀', const Color(0xFFEC4899)),
+      'male' || 'm' || '公' || '雄' => ('♂', const Color(0xFF3B82F6)),
+      _ => ('', AppColors.textTertiary),
+    };
+    if (symbol.isEmpty) return const SizedBox.shrink();
+    return Text(
+      symbol,
+      style: TextStyle(fontSize: fontSize, height: 1, color: color),
+    );
+  }
 }
 
 /// 带图标的统计小块。参考稿的「体重 / 状态 / 活跃度」三格用的就是这个。
@@ -488,7 +535,7 @@ String relativeDay(DateTime dt) {
   if (diff == 0) return L.t('timeline.today');
   if (diff == 1) return L.t('timeline.yesterday');
   if (diff > 1 && diff < 30) return L.tp('timeline.daysAgo', {'n': diff});
-  return '${dt.year}-${_p(dt.month)}-${_p(dt.day)}';
+  return '${dt.year}-${pad2(dt.month)}-${pad2(dt.day)}';
 }
 
 /// 提醒倒计时：「还有 3 天」/「已过期 2 天」/「今天」
@@ -504,11 +551,9 @@ String dueLabel(DateTime dueAt) {
   return L.tp('due.overdueBy', {'n': -diff});
 }
 
-String _p(int v) => v.toString().padLeft(2, '0');
-
 /// 日期时间紧凑格式。
 String compactDateTime(DateTime dt) =>
-    '${_p(dt.month)}-${_p(dt.day)} ${_p(dt.hour)}:${_p(dt.minute)}';
+    '${pad2(dt.month)}-${pad2(dt.day)} ${pad2(dt.hour)}:${pad2(dt.minute)}';
 
 /// 文档原件 → 图标，按扩展名分。
 ///
@@ -536,7 +581,7 @@ IconData documentIcon(String? ext) =>
 /// 显示几点几分是噪声，而且会让人以为时间是有意义的。
 String compactDate(DateTime dt) => L.isZh
     ? '${dt.year}年${dt.month}月${dt.day}日'
-    : '${_p(dt.month)}/${_p(dt.day)}/${dt.year}';
+    : '${pad2(dt.month)}/${pad2(dt.day)}/${dt.year}';
 
 /// 台账分类 → 图标。转发给 [reminderTypeIcon]，同一件事在两处不能长两个样。
 IconData careKindIcon(PlanItemType kind) => reminderTypeIcon(kind.wireName);
@@ -657,7 +702,7 @@ class TodoTile extends StatelessWidget {
         r.nextAt.day == now.day;
 
     if (sameDay) {
-      return '${_p(r.nextAt.hour)}:${_p(r.nextAt.minute)}';
+      return '${pad2(r.nextAt.hour)}:${pad2(r.nextAt.minute)}';
     }
     return dueLabel(r.nextAt);
   }

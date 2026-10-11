@@ -291,31 +291,17 @@ class _RecordDetailSheetState extends ConsumerState<_RecordDetailSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
+      showErrorSnack(context, e);
     }
   }
 
   Future<void> _confirmDelete() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('detail.deleteConfirm')),
-        content: Text(L.t('detail.deleteConfirm.hint')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(L.t('action.cancel')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-            child: Text(L.t('action.delete')),
-          ),
-        ],
-      ),
+    final ok = await confirmDelete(
+      context,
+      title: L.t('detail.deleteConfirm'),
+      hint: L.t('detail.deleteConfirm.hint'),
     );
-    if (ok != true) return;
+    if (!ok) return;
 
     setState(() => _busy = true);
     await ref.read(recordRepositoryProvider).softDelete(_record.id);
@@ -503,8 +489,7 @@ class _PhotosSection extends ConsumerWidget {
           );
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
+      showErrorSnack(context, e);
     }
   }
 
@@ -513,24 +498,8 @@ class _PhotosSection extends ConsumerWidget {
     WidgetRef ref,
     RecordAttachment att,
   ) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('detail.photos.delete')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-            child: Text(L.t('action.delete')),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
+    final ok = await confirmDelete(context, title: L.t('detail.photos.delete'));
+    if (!ok) return;
 
     await ref.read(appActionsProvider).deleteAttachment(
           petId: petId,
@@ -754,7 +723,7 @@ class _DocumentsSection extends ConsumerWidget {
       // 别把「用户主动取消」显示成「出错了」。
       final msg = _isPickerCancelled(e)
           ? L.t('doc.pickCancelled')
-          : L.tp('doc.pickError', {'e': '$e'});
+          : L.tp('doc.pickError', {'e': L.error(e)});
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       return;
@@ -769,7 +738,7 @@ class _DocumentsSection extends ConsumerWidget {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(L.tp('doc.readError', {'e': '$e'}))),
+        SnackBar(content: Text(L.tp('doc.readError', {'e': L.error(e)}))),
       );
       return;
     }
@@ -802,9 +771,7 @@ class _DocumentsSection extends ConsumerWidget {
       );
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      showErrorSnack(context, e);
     }
   }
 }
@@ -870,29 +837,14 @@ class _DocumentTile extends ConsumerWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.t('detail.documents.delete')),
-        content: Text(
-          attachmentTitle(attachment).isEmpty
-              ? L.t('doc.unknownType')
-              : attachmentTitle(attachment),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-            child: Text(L.t('action.delete')),
-          ),
-        ],
-      ),
+    final ok = await confirmDelete(
+      context,
+      title: L.t('detail.documents.delete'),
+      hint: attachmentTitle(attachment).isEmpty
+          ? L.t('doc.unknownType')
+          : attachmentTitle(attachment),
     );
-    if (ok != true) return;
+    if (!ok) return;
 
     await ref.read(appActionsProvider).deleteAttachment(
           petId: petId,

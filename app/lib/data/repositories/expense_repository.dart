@@ -5,9 +5,15 @@
 /// （朋友送的药）。所以两者不合并、也不互相推导 —— 想关联时用
 /// [Expense.recordId] 单边挂上去，不强求一一对应。
 ///
-/// 金额一律用 [double] 存最小货币单位之上（`amount REAL`）。
-/// 为什么不用「分」的整数：SQLite 的 REAL 在 1e-2 精度上完全够用，
-/// 而换算成整数分会让「12.5 元」这种输入在展示层到处要除 100。
+/// 金额存 [Expense.amountCents]（**整数分**，列名 `amount_cents`）。
+///
+/// 为什么不存 double「元」（2026-10-11 P2 改的口径）：浮点累加会出真实误差，
+/// 实测 `100 × 12.35 = 1234.9999999999998`、`1000 × 0.07 = 69.99999999999966`。
+/// 原先靠展示层 `formatMoney` 的判零阈值恰好吸收掉，但那是巧合不是设计 ——
+/// 金额不该依赖「误差够小」这个前提。整数分是财务软件的标准做法。
+///
+/// 对外接口仍收/回 `double`（表单是元的字符串），换算集中在
+/// [yuanToCents] / [centsToYuan] 两个函数里。
 library;
 
 import 'package:sqflite/sqflite.dart';
@@ -75,6 +81,9 @@ class ExpenseRepository {
   ///
   /// [spentAt] 默认今天 00:00 而不是 now()：费用是「哪天花」而不是「几点花」，
   /// 存到秒会让「同一天的两笔」在按月聚合之外还会因排序抖动，也没意义。
+  ///
+  /// [amount] 是**元**（表单输入的口径），内部立刻用 [yuanToCents] 转成整数分。
+  /// 传入非法值（NaN / 无穷）会抛 [ArgumentError]。
   Future<Expense> createSimple({
     required String petId,
     required double amount,
@@ -89,7 +98,7 @@ class ExpenseRepository {
     return create(Expense(
       id: _uuid.v4(),
       petId: petId,
-      amount: amount,
+      amountCents: yuanToCents(amount),
       currency: currency,
       category: category,
       spentAt: DateTime(spentAt.year, spentAt.month, spentAt.day),
@@ -152,10 +161,12 @@ class ExpenseRepository {
     }
 
     final rows = await _db.rawQuery(
-      'SELECT SUM(amount) AS s FROM $_table WHERE ${where.join(' AND ')}',
+      'SELECT SUM(amount_cents) AS s FROM $_table WHERE ${where.join(' AND ')}',
       args,
     );
-    return (rows.first['s'] as num?)?.toDouble() ?? 0;
+    // 整数求和，不产生表示误差；只有最后这一步转成「元」给展示层。
+    final cents = (rows.first['s'] as num?)?.toInt() ?? 0;
+    return centsToYuan(cents);
   }
 
   Future<int> countForPet(String petId) async {

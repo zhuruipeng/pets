@@ -22,22 +22,23 @@ import 'dart:convert';
 import 'package:sqflite_common/sqlite_api.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../domain/sync_ids.dart';
+import '../db/schema.dart';
 import 'sync_api.dart';
 import 'token_store.dart';
 
-/// 哪些表参与同步。与 schema.dart 的 kSyncedTables 一致 ——
-/// 那边决定「谁产生变更」，这边决定「谁能被应用」。
-const List<String> kSyncableTables = [
-  'users',
-  'pets',
-  'members',
-  'records',
-  'attachments',
-  'reminders',
-  'reminder_logs',
-  'expenses',
-  'walk_sessions',
-];
+/// 哪些表**能**被应用（apply）到本机。
+///
+/// ⚠️ **必须从 [kSyncedTables] 派生，不能另写一份字面量列表。**
+///
+/// 抽之前的状况是两份手写列表：`schema.dart` 的 `kSyncedTables`
+/// （决定「谁产生变更」，用来建触发器）和这里的 `kSyncableTables`
+/// （决定「谁能被应用」）。两边必须一字不差，却是同一份知识的两次誊写 ——
+/// 加表时只改一处，结果要么产生变更却应用不了（推到服务端、拉回来被丢弃），
+/// 要么反过来。而且**两边都不会报错**，只表现为某类数据静默不同步。
+///
+/// 现在只有一处真值：`kSyncedTables` 的 `table` 字段。
+final List<String> kSyncableTables = kSyncedTableNames;
 
 /// 一次同步的结果。
 class SyncReport {
@@ -585,9 +586,7 @@ class SyncEngine {
     // The server keeps the first completion of an occurrence. Its canonical
     // timestamp can be older than this device's duplicate offline completion.
     final isCompletion = c.table == 'reminder_logs' ||
-        (c.table == 'records' &&
-            c.rowId.startsWith('dose_') &&
-            c.op == 'upsert');
+        (c.table == 'records' && isDoseRecordId(c.rowId) && c.op == 'upsert');
     final pending = await txn.query('sync_outbox',
         where: 'table_name = ? AND row_id = ?',
         whereArgs: [c.table, c.rowId],

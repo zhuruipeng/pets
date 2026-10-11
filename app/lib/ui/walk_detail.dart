@@ -21,6 +21,7 @@ import '../core/units.dart';
 import '../data/models.dart';
 import '../providers.dart';
 import '../services/share_helper.dart';
+import 'sheet_scaffold.dart';
 import 'widgets.dart';
 
 Future<void> showWalkDetailSheet(
@@ -50,95 +51,64 @@ class _WalkDetailSheet extends ConsumerWidget {
 
     return FractionallySizedBox(
       heightFactor: 0.88,
-      child: Column(
-        children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                color: AppColors.divider,
-                borderRadius: BorderRadius.circular(2),
-              ),
+      child: SheetScaffold(
+        title: L.t('walk.detail'),
+        scrollable: false,
+        action: IconButton(
+          tooltip: L.t('lost.share'),
+          onPressed: () => _share(context, distUnit),
+          icon: const Icon(Icons.ios_share_rounded, size: 19),
+        ),
+        child: points.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => errorPlaceholder(e),
+          data: (pts) => ListView(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.page,
+              AppSpace.gapL,
+              AppSpace.page,
+              AppSpace.gapXl,
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpace.page),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    L.t('walk.detail'),
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
+            children: [
+              _TrackMap(points: pts),
+              if (!region.mapRenderingEnabled) ...[
+                const SizedBox(height: AppSpace.gapS),
+                Text(
+                  L.t('walk.noMapHint'),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.textTertiary,
                   ),
-                ),
-                IconButton(
-                  tooltip: L.t('lost.share'),
-                  onPressed: () => _share(context, distUnit),
-                  icon: const Icon(Icons.ios_share_rounded, size: 19),
                 ),
               ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: points.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('$e')),
-              data: (pts) => ListView(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpace.page,
-                  AppSpace.gapL,
-                  AppSpace.page,
-                  AppSpace.gapXl,
+
+              const SizedBox(height: AppSpace.gapL),
+              _Stats(session: session, unit: distUnit),
+
+              const SizedBox(height: AppSpace.gapL),
+              if ((session.mood ?? '').isNotEmpty)
+                _Row(
+                  icon: Icons.mood_rounded,
+                  label: L.t('walk.mood'),
+                  value:
+                      '${walkMoodEmoji(session.mood!)} ${L.t('walk.mood.${session.mood}')}',
                 ),
-                children: [
-                  _TrackMap(points: pts),
-                  if (!region.mapRenderingEnabled) ...[
-                    const SizedBox(height: AppSpace.gapS),
-                    Text(
-                      L.t('walk.noMapHint'),
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.textTertiary,
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: AppSpace.gapL),
-                  _Stats(session: session, unit: distUnit),
-
-                  const SizedBox(height: AppSpace.gapL),
-                  if ((session.mood ?? '').isNotEmpty)
-                    _Row(
-                      icon: Icons.mood_rounded,
-                      label: L.t('walk.mood'),
-                      value:
-                          '${walkMoodEmoji(session.mood!)} ${L.t('walk.mood.${session.mood}')}',
-                    ),
-                  if ((session.note ?? '').isNotEmpty)
-                    _Row(
-                      icon: Icons.sticky_note_2_outlined,
-                      label: L.t('detail.note'),
-                      value: session.note!,
-                    ),
-                  _Row(
-                    icon: Icons.route_outlined,
-                    label: L.t('walk.track'),
-                    value: pts.isEmpty
-                        ? L.t('walk.noTrack')
-                        : L.tp('walk.points', {'n': pts.length}),
-                  ),
-                ],
+              if ((session.note ?? '').isNotEmpty)
+                _Row(
+                  icon: Icons.sticky_note_2_outlined,
+                  label: L.t('detail.note'),
+                  value: session.note!,
+                ),
+              _Row(
+                icon: Icons.route_outlined,
+                label: L.t('walk.track'),
+                value: pts.isEmpty
+                    ? L.t('walk.noTrack')
+                    : L.tp('walk.points', {'n': pts.length}),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

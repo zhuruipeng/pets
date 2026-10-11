@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 
 import '../core/region.dart';
 import '../data/db/schema.dart';
+import '../domain/sync_ids.dart';
 
 const _tables = [
   'pets',
@@ -222,14 +223,19 @@ class BackupService {
               if (payload['due_at'] is! int) throw StateError('backup.invalid');
               final courseId = remap('reminders', payload['course_id']);
               ids['records']![row['id'] as String] =
-                  'dose_${courseId}_${payload['due_at']}';
+                  doseRecordId(
+                      reminderId: courseId,
+                      dueAt: DateTime.fromMillisecondsSinceEpoch(
+                          payload['due_at'] as int));
             }
           }
           for (final row in tables['reminder_logs']!) {
             if (row['due_at'] is! int) throw StateError('backup.invalid');
             final reminderId = remap('reminders', row['reminder_id']);
-            ids['reminder_logs']![row['id'] as String] =
-                'log_${reminderId}_${row['due_at']}';
+            ids['reminder_logs']![row['id'] as String] = reminderLogId(
+              reminderId: reminderId,
+              dueAt: DateTime.fromMillisecondsSinceEpoch(row['due_at'] as int),
+            );
           }
           if (ids.values
               .any((map) => map.values.toSet().length != map.length)) {

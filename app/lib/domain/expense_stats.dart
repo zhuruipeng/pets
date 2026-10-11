@@ -81,33 +81,40 @@ ExpenseSummary buildExpenseSummary(
   final nextMonth =
       now.month == 12 ? DateTime(now.year + 1, 1, 1) : DateTime(now.year, now.month + 1, 1);
 
-  double monthTotal = 0;
-  double allTotal = 0;
+  // 累加一律用**整数分**（[Expense.amountCents]），只在最后一次性转成元。
+  //
+  // 为什么不用 double 直接累加（2026-10-11 P2）：实测 30 笔 0.10 元累加得到
+  // `3.0000000000000013`，1000 笔 0.07 元得到 `69.99999999999966`。界面上看
+  // 不出来只是因为 `formatMoney` 的判零阈值恰好吸收了末位误差 —— 靠巧合。
+  // 汇总和存储用同一口径（整数分），换算只发生在边界。
+  var monthCents = 0;
+  var allCents = 0;
   var monthCount = 0;
 
   // 月度桶按「年*12+月序号」做键：跨年往前推时用 month - i 会算出 0 或负数，
   // 又得手写借位；换成整数轴就没有这个分支。
-  final buckets = <int, double>{};
+  final buckets = <int, int>{};
   final thisIdx = now.year * 12 + (now.month - 1);
   for (var i = 0; i < monthsBack; i++) {
     final idx = thisIdx - (monthsBack - 1 - i);
     buckets[_key(idx ~/ 12, idx % 12 + 1)] = 0;
   }
 
-  final catTotals = <ExpenseCategory, double>{};
+  final catCents = <ExpenseCategory, int>{};
 
   for (final e in all) {
-    allTotal += e.amount;
+    final cents = e.amountCents;
+    allCents += cents;
 
     if (!e.spentAt.isBefore(monthStart) && e.spentAt.isBefore(nextMonth)) {
-      monthTotal += e.amount;
+      monthCents += cents;
       monthCount++;
-      catTotals[e.category] = (catTotals[e.category] ?? 0) + e.amount;
+      catCents[e.category] = (catCents[e.category] ?? 0) + cents;
     }
 
     final k = _key(e.spentAt.year, e.spentAt.month);
     if (buckets.containsKey(k)) {
-      buckets[k] = buckets[k]! + e.amount;
+      buckets[k] = buckets[k]! + cents;
     }
   }
 
@@ -115,22 +122,25 @@ ExpenseSummary buildExpenseSummary(
     // 键是「年*12+月序号」，升序即时间升序。
     ..sort((a, b) => a.key.compareTo(b.key));
 
-  final byCategory = catTotals.entries
+  final byCategory = catCents.entries
       .where((e) => e.value > 0)
-      .map((e) => ExpenseSlice(category: e.key, total: e.value))
+      .map((e) => ExpenseSlice(
+            category: e.key,
+            total: centsToYuan(e.value),
+          ))
       .toList()
     ..sort((a, b) => b.total.compareTo(a.total));
 
   return ExpenseSummary(
-    monthTotal: monthTotal,
-    allTotal: allTotal,
+    monthTotal: centsToYuan(monthCents),
+    allTotal: centsToYuan(allCents),
     monthCount: monthCount,
     months: [
       for (final e in months)
         ExpenseMonth(
           year: e.key ~/ 12,
           month: e.key % 12 + 1,
-          total: e.value,
+          total: centsToYuan(e.value),
         ),
     ],
     byCategory: byCategory,

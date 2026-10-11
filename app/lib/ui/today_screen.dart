@@ -294,7 +294,7 @@ class _PetHeroCard extends ConsumerWidget {
                           ),
                         ),
                         const SizedBox(width: 5),
-                        _GenderMark(gender: pet.gender),
+                        GenderMark(gender: pet.gender, fontSize: 16),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -655,30 +655,6 @@ class _QuickAddTile extends StatelessWidget {
   }
 }
 
-/// 性别符号。参考稿把母标记画成粉色 ♀，公狗是蓝色 ♂。
-///
-/// 未知性别返回空盒子，不要凭空画一个符号出来 —— 那是编数据。
-class _GenderMark extends StatelessWidget {
-  const _GenderMark({required this.gender});
-
-  final String? gender;
-
-  @override
-  Widget build(BuildContext context) {
-    final g = (gender ?? '').trim().toLowerCase();
-    final (symbol, color) = switch (g) {
-      'female' || 'f' || '母' || '雌' => ('♀', const Color(0xFFEC4899)),
-      'male' || 'm' || '公' || '雄' => ('♂', const Color(0xFF3B82F6)),
-      _ => ('', AppColors.textTertiary),
-    };
-    if (symbol.isEmpty) return const SizedBox.shrink();
-    return Text(
-      symbol,
-      style: TextStyle(fontSize: 16, height: 1, color: color),
-    );
-  }
-}
-
 // ------------------------------------------------------------------ 今日待办
 
 /// 今日待办：标题 + 「查看全部」，下面是横向滚动的小卡。
@@ -912,7 +888,29 @@ class _TodoActionsState extends ConsumerState<_TodoActions> {
   @override
   void didUpdateWidget(_TodoActions old) {
     super.didUpdateWidget(old);
-    if (_index >= widget.reminders.length) _index = 0;
+    // 按**提醒 id** 追踪，而不是按下标（2026-10-11 P2 修）。
+    //
+    // 原实现是 `if (_index >= widget.reminders.length) _index = 0;` —— 只兜
+    // 「越界」。而当列表被换成**同样长度、不同内容**时（完成后自动刷新是常见
+    // 路径：第 0 条从 A 变成 B），`_index` 仍然合法，于是操作条静默指向了另
+    // 一条：卡片标题变了，但用户刚点的那颗「跳过」打的其实是别的提醒。
+    // **这是误操作，不是纯显示问题。**
+    //
+    // 正确的语义是「跟着同一条提醒走」。做法：拿**上一轮的列表**（`old`）
+    // 找出当前下标对应的 id，再在新列表里找它；找不到才夹到合法范围。
+    // 用 `old.reminders` 而不是自己缓存 id，少一份要同步的状态。
+    final prev = old.reminders;
+    if (prev.isEmpty || widget.reminders.isEmpty) {
+      _index = 0;
+      return;
+    }
+    if (_index >= prev.length) {
+      _index = widget.reminders.length - 1;
+      return;
+    }
+    final wantedId = prev[_index].id;
+    final found = widget.reminders.indexWhere((r) => r.id == wantedId);
+    _index = found >= 0 ? found : _index.clamp(0, widget.reminders.length - 1);
   }
 
   @override

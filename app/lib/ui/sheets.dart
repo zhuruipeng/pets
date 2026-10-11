@@ -414,7 +414,7 @@ class _AddPetSheetState extends ConsumerState<_AddPetSheet> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = '$e';
+        _error = L.error(e);
       });
     }
   }
@@ -1299,7 +1299,7 @@ class _AddRecordSheetState extends ConsumerState<_AddRecordSheet> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = '$e';
+        _error = L.error(e);
       });
     }
   }
@@ -1753,7 +1753,7 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = '$e';
+        _error = L.error(e);
       });
     }
   }

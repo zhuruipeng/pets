@@ -33,7 +33,7 @@ class MedicationCoursesPage extends ConsumerWidget {
           : null,
       body: reminders.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('$e')),
+        error: (e, _) => errorPlaceholder(e),
         data: (all) {
           final courses = all
               .where((r) => r.rule['mode'] == 'medication')
@@ -227,25 +227,17 @@ class _CourseCardState extends ConsumerState<_CourseCard> {
   Future<void> _give() async {
     final reminder = widget.reminder;
     final course = MedicationCourse.fromReminder(reminder)!;
-    final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-              title: Text(L.t('med.givenConfirm')),
-              content: Text(L.tp('med.givenHint', {
-                'name': course.name,
-                'dose': course.dose,
-                'time': compactDateTime(reminder.nextAt)
-              })),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: Text(L.t('action.cancel'))),
-                FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: Text(L.t('med.given')))
-              ],
-            ));
-    if (ok != true || !mounted) return;
+    final ok = await confirmAction(
+      context,
+      title: L.t('med.givenConfirm'),
+      hint: L.tp('med.givenHint', {
+        'name': course.name,
+        'dose': course.dose,
+        'time': compactDateTime(reminder.nextAt)
+      }),
+      confirmLabel: L.t('med.given'),
+    );
+    if (!ok || !mounted) return;
     await _run(() async {
       final result = await ref
           .read(appActionsProvider)
@@ -258,21 +250,13 @@ class _CourseCardState extends ConsumerState<_CourseCard> {
   }
 
   Future<void> _delete() async {
-    final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-              title: Text(L.t('reminder.deleteConfirm')),
-              content: Text(L.t('reminder.deleteConfirm.hint')),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: Text(L.t('action.cancel'))),
-                FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: Text(L.t('reminder.delete')))
-              ],
-            ));
-    if (ok == true && mounted) {
+    final ok = await confirmDelete(
+      context,
+      title: L.t('reminder.deleteConfirm'),
+      hint: L.t('reminder.deleteConfirm.hint'),
+      confirmLabel: L.t('reminder.delete'),
+    );
+    if (ok && mounted) {
       await _run(
           () => ref.read(appActionsProvider).deleteReminder(widget.reminder));
     }

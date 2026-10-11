@@ -343,7 +343,7 @@ def _send_email_code(
             with smtplib.SMTP_SSL(
                 settings.smtp_host, settings.smtp_port, timeout=20
             ) as srv:
-                srv.login(settings.smtp_user, settings.smtp_password)
+                srv.login(settings.smtp_user, settings.smtp_password.get_secret_value())
                 srv.send_message(msg)
         else:
             # 587：先明文连上再 STARTTLS 升级。
@@ -351,7 +351,7 @@ def _send_email_code(
                 settings.smtp_host, settings.smtp_port, timeout=20
             ) as srv:
                 srv.starttls()
-                srv.login(settings.smtp_user, settings.smtp_password)
+                srv.login(settings.smtp_user, settings.smtp_password.get_secret_value())
                 srv.send_message(msg)
     except smtplib.SMTPAuthenticationError:
         # 最常见的一种：把登录密码当成了授权码。错误信息里说清楚。
@@ -486,7 +486,7 @@ def request_code(
     # 邮件通道是否真的可用：**看 SMTP 有没有配齐**，而不是看 email_provider
     # 这个标志位。后者只是一个「打算用邮件」的意图标记，为空不代表发不出去。
     has_provider = (
-        bool(settings.smtp_host and settings.smtp_user and settings.smtp_password)
+        settings.smtp_configured
         if payload.channel == "email"
         else bool(settings.sms_provider)
     )

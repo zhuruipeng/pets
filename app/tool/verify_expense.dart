@@ -24,6 +24,7 @@ void check(bool ok, String what) {
   }
 }
 
+/// 按「元」造一条支出（走 [yuanToCents] 换算），与表单输入的口径一致。
 Expense _e(
   ExpenseCategory c,
   double amount,
@@ -34,7 +35,7 @@ Expense _e(
     Expense(
       id: 'e-${at.millisecondsSinceEpoch}-${c.wireName}',
       petId: 'p1',
-      amount: amount,
+      amountCents: yuanToCents(amount),
       currency: currency,
       category: c,
       spentAt: at,
@@ -179,6 +180,93 @@ void main() {
   final three = buildExpenseSummary(sep, now: now, monthsBack: 3);
   check(three.months.length == 3, 'monthsBack=3 只出 3 个桶');
   check(three.allTotal == 1240, '桶的多少不影响累计，实际 ${three.allTotal}');
+
+  // ---- 12) 元 ⇄ 分 换算（P2 改整数分后的核心约束）----
+  // 这一节存在的理由：换成整数分**不是为了好看**，而是因为浮点累加会漂。
+  // 下面每条都是「旧实现会错、新实现必须对」的靶子。
+  check(yuanToCents(0) == 0, '0 元 = 0 分');
+  check(yuanToCents(120) == 12000, '整数元：120 → 12000 分');
+  check(yuanToCents(12.35) == 1235,
+      '两位小数：12.35 → 1235 分（不是 1234），实际 ${yuanToCents(12.35)}');
+  check(yuanToCents(12.34) == 1234, '12.34 → 1234 分，实际 ${yuanToCents(12.34)}');
+  check(yuanToCents(0.07) == 7, '0.07 → 7 分，实际 ${yuanToCents(0.07)}');
+  check(yuanToCents(0.1) == 10, '0.1 → 10 分，实际 ${yuanToCents(0.1)}');
+  check(yuanToCents(-12.5) == -1250, '负数（退款）同样换算，实际 ${yuanToCents(-12.5)}');
+  check(yuanToCents(12.345) == 1235, '多余小数位四舍五入，实际 ${yuanToCents(12.345)}');
+  check(yuanToCents(12.344) == 1234, '多余小数位向下舍，实际 ${yuanToCents(12.344)}');
+
+  // 分 → 元 是精确的（整数除以 100 在二进制里不精确，但值是对的）。
+  check(centsToYuan(12000) == 120, '12000 分 = 120 元');
+  check(centsToYuan(1235) == 12.35, '1235 分 = 12.35 元');
+  check(centsToYuan(0) == 0, '0 分 = 0 元');
+  check(centsToYuan(-1250) == -12.5, '负数分回元');
+
+  // 往返：元 → 分 → 元 在「两位以内」的值上必须逐位相等。
+  for (final v in <double>[0, 1, 12.34, 12.35, 99.99, 0.07, 1234.56, -7.77]) {
+    final back2 = centsToYuan(yuanToCents(v));
+    check(back2 == v, '元→分→元 往返无损：$v，实际 $back2');
+  }
+
+  // 非法输入必须抛，不能静默变成 0 —— 否则用户清空金额框会记成 0 元支出。
+  var threwNan = false;
+  try {
+    yuanToCents(double.nan);
+  } on ArgumentError {
+    threwNan = true;
+  }
+  check(threwNan, 'NaN 金额抛 ArgumentError（不静默记 0）');
+
+  var threwInf = false;
+  try {
+    yuanToCents(double.infinity);
+  } on ArgumentError {
+    threwInf = true;
+  }
+  check(threwInf, '无穷金额抛 ArgumentError');
+
+  // ---- 13) 为什么必须用整数分：浮点会漂，整数不会 ----
+  // 这是本次改造的**唯一理由**，所以必须在测试里把反例钉死，
+  // 免得将来有人「为了简洁」又改回 double。
+  const fpDrift = 0.0;
+  var fpSum = fpDrift;
+  for (var i = 0; i < 1000; i++) {
+    fpSum += 0.07;
+  }
+  check(fpSum != 70.0, '浮点累加 1000 次 0.07 会漂（实际 $fpSum）');
+
+  var intSum = 0;
+  for (var i = 0; i < 1000; i++) {
+    intSum += yuanToCents(0.07);
+  }
+  check(intSum == 7000, '整数分累加 1000 次 0.07 精确等于 7000，实际 $intSum');
+  check(centsToYuan(intSum) == 70.0, '且换算回元恰好是 70');
+
+  // 注意：这里刻意**不**断言 `100 * 12.35 != 1235`。
+  // 我第一版那么写过，实测是错的：Dart 里 `100 * 12.35` 恰好得到 `1235.0`
+  // （两个操作数的舍入误差正好抵消）。浮点的问题不是「某个表达式一定错」，
+  // 而是「换个数字/换个顺序就可能错」—— 所以要钉的是能稳定复现的那几种。
+  check((0.1 + 0.2) != 0.3, '经典反例：0.1 + 0.2 != 0.3（实际 ${0.1 + 0.2}）');
+
+  var sevenK = 0.0;
+  for (var i = 0; i < 1000; i++) {
+    sevenK += 0.07;
+  }
+  check(sevenK != 70.0, '浮点累加 1000 次 0.07 不恰好是 70（实际 $sevenK）');
+
+  // 1000 × 12.35：乘法这次是干净的，但换成「先累加」就脏了 —— 这正是仓储层
+  // `SUM(amount_cents)` 存在的理由。
+  check(1235 * 100 == 123500, '整数分：1235 分 × 100 = 123500 分（精确）');
+
+  // ---- 14) 汇总走的是整数分，不受浮点影响 ----
+  // 30 笔 0.10 元 = 3.00 元。用 double 走 SUM 会得到 2.9999999999999996。
+  final tiny = <Expense>[
+    for (var i = 0; i < 30; i++)
+      _e(ExpenseCategory.other, 0.10, DateTime(2026, 9, 5 + (i % 20))),
+  ];
+  final tinySum = buildExpenseSummary(tiny, now: now);
+  check(tinySum.monthTotal == 3.0,
+      '30 笔 0.10 元合计恰好 3.0 元（不是 2.9999999999999996），实际 ${tinySum.monthTotal}');
+  check(tinySum.allTotal == 3.0, '累计同样精确，实际 ${tinySum.allTotal}');
 
   print('');
   print('通过 $_passed 项，失败 $_failed 项');

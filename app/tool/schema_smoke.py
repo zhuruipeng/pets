@@ -103,10 +103,10 @@ def main():
                       " rule, next_at, enabled, created_at, updated_at)"
                       " VALUES ('rm1','p1','vaccine','t','{}',1300,1,"
                       " 1200,1200)"),
-        ("expenses", "INSERT INTO expenses (id, pet_id, amount, currency,"
+        ("expenses", "INSERT INTO expenses (id, pet_id, amount_cents, currency,"
                      " category, spent_at, created_by, created_at,"
                      " updated_at) VALUES "
-                     "('e1','p1',120.0,'CNY','medical',1200,'u1',1200,1200)"),
+                     "('e1','p1',12000,'CNY','medical',1200,'u1',1200,1200)"),
         ("walk_sessions", "INSERT INTO walk_sessions (id, pet_id,"
                           " started_at, region, created_by, created_at,"
                           " updated_at) VALUES "
@@ -135,9 +135,9 @@ def main():
     db.execute("INSERT OR REPLACE INTO sync_meta (key, value)"
                " VALUES ('applying','1')")
     db.execute("DELETE FROM sync_outbox")
-    db.execute("INSERT INTO expenses (id, pet_id, amount, currency, category,"
-               " spent_at, created_by, created_at, updated_at) VALUES "
-               "('e2','p1',5,'CNY','food',1400,'u1',1400,1400)")
+    db.execute("INSERT INTO expenses (id, pet_id, amount_cents, currency,"
+               " category, spent_at, created_by, created_at, updated_at)"
+               " VALUES ('e2','p1',500,'CNY','food',1400,'u1',1400,1400)")
     assert not list(db.execute("SELECT * FROM sync_outbox")), \
         "applying=1 时触发器必须哑火，否则同步会自激循环"
     db.execute("DELETE FROM sync_meta WHERE key='applying'")
@@ -166,19 +166,29 @@ def main():
     #
     # 容忍两类「已存在」：onCreate 已经建过同名列 / 表 / 索引 / 触发器。
     # **只容忍这两种措辞**，真正的语法错、列名拼错会被留下来报出来。
-    # v6 是个例外也是重点：它先 DROP 再 CREATE，所以那两条 CREATE 是
-    # 真跑成功的 —— 它会被下面的 local_only 断言再验一遍。
+    #
+    # 两级迁移是特例，都在别处被真跑验证，这里只查「其余语句语法对不对」：
+    # - v6：先 DROP 再 CREATE，那两条 CREATE 在本阶段就是真跑成功的。
+    # - v8：重建 expenses 表，`SELECT amount`（旧列名）在「本版本建出来的库」
+    #   上必然找不到 —— `no such column` 是**预期**的，不是手误。
+    #   它在第 7 节用真正的 v7 老库结构跑过一遍，那才是有意义的验证。
+    KNOWN_REPLAY_ERRORS = {
+        "migration 8": ["no such column: amount"],
+    }
     bad = []
     for v in sorted(migs, key=lambda k: int(k.split()[1])):
         probe = sqlite3.connect(":memory:")
         for stmt in on_create:
             probe.execute(stmt)
+        tolerated = KNOWN_REPLAY_ERRORS.get(v, [])
         for stmt in migs[v]:
             try:
                 probe.execute(stmt)
             except sqlite3.OperationalError as e:
                 msg = str(e)
                 if "duplicate column name" in msg or "already exists" in msg:
+                    continue
+                if any(t in msg for t in tolerated):
                     continue
                 bad.append(f"  v{v}: {msg}\n    {stmt.splitlines()[0][:90]}")
 
@@ -267,6 +277,106 @@ CREATE TABLE attachments (
         f"老照片要照常同步，实际 {rows}"
     probe.close()
     print("v6 升级路径：老库补列成功、触发器被换掉、文档拦得住、老照片照常同步")
+
+    # ---- 7) v7 → v8 升级路径：金额 REAL「元」→ INTEGER「分」 ----
+    # 这是全库唯一一次**数据类型变更**（SQLite 不支持 ALTER COLUMN），
+    # 走的是「建新表 → 搬运 → 删旧 → 改名 → 重建索引/触发器」。
+    # 三个必须验的点：
+    #   a) 老金额被正确换算成分（ROUND 不能省，否则 12.35 会截成 1234）
+    #   b) 老行要重新进 outbox —— 否则其他设备永远拿不到新格式的金额
+    #   c) 触发器/索引真的重建了（漏了的话那张表从此不同步）
+    OLD_EXPENSES = """
+CREATE TABLE expenses (
+  id          TEXT PRIMARY KEY,
+  pet_id      TEXT NOT NULL,
+  amount      REAL NOT NULL,
+  currency    TEXT NOT NULL DEFAULT 'CNY',
+  category    TEXT NOT NULL DEFAULT 'other',
+  spent_at    INTEGER NOT NULL,
+  note        TEXT,
+  record_id   TEXT,
+  created_by  TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER,
+  deleted_at  INTEGER
+);
+"""
+    probe = sqlite3.connect(":memory:")
+    probe.row_factory = sqlite3.Row
+    for stmt in on_create:
+        if "expenses" in stmt:
+            continue  # 表用 v7 时代的老结构另建，索引/触发器由 v8 迁移重建。
+        probe.execute(stmt)
+    probe.execute(OLD_EXPENSES)
+
+    # 老数据：挑几个「换算会出错」的典型值。
+    #   12.35 → 1235（不 ROUND 会 truncate 成 1234）
+    #    0.07 →    7
+    #  120.0  → 12000
+    #   -12.5 → -1250（退款，负号必须保住）
+    #    0.0   →    0
+    legacy = [
+        ("e1", 12.35, 1000),
+        ("e2", 0.07, 2000),
+        ("e3", 120.0, 3000),
+        ("e4", -12.5, 4000),
+        ("e5", 0.0, 5000),
+    ]
+    for eid, amt, ts in legacy:
+        probe.execute(
+            "INSERT INTO expenses (id, pet_id, amount, currency, category,"
+            " spent_at, created_by, created_at, updated_at) VALUES"
+            " (?, 'p1', ?, 'CNY', 'food', ?, 'u1', ?, ?)",
+            (eid, amt, ts, ts, ts),
+        )
+
+    for stmt in migs["migration 8"]:
+        probe.execute(stmt)
+
+    # a) 列类型与名字都换了。
+    cols = {r["name"]: r["type"] for r in probe.execute(
+        "PRAGMA table_info(expenses)")}
+    assert "amount_cents" in cols, "v8 之后必须有 amount_cents 列"
+    assert "amount" not in cols, "v8 之后旧的 amount 列必须消失"
+    assert cols["amount_cents"].upper() == "INTEGER", \
+        f"amount_cents 必须是 INTEGER，实际 {cols['amount_cents']}"
+
+    # b) 每一笔的换算都对。
+    want = {"e1": 1235, "e2": 7, "e3": 12000, "e4": -1250, "e5": 0}
+    got = {r["id"]: r["amount_cents"] for r in probe.execute(
+        "SELECT id, amount_cents FROM expenses")}
+    assert got == want, f"换算结果不对：期望 {want}，实际 {got}"
+
+    # c) 老行重新进了 outbox（不然别的设备还是老金额）。
+    out = {r["row_id"] for r in probe.execute(
+        "SELECT row_id FROM sync_outbox WHERE table_name='expenses'")}
+    assert out == set(want), f"老费用行应全部重推，实际 {out}"
+    ops = {r["op"] for r in probe.execute(
+        "SELECT op FROM sync_outbox WHERE table_name='expenses'")}
+    assert ops == {"upsert"}, f"重推应是 upsert，实际 {ops}"
+
+    # d) 索引与触发器真的重建了（漏了就从此不同步 / 查询变慢）。
+    idx = {r[0] for r in probe.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='expenses'")}
+    assert any("pet" in n or "spent" in n for n in idx), \
+        f"expenses 的索引没重建，实际 {idx}"
+    trg = {r[0] for r in probe.execute(
+        "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='expenses'")}
+    assert "trg_expenses_outbox_ins" in trg, f"INSERT 触发器没重建，实际 {trg}"
+    assert "trg_expenses_outbox_upd" in trg, f"UPDATE 触发器没重建，实际 {trg}"
+
+    # e) 迁移后的表真的能写（新触发器生效）。
+    probe.execute("DELETE FROM sync_outbox")
+    probe.execute(
+        "INSERT INTO expenses (id, pet_id, amount_cents, currency, category,"
+        " spent_at, created_by, created_at, updated_at) VALUES"
+        " ('e9','p1',99,'CNY','food',9000,'u1',9000,9000)")
+    rows = list(probe.execute(
+        "SELECT * FROM sync_outbox WHERE row_id='e9'"))
+    assert len(rows) == 1 and rows[0]["pet_id"] == "p1", \
+        "迁移后新写入必须照常进 outbox"
+    probe.close()
+    print("v7→v8 升级路径：REAL 元 正确换算为 INTEGER 分、老行重推、索引/触发器重建")
 
     print("\n全部通过")
 

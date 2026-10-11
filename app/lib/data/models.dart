@@ -11,22 +11,78 @@ import 'dart:convert';
 import '../core/species.dart';
 
 // ---------------------------------------------------------------- 转换助手
+//
+// ⚠️ 这一组助手都遵循同一条规则：**坏数据当缺省值处理，绝不抛异常**。
+//
+// 为什么：这些函数在 `fromMap` 里逐字段被调用，任何一处抛异常都会让
+// `fromMap` 整个失败（`FutureProvider` 变成 error → 整页显示「出错了」）。
+// 一条脏数据（比如某次同步写进来的 null 或字符串）就能让用户**打不开
+// 自己的宠物页**，代价完全不成比例。
+//
+// 抽之前的实际状况是**不对称的**：`_strList` 有 try/catch，
+// 而 `_json` / `_dt` / `_bool` 是硬 cast（`as int` / `as Map`）——
+// 同一个风险，四个函数里只防了一个。审查就是在看 `_json` 时发现的。
+//
+// 注意这里**不做「猜」**：解析不出来就返回缺省值，不尝试把 '123' 变成
+// 123、不把 'true' 变成 true。静默的类型纠正会掩盖真正的同步 bug，
+// 而那些 bug 需要被发现、而不是被抹平。
 
-DateTime? _dt(Object? v) =>
-    v == null ? null : DateTime.fromMillisecondsSinceEpoch(v as int);
+/// 毫秒时间戳 → DateTime。
+///
+/// 容忍数字字符串（`'1712345678000'`）：SQLite 的 INTEGER 列经过某些
+/// JSON 往返后会变成字符串，这是**已知且无害**的一种偏差，直接转掉。
+/// 其余形状（布尔 / 对象 / 无法解析的串）一律当 null 处理。
+DateTime? _dt(Object? v) {
+  if (v == null) return null;
+  if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+  if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+  if (v is String) {
+    final n = int.tryParse(v);
+    return n == null ? null : DateTime.fromMillisecondsSinceEpoch(n);
+  }
+  return null;
+}
 
 int? _ms(DateTime? d) => d?.millisecondsSinceEpoch;
 
-bool _bool(Object? v) => (v as int?) == 1;
+/// 0/1 → bool。其它值当 false，不抛。
+bool _bool(Object? v) => v == 1 || v == true || v == '1';
 
 int _boolToInt(bool v) => v ? 1 : 0;
 
+// ---- 金额：元 ⇄ 分 ----------------------------------------------------
+//
+// 放在这里而不是 expense_stats.dart，是因为 models.dart 不能反向依赖它
+// （expense_stats 已经 import 了 models，会形成环）。
+
+/// 「元」→「分」。[Expense.amountCents] 的唯一入口。
+///
+/// **必须走四舍五入**，不能直接 `(yuan * 100).round()` 之外的做法：
+/// `(12.35 * 100)` 在 IEEE754 下是 `1234.9999999999998`，
+/// 直接 `toInt()` 会截断成 **1234** —— 每笔少一分钱，且只在部分金额上出现。
+/// `.round()` 才把它拉回 1235。
+int yuanToCents(double yuan) {
+  if (yuan.isNaN || yuan.isInfinite) {
+    throw ArgumentError('expense.amountRequired');
+  }
+  return (yuan * 100).round();
+}
+
+/// 「分」→「元」。**只用于展示**，不要拿结果参与累加。
+double centsToYuan(int cents) => cents / 100;
+
+/// JSON 对象字符串 → Map。坏数据当空 Map，不抛。
 Map<String, dynamic> _json(Object? v) {
   if (v == null) return const {};
   if (v is Map<String, dynamic>) return v;
-  final raw = v as String;
-  if (raw.isEmpty) return const {};
-  return jsonDecode(raw) as Map<String, dynamic>;
+  if (v is! String) return const {};
+  if (v.isEmpty) return const {};
+  try {
+    final decoded = jsonDecode(v);
+    return decoded is Map<String, dynamic> ? decoded : const {};
+  } on FormatException {
+    return const {};
+  }
 }
 
 // ---------------------------------------------------------------- 记录类型
@@ -278,10 +334,12 @@ class Pet {
 /// 一条脏数据不该让整页打不开。
 List<String> _strList(Object? v) {
   if (v == null) return const <String>[];
-  final raw = v as String;
-  if (raw.trim().isEmpty) return const <String>[];
+  // 已经是 List 就直接用（某些调用方传的就是解码后的值，不过 JSON 串）。
+  if (v is List) return v.map((e) => '$e').toList(growable: false);
+  if (v is! String) return const <String>[];
+  if (v.trim().isEmpty) return const <String>[];
   try {
-    final decoded = jsonDecode(raw);
+    final decoded = jsonDecode(v);
     if (decoded is List) {
       return decoded.map((e) => '$e').toList(growable: false);
     }
@@ -888,7 +946,7 @@ class Expense {
   const Expense({
     required this.id,
     required this.petId,
-    required this.amount,
+    required this.amountCents,
     required this.currency,
     required this.category,
     required this.spentAt,
@@ -900,9 +958,60 @@ class Expense {
     this.deletedAt,
   });
 
+  /// 从「元」构造（表单输入是元的字符串）。**只应在输入边界使用** ——
+  /// 之后的存储、累加、比较一律用 [amountCents]。
+  factory Expense.fromYuan({
+    required String id,
+    required String petId,
+    required double yuan,
+    required String currency,
+    required ExpenseCategory category,
+    required DateTime spentAt,
+    required String createdBy,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    String? note,
+    String? recordId,
+    DateTime? deletedAt,
+  }) =>
+      Expense(
+        id: id,
+        petId: petId,
+        amountCents: yuanToCents(yuan),
+        currency: currency,
+        category: category,
+        spentAt: spentAt,
+        createdBy: createdBy,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        note: note,
+        recordId: recordId,
+        deletedAt: deletedAt,
+      );
+
   final String id;
   final String petId;
-  final double amount;
+
+  /// 金额，单位是**分**（整数）。
+  ///
+  /// ## 为什么不是 double（2026-10-11 P2 改）
+  ///
+  /// 用 double 存「元」会累加出真实误差，本机实测：
+  ///
+  ///     100 × 12.35 = 1234.9999999999998
+  ///     1000 × 0.07 = 69.99999999999966
+  ///
+  /// 界面上暂时看不出来只是因为 `formatMoney` 的判零阈值（0.005）
+  /// 恰好吸收了 1e-13 量级的偏差 —— 靠巧合而不是靠设计。
+  /// 金额不该这样。整数分是财务软件的标准做法：
+  /// 加减乘除全在整数域，不产生表示误差。
+  final int amountCents;
+
+  /// 金额的「元」表示。**只给展示用**（`formatMoney` 等）。
+  ///
+  /// ⚠️ **不要拿它去参与累加或相等比较** —— 那就等于把误差又请回来了。
+  /// 需要汇总就累加 [amountCents]，最后再转一次。
+  double get amount => amountCents / 100;
 
   /// ISO 代码（CNY / USD…），不是符号。
   final String currency;
@@ -925,7 +1034,7 @@ class Expense {
   factory Expense.fromMap(Map<String, dynamic> m) => Expense(
         id: m['id'] as String,
         petId: m['pet_id'] as String,
-        amount: (m['amount'] as num).toDouble(),
+        amountCents: (m['amount_cents'] as num).toInt(),
         currency: m['currency'] as String,
         category: expenseCategoryFromWire(m['category'] as String?),
         spentAt: _dt(m['spent_at'])!,
@@ -940,7 +1049,7 @@ class Expense {
   Map<String, dynamic> toMap() => {
         'id': id,
         'pet_id': petId,
-        'amount': amount,
+        'amount_cents': amountCents,
         'currency': currency,
         'category': category.wireName,
         'spent_at': _ms(spentAt)!,

@@ -28,12 +28,41 @@ class L {
     return table[key] ?? _en[key] ?? key;
   }
 
-  /// Domain errors carry translation keys; show their message without wrappers.
+  /// 把异常渲染成**给用户看**的文案。
+  ///
+  /// 分两类，这是关键：
+  ///
+  /// 1. **领域异常**（`ArgumentError` / `StateError`）抛出的是翻译 key
+  ///    （如 `'care.error.changed'`），直接查表即可 —— 这类是「我们主动
+  ///    告诉用户原因」，文案是写好的。
+  /// 2. **其它异常**一律**不把原文甩给用户**。
+  ///
+  /// 第 2 条是 2026-10-11 改的（P2）。原先的兜底是 `'$error'`，
+  /// 于是界面上会出现：
+  ///
+  /// ```
+  /// SocketException: Connection refused (OS Error: Connection refused, errno = 111),
+  /// address = api.pet.weiyuantool.com, port = 44300
+  /// ```
+  ///
+  /// 三个问题：用户看不懂；暴露内部域名与端口；同类异常每台设备文案都不一样，
+  /// 用户反馈时说不清、我们也搜不到。审查时发现有约 8 处直接 `Text('$e')`。
+  ///
+  /// 兜底文案刻意做得**可行动**（「检查网络后重试」）而不是「未知错误」——
+  /// 后者等于没说，用户唯一能做的就是截图问人。
   static String error(Object error) {
     final message = error is ArgumentError ? error.message
         : error is StateError ? error.message : null;
-    return message is String ? t(message) : '$error';
+    if (message is String) {
+      // 领域异常的 message 是 key；查不到表说明它不是 key（比如直接抛了
+      // 中文句子），此时 t() 会原样返回，仍然合理。
+      return t(message);
+    }
+    return t('error.generic');
   }
+
+  /// 断网/超时类的异常文案（比 [error] 更具体，用在本机网络明显不可用时）。
+  static String get offline => t('error.offline');
 
   /// 两张表的键差。给测试用的 —— 加中文忘加英文是最常见的翻车方式，
   /// 而 [t] 的回落逻辑（zh 缺就去 en 找）会把它藏起来，运行期看不出来。
@@ -452,6 +481,11 @@ class L {
     'action.back': '上一步',
     'action.next': '下一步',
 
+    // 异常兜底（P2）。刻意写成「可行动」的句子而不是「未知错误」——
+    // 后者用户唯一能做的只有截图问人。
+    'error.generic': '操作没成功，请稍后重试。',
+    'error.offline': '网络不可用，请检查连接后重试。',
+
     'addPet.progress': '第 {a} 步 / 共 {b} 步',
     'addPet.step1.title': '先认识一下',
     'addPet.step1.hint': '只需要名字，别的都可以以后再补',
@@ -788,6 +822,7 @@ class L {
     'members.status.pending': '待接受',
     'members.invite.sent': '邀请已发出',
     'members.invite.failed': '邀请失败',
+    'members.alreadyMember': '对方已经是这只宠物的成员了',
     'members.notRegistered': '对方还没有账号，让他先安装并登录一次',
     'members.remove': '移除',
     'members.removeConfirm': '把 {name} 移出共养？',
@@ -1226,6 +1261,9 @@ class L {
     'action.back': 'Back',
     'action.next': 'Next',
 
+    'error.generic': "That didn't work. Please try again.",
+    'error.offline': 'No network connection. Check your connection and retry.',
+
     'addPet.progress': 'Step {a} of {b}',
     'addPet.step1.title': 'Say hello',
     'addPet.step1.hint': 'A name is all we need — the rest can wait',
@@ -1563,6 +1601,7 @@ class L {
     'members.status.pending': 'Pending',
     'members.invite.sent': 'Invite sent',
     'members.invite.failed': 'Invite failed',
+    'members.alreadyMember': 'They are already a member of this pet',
     'members.notRegistered': 'They have no account yet — ask them to install and sign in first',
     'members.remove': 'Remove',
     'members.removeConfirm': 'Remove {name} from shared care?',

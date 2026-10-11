@@ -19,6 +19,7 @@ import '../data/sync/sync_engine.dart';
 import '../data/sync/unified_api.dart';
 import '../providers.dart';
 import 'auth_sheet.dart';
+import 'sheet_scaffold.dart';
 import 'widgets.dart';
 
 /// 某只宠物的成员（服务端视图）。未登录时返回空。
@@ -89,7 +90,7 @@ class _MembersSheet extends ConsumerWidget {
                 padding: EdgeInsets.all(AppSpace.gapXl),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => _ErrorBox(message: '$e'),
+              error: (e, _) => _ErrorBox(message: L.error(e)),
               data: (list) {
                 if (list.isEmpty) {
                   return Text(
@@ -343,27 +344,14 @@ class _MemberRowState extends ConsumerState<_MemberRow> {
   }
 
   Future<void> _remove() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(L.tp('members.removeConfirm', {
-          'name': widget.member.nickname ?? widget.member.userId,
-        })),
-        content: Text(L.t('members.removeHint')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(L.t('action.cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: Text(L.t('members.remove')),
-          ),
-        ],
-      ),
+    final name = widget.member.nickname ?? widget.member.userId;
+    final ok = await confirmDelete(
+      context,
+      title: L.tp('members.removeConfirm', {'name': name}),
+      hint: L.t('members.removeHint'),
+      confirmLabel: L.t('members.remove'),
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
 
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
@@ -374,7 +362,7 @@ class _MemberRowState extends ConsumerState<_MemberRow> {
       ref.invalidate(petMembersRemoteProvider(widget.petId));
       messenger.showSnackBar(SnackBar(content: Text(L.t('members.removed'))));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -431,53 +419,20 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
+    return SheetScaffold(
+      title: L.t('members.invite'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            L.t('members.inviteHint'),
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.6,
+              color: AppColors.textSecondary,
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.page,
-                0,
-                AppSpace.page,
-                AppSpace.gapXl,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    L.t('members.invite'),
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpace.gapS),
-                  Text(
-                    L.t('members.inviteHint'),
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      height: 1.6,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpace.gapL),
+          ),
+          const SizedBox(height: AppSpace.gapL),
 
                   // 只有一个可用通道时不必显示选择器 —— 给一个点了必然失败的
                   // 选项比不给更糟（用户会以为 App 坏了，而不是自己选错了）。
@@ -555,10 +510,6 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -596,12 +547,20 @@ class _InviteSheetState extends ConsumerState<_InviteSheet> {
       setState(() => _sending = false);
       // 「对方没注册」是最常见的失败，值得单独说清楚 ——
       // 否则用户会以为邀请成功了，等几天才发现对方根本没收到。
+      //
+      // ⚠️ 判定只看服务端**英文原文**里的关键词，但**显示给用户的一律是
+      // 本地化文案** —— 之前 `already` 那支直接把 `raw` 甩出去，
+      // 界面上会出现整段英文（还带 HTTP 状态码），中文用户读不懂。
       final raw = e.toString();
-      messenger.showSnackBar(SnackBar(
-        content: Text(raw.contains('not registered')
-            ? L.t('members.notRegistered')
-            : (raw.contains('already') ? raw : L.t('members.invite.failed'))),
-      ));
+      final String message;
+      if (raw.contains('not registered')) {
+        message = L.t('members.notRegistered');
+      } else if (raw.contains('already')) {
+        message = L.t('members.alreadyMember');
+      } else {
+        message = L.error(e);
+      }
+      messenger.showSnackBar(SnackBar(content: Text(message)));
     }
   }
 }

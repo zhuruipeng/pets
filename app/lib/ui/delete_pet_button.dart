@@ -6,6 +6,7 @@ import '../core/theme.dart';
 import '../data/models.dart';
 import '../data/repositories/member_repository.dart';
 import '../providers.dart';
+import 'widgets.dart';
 
 class DeletePetButton extends ConsumerStatefulWidget {
   const DeletePetButton({super.key, required this.pet});
@@ -32,29 +33,20 @@ class _DeletePetButtonState extends ConsumerState<DeletePetButton> {
   }
 
   Future<void> _delete() async {
-    final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-              title: Text(L.tp('pet.delete.title', {'name': widget.pet.name})),
-              content: Text(L.t('pet.delete.hint')),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: Text(L.t('action.cancel'))),
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: Text(L.t('pet.delete'),
-                        style: const TextStyle(color: AppColors.danger))),
-              ],
-            ));
-    if (confirmed != true || !mounted) return;
+    final confirmed = await confirmDelete(
+      context,
+      title: L.tp('pet.delete.title', {'name': widget.pet.name}),
+      hint: L.t('pet.delete.hint'),
+      confirmLabel: L.t('pet.delete'),
+    );
+    if (!confirmed || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
     try {
       await ref.read(appActionsProvider).deletePet(widget.pet.id);
       messenger.showSnackBar(SnackBar(content: Text(L.t('pet.deleted'))));
     } catch (e) {
-      if (mounted) messenger.showSnackBar(SnackBar(content: Text(L.error(e))));
+      if (mounted) showErrorSnackVia(messenger, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
