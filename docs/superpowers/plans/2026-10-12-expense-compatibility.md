@@ -12,7 +12,7 @@
 
 - Change expense synchronization, backup compatibility, tests, build validation, and verification documentation only; no other business modules.
 - Do not modify an already shipped migration or bump the app version.
-- Do not deploy, publish, or use production data for testing.
+- Do not deploy or publish until the release gate passes; never use production data for testing.
 - Keep malformed monetary input explicit: errors must roll back queue/cursor and restore changes.
 - Finish and verify synchronization before starting the backup task.
 
@@ -43,7 +43,9 @@
 
 - [x] Run full Flutter tests and static analysis on this Mac; the documented administrator-terminal constraint applies to Windows.
 - [x] Initialize a fresh local PostgreSQL cluster bound to loopback on a dedicated port, create a disposable database, set only `PET_TEST_POSTGRES_URL`, run `pytest tests/test_sync_concurrency.py -q`, and shut down the cluster. Three regressions must pass without skips.
-- [ ] Use the user-selected connected test phone to check upgrade, manual sync, account switching, and ZIP restoration if device access/signing/test accounts allow. Record exact unavailable dependencies and any unverified steps; do not claim a release gate passed from simulator-only evidence.
+- [x] Use the user-selected connected test phone to check upgrade, manual sync, account switching, and ZIP restoration if device access/signing/test accounts allow. Record exact unavailable dependencies and any unverified steps; do not claim a release gate passed from simulator-only evidence.
 - [x] Record fresh results and pending physical-device checks in the repository, commit/push, verify remote SHA and working tree. Publish no new package.
 
 **2026-10-12 evidence:** See `docs/2026-10-12-费用兼容性验收.md`. Flutter 403, server 340, standalone PostgreSQL concurrency 3 passed; analysis clean. Version 0.1.9+19 installed over the same Sideloadly identity; schema 7 -> 8 preserved money/rows/files. Physical schema 7 ZIP restoration preserves four expenses, their medical record, and PNG/PDF bytes. Manual sync against the disposable local API uploaded all six queued rows; the phone queue is now empty and all four server amounts match. Actual API pull uses the legacy amount field and matches local cents. Physical account B isolation and return to A remain pending; no deployment or public package release.
+
+**Final gate evidence:** B isolation and A return/reopen verified on the actual phone. Four business tables and two attachment byte hashes match before switching; expense pending writes are zero. One pre-existing startup placeholder user row is documented separately. Concurrent upstream e379c31 was retained; full Flutter rerun passes 404, analysis clean, and the default-API IPA was rebuilt and verified. Expense release gate passed; deployment/public package release can now follow the user's earlier authorization.
