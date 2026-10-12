@@ -146,7 +146,9 @@ echo ""
 echo "▶ 校验 ipa"
 fail=0
 
-if unzip -l "$IPA" | grep -q "Payload/Runner.app/Info.plist"; then
+# Read the complete listing: grep -q exits early and makes unzip receive
+# SIGPIPE under pipefail, which incorrectly rejects a valid IPA.
+if unzip -l "$IPA" | grep "Payload/Runner.app/Info.plist" >/dev/null; then
   echo "  ✓ 结构正确（Payload/Runner.app/Info.plist）"
 else
   echo "  ✗ 结构损坏 —— Runner.app 被压成了文件？检查复制阶段是否误用了 -c -k" >&2
@@ -161,7 +163,7 @@ else
   fail=1
 fi
 
-if unzip -l "$IPA" | grep -q "PrivacyInfo.xcprivacy"; then
+if unzip -l "$IPA" | grep "PrivacyInfo.xcprivacy" >/dev/null; then
   echo "  ✓ 隐私清单在包里"
 else
   echo "  ✗ 包里没有 PrivacyInfo.xcprivacy —— 传上 App Store 会被拒" >&2

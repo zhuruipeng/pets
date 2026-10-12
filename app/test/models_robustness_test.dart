@@ -123,7 +123,7 @@ void main() {
           'recorded_at': 0,
           'created_by': 'local-user',
           'created_at': '1712345678000',
-          'updated_at': '',
+          'updated_at': '1712345678000',
           'payload': '{{{',
           'value_num': 'not-a-number',
         }),
