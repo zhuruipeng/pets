@@ -73,6 +73,11 @@ server {
     location /download/ {
         alias /var/www/pet-apk/;
         autoindex off;
+        types {
+            application/vnd.android.package-archive apk;
+            application/octet-stream ipa;
+            text/plain sha256;
+        }
         default_type application/vnd.android.package-archive;
     }
 
@@ -104,6 +109,11 @@ server {
     location /download/ {
         alias /var/www/pet-apk/;
         autoindex off;
+        types {
+            application/vnd.android.package-archive apk;
+            application/octet-stream ipa;
+            text/plain sha256;
+        }
         default_type application/vnd.android.package-archive;
     }
 
