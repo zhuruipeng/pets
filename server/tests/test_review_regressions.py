@@ -171,6 +171,64 @@ def push(db, user_id, table, row_id, payload, timestamp=10, op="upsert"):
     )
 
 
+@pytest.mark.parametrize("money,cents", [
+    ({"amount": 12.35}, 1235), ({"amount": 0.07}, 7),
+    ({"amount": -12.5}, -1250), ({"amount": 0}, 0),
+    ({"amount_cents": 1235}, 1235),
+    ({"amount": 12.35, "amount_cents": 1235}, 1235),
+])
+def test_expense_money_is_stored_as_cents_and_pulled_as_legacy_amount(db, money, cents):
+    payload = {"id": "expense", "pet_id": "pet", "currency": "CNY",
+               "category": "food", "spent_at": 1, "created_by": "owner",
+               "created_at": 1, "updated_at": 10, **money}
+    assert push(db, "owner", "expenses", "expense", payload)["applied"]
+    stored = db.execute(select(SyncChange).where(SyncChange.table_name == "expenses")).scalar_one()
+    assert stored.payload["amount_cents"] == cents
+    assert "amount" not in stored.payload
+    page = sync_pull(since=0, limit=500, table=None, user=db.get(User, "owner"), session=db)
+    wire = next(row["payload"] for row in page["changes"] if row["table"] == "expenses")
+    assert wire["amount"] == cents / 100
+    assert "amount_cents" not in wire  # A schema 7 SQLite row must accept it.
+    assert wire["updated_at"] == 10
+    assert stored.payload["amount_cents"] == cents  # Rendering must not mutate storage.
+
+
+@pytest.mark.parametrize("server_cents_only", [False, True])
+def test_expense_migration_stale_returns_legacy_compatible_authoritative_money(db, server_cents_only):
+    money = {"amount_cents": 1235} if server_cents_only else {"amount": 12.35}
+    # Existing data can have either shape, including cents written before this fix.
+    snapshot = SyncChange(table_name="expenses", row_id="expense", pet_id="pet",
+                          user_id="owner", op="upsert", changed_at=10,
+                          payload={"id": "expense", "pet_id": "pet", "note": "server winner",
+                                   "updated_at": 10, **money})
+    db.add(snapshot)
+    db.commit()
+    result = push(db, "owner", "expenses", "expense",
+                  {"id": "expense", "pet_id": "pet", "amount_cents": 1235}, timestamp=10)
+    assert not result["applied"]
+    loser = result["rejected"][0]
+    assert loser["result"] == "stale"
+    assert loser["canonical"]["payload"]["amount"] == 12.35
+    assert "amount_cents" not in loser["canonical"]["payload"]
+    assert loser["canonical"]["payload"]["note"] == "server winner"
+    assert loser["canonical"]["changed_at"] == 10
+    assert db.execute(select(SyncChange)).scalar_one().payload == snapshot.payload
+
+
+@pytest.mark.parametrize("money", [
+    {"amount": "bad"}, {"amount": None}, {"amount": True},
+    {"amount": float("nan")}, {"amount": float("inf")},
+    {"amount_cents": 1.5}, {"amount_cents": True}, {"amount_cents": "1235"},
+    {"amount": 99, "amount_cents": 1235},
+])
+def test_invalid_expense_money_is_explicitly_rejected_without_a_change(db, money):
+    result = push(db, "owner", "expenses", "expense",
+                  {"id": "expense", "pet_id": "pet", **money})
+    assert not result["applied"]
+    assert result["rejected"][0]["result"] == "invalid"
+    assert db.execute(select(SyncChange)).first() is None
+
+
 @pytest.mark.parametrize("user_id,allowed", [("owner", True), ("editor", True), ("viewer", False), ("outsider", False)])
 def test_symptom_observation_uses_existing_sync_and_pet_permissions(db, user_id, allowed):
     observation = {"symptom": "vomiting", "count": 2, "appetite": "reduced",

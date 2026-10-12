@@ -24,6 +24,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../domain/sync_ids.dart';
 import '../db/schema.dart';
+import '../expense_payload.dart';
 import 'sync_api.dart';
 import 'token_store.dart';
 
@@ -460,7 +461,9 @@ class SyncEngine {
     final rows = await executor.query(table,
         where: 'id = ?', whereArgs: [rowId], limit: 1);
     if (rows.isEmpty) return null;
-    final payload = Map<String, dynamic>.from(rows.first);
+    final payload = table == 'expenses'
+        ? expensePayloadForSync(Map<String, dynamic>.from(rows.first))
+        : Map<String, dynamic>.from(rows.first);
 
     if (table == 'attachments') {
       // 附件归属只在 outbox 中，本地表没有 pet_id；服务端需从载荷判权限。
@@ -562,7 +565,9 @@ class SyncEngine {
 
   Future<bool> _applyOne(DatabaseExecutor txn, SyncChange c,
       {bool authoritative = false}) async {
-    final payload = Map<String, dynamic>.from(c.payload);
+    final payload = c.table == 'expenses'
+        ? expensePayloadForLocal(c.payload)
+        : Map<String, dynamic>.from(c.payload);
     payload.remove('points'); // 轨迹点是子资源，单独处理
     if (c.table == 'attachments') payload.remove('pet_id');
 

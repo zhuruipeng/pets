@@ -29,6 +29,7 @@ from .changes import (
     resolve_role,
 )
 from .db import get_session
+from .expense_payload import expense_payload_for_storage, expense_payload_for_wire
 from .models import Member, Pet, PetRecord, SyncChange, User
 from .sync_logic import is_newer, now_ms, role_can, visible_to
 
@@ -160,7 +161,9 @@ def _rejected(change: PushChangeIn, result: str, current: SyncChange | None = No
     if current is not None:
         response["canonical"] = {
             "seq": current.seq, "table": current.table_name, "row_id": current.row_id,
-            "op": current.op, "payload": dict(current.payload), "changed_at": current.changed_at,
+            "op": current.op, "payload": (
+                expense_payload_for_wire(current.payload) if current.table_name == "expenses"
+                else dict(current.payload)), "changed_at": current.changed_at,
         }
     return response
 
@@ -314,6 +317,13 @@ def sync_push(
             # 权限关系只通过邀请/接受/移除接口变更，不能发布与实体表不符的快照。
             rejected.append(_rejected(change, "forbidden"))
             continue
+        if change.table == "expenses":
+            try:
+                change = change.model_copy(update={
+                    "payload": expense_payload_for_storage(change.payload)})
+            except ValueError:
+                rejected.append(_rejected(change, "invalid"))
+                continue
         valid_changes.append(change)
 
     # 身份校验在引导之前，避免无效载荷先产生 owner 或修改另一只宠物。
@@ -497,7 +507,8 @@ def sync_pull(
             "table": item["table"],
             "row_id": item["row_id"],
             "op": item["op"],
-            "payload": item["payload"],
+            "payload": (expense_payload_for_wire(item["payload"])
+                        if item["table"] == "expenses" else item["payload"]),
             "changed_at": item["changed_at"],
         }
         for item in visible
