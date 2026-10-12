@@ -44,6 +44,6 @@
 - [x] Run full Flutter tests and static analysis on this Mac; the documented administrator-terminal constraint applies to Windows.
 - [x] Initialize a fresh local PostgreSQL cluster bound to loopback on a dedicated port, create a disposable database, set only `PET_TEST_POSTGRES_URL`, run `pytest tests/test_sync_concurrency.py -q`, and shut down the cluster. Three regressions must pass without skips.
 - [ ] Use the user-selected connected test phone to check upgrade, manual sync, account switching, and ZIP restoration if device access/signing/test accounts allow. Record exact unavailable dependencies and any unverified steps; do not claim a release gate passed from simulator-only evidence.
-- [ ] Record fresh results and pending physical-device checks in the repository, commit/push, verify remote SHA and working tree. Publish no new package.
+- [x] Record fresh results and pending physical-device checks in the repository, commit/push, verify remote SHA and working tree. Publish no new package.
 
 **2026-10-12 evidence:** See `docs/2026-10-12-费用兼容性验收.md`. Flutter 403, server 340, standalone PostgreSQL concurrency 3 passed; analysis clean. Device unlocked and schema 7 data backed up; Sideloadly control times out and new IPA installation is unconfirmed. The unsigned IPA is built and independently verified. Physical release gate remains pending.
