@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 
 import '../core/region.dart';
 import '../data/db/schema.dart';
+import '../data/expense_payload.dart';
 import '../domain/sync_ids.dart';
 
 const _tables = [
@@ -188,6 +189,27 @@ class BackupService {
                   .map((r) => Map<String, Object?>.from(r as Map))
                   .toList(),
           };
+          // Only the known v7 -> v8 expense representation is convertible.
+          // Validate before inserting rows so invalid money cannot be truncated
+          // by SQLite affinity or leave a partially restored working set.
+          for (final row in tables['expenses']!) {
+            final legacy = manifest['schema'] == 7;
+            if (legacy
+                ? !row.containsKey('amount') || row.containsKey('amount_cents')
+                : !row.containsKey('amount_cents') ||
+                    row.containsKey('amount')) {
+              throw StateError('backup.invalid');
+            }
+            try {
+              final converted =
+                  expensePayloadForLocal(Map<String, dynamic>.from(row));
+              row
+                ..clear()
+                ..addAll(converted);
+            } on FormatException {
+              throw StateError('backup.invalid');
+            }
+          }
           final ids = <String, Map<String, String>>{};
           for (final table in _tables) {
             ids[table] = {};
@@ -222,11 +244,10 @@ class BackupService {
             if (payload['course_id'] != null) {
               if (payload['due_at'] is! int) throw StateError('backup.invalid');
               final courseId = remap('reminders', payload['course_id']);
-              ids['records']![row['id'] as String] =
-                  doseRecordId(
-                      reminderId: courseId,
-                      dueAt: DateTime.fromMillisecondsSinceEpoch(
-                          payload['due_at'] as int));
+              ids['records']![row['id'] as String] = doseRecordId(
+                  reminderId: courseId,
+                  dueAt: DateTime.fromMillisecondsSinceEpoch(
+                      payload['due_at'] as int));
             }
           }
           for (final row in tables['reminder_logs']!) {
@@ -371,7 +392,8 @@ class BackupService {
 void _checkManifest(Map<String, dynamic> manifest, Region region) {
   if (manifest['format'] != _format ||
       manifest['version'] != 1 ||
-      manifest['schema'] != kSchemaVersion ||
+      manifest['schema'] is! int ||
+      (manifest['schema'] != 7 && manifest['schema'] != kSchemaVersion) ||
       manifest['id'] is! String ||
       manifest['created_at'] is! int ||
       manifest['contact'] is! Map ||

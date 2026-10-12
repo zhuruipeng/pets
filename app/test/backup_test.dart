@@ -269,6 +269,7 @@ void main() {
     expect(logs.single['record_id'], dose.id);
     expect((await target.query('expenses')).single['record_id'],
         symptom.payload['medical_record_id']);
+    expect((await target.query('expenses')).single['amount_cents'], 1000);
     expect((await target.query('walk_points')).single['session_id'],
         (await target.query('walk_sessions')).single['id']);
     expect((await target.query('pet_tags')).single['pet_id'], ids.single);
@@ -292,6 +293,108 @@ void main() {
         throwsStateError);
     expect((await target.query('pets')).length, 1);
   });
+
+  for (final entry in [(12.35, 1235), (0.07, 7), (-12.5, -1250), (0.0, 0)]) {
+    test('schema 7 ZIP restores ${entry.$1} with linked records and files',
+        () async {
+      final legacy = await rewrite(
+          backup, File(p.join(temp.path, 'schema7-${entry.$2}.zip')),
+          manifestChange: (m) {
+        m['schema'] = 7;
+        final expense = (m['tables']['expenses'] as List).single as Map;
+        expense.remove('amount_cents');
+        expense['amount'] = entry.$1;
+      });
+      final preview = await importer.inspect(legacy.path);
+      final ids = await importer.restore(legacy.path, expectedId: preview.id);
+      final expense = (await target.query('expenses')).single;
+      expect(expense['amount_cents'], entry.$2);
+      expect(expense, isNot(contains('amount')));
+      expect(expense['pet_id'], ids.single);
+      final linked = (await target.query('records',
+              where: 'id = ?', whereArgs: [expense['record_id']]))
+          .single;
+      expect(linked['pet_id'], ids.single);
+      expect(linked['type'], 'medical');
+      expect((await target.query('records')).length, 3);
+      final files = await target.query('attachments');
+      expect(files.length, 2);
+      for (final file in files) {
+        final record = (await target.query('records',
+                where: 'id = ?', whereArgs: [file['record_id']]))
+            .single;
+        expect(record['pet_id'], ids.single);
+        expect(
+            await File(file['local_path'] as String).readAsBytes(),
+            file['kind'] == 'photo'
+                ? [1, 2, 3, 4]
+                : utf8.encode('vet document'));
+      }
+      final log = (await target.query('reminder_logs')).single;
+      expect(
+          (await target.query('records',
+                  where: 'id = ?', whereArgs: [log['record_id']]))
+              .single['pet_id'],
+          ids.single);
+      expect((await target.query('walk_points')).single['session_id'],
+          (await target.query('walk_sessions')).single['id']);
+    });
+  }
+
+  for (final invalid in ['12.35', null, true, <String, Object?>{}]) {
+    test('schema 7 invalid amount $invalid rolls back data and staged files',
+        () async {
+      final beforeQueue = await target.query('sync_outbox');
+      final legacy =
+          await rewrite(backup, File(p.join(temp.path, 'invalid-money.zip')),
+              manifestChange: (m) {
+        m['schema'] = 7;
+        final expense = (m['tables']['expenses'] as List).single as Map;
+        expense.remove('amount_cents');
+        expense['amount'] = invalid;
+      });
+      final preview = await importer.inspect(legacy.path);
+      await expectLater(importer.restore(legacy.path, expectedId: preview.id),
+          throwsStateError);
+      expect(await target.query('pets'), isEmpty);
+      expect(await target.query('expenses'), isEmpty);
+      expect(await target.query('sync_outbox'), beforeQueue);
+      final stage = Directory(p.join(temp.path, 'new-device', 'restored'));
+      if (await stage.exists()) expect(await stage.list().toList(), isEmpty);
+    });
+  }
+
+  for (final schema in [6, 9, 7.0, '7', null]) {
+    test('unsupported or malformed backup schema $schema is rejected',
+        () async {
+      final beforeQueue = await target.query('sync_outbox');
+      final invalid = await rewrite(
+          backup, File(p.join(temp.path, 'schema-invalid.zip')),
+          manifestChange: (m) => m['schema'] = schema);
+      await expectLater(importer.inspect(invalid.path), throwsStateError);
+      await expectLater(
+          importer.restore(invalid.path,
+              expectedId: (await exporter.inspect(backup.path)).id),
+          throwsStateError);
+      expect(await target.query('pets'), isEmpty);
+      expect(await target.query('sync_outbox'), beforeQueue);
+    });
+  }
+
+  for (final invalid in [12.35, '1235', true, null]) {
+    test('schema 8 invalid cents $invalid cannot silently truncate', () async {
+      final beforeQueue = await target.query('sync_outbox');
+      final file = await rewrite(
+          backup, File(p.join(temp.path, 'invalid-cents.zip')),
+          manifestChange: (m) => (m['tables']['expenses'] as List)
+              .single['amount_cents'] = invalid);
+      final preview = await importer.inspect(file.path);
+      await expectLater(importer.restore(file.path, expectedId: preview.id),
+          throwsStateError);
+      expect(await target.query('pets'), isEmpty);
+      expect(await target.query('sync_outbox'), beforeQueue);
+    });
+  }
 
   test(
       'archived and deleted data stay archived and deleted without blocked tombstone uploads',
