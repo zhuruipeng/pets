@@ -45,6 +45,26 @@ DateTime? _dt(Object? v) {
 
 int? _ms(DateTime? d) => d?.millisecondsSinceEpoch;
 
+/// 容忍数字字符串的数值读取。坏数据 → null，不抛。
+///
+/// ⚠️ 裸 `as num?` 会让**整条记录**解析失败：`(m['value_num'] as num?)`
+/// 遇到字符串 `'not-a-number'` 直接 `_TypeError`，`fromMap` 炸掉
+/// ⇒ 该宠物页整页显示「出错了」。这与 `_dt` 要防的是同一类风险。
+///
+/// 与 `_dt` 一致，**只认能安全转换的形状**，不做启发式纠正。
+num? _num(Object? v) {
+  if (v == null) return null;
+  if (v is num) return v;
+  if (v is String) return num.tryParse(v);
+  return null;
+}
+
+/// 见 [_num]。
+int? _int(Object? v) => _num(v)?.toInt();
+
+/// 见 [_num]。
+double? _dbl(Object? v) => _num(v)?.toDouble();
+
 /// 0/1 → bool。其它值当 false，不抛。
 bool _bool(Object? v) => v == 1 || v == true || v == '1';
 
@@ -227,7 +247,7 @@ class Pet {
         birthdayEstimated: _bool(m['birthday_estimated']),
         adoptDate: _dt(m['adopt_date']),
         avatarUrl: m['avatar_url'] as String?,
-        weightBaseline: (m['weight_baseline'] as num?)?.toDouble(),
+        weightBaseline: _dbl(m['weight_baseline']),
         neutered: _bool(m['neutered']),
         chipNo: m['chip_no'] as String?,
         color: m['color'] as String?,
@@ -390,7 +410,7 @@ class PetRecord {
         petId: m['pet_id'] as String,
         type: recordTypeFromWire(m['type'] as String?),
         recordedAt: _dt(m['recorded_at'])!,
-        valueNum: (m['value_num'] as num?)?.toDouble(),
+        valueNum: _dbl(m['value_num']),
         valueText: m['value_text'] as String?,
         unit: m['unit'] as String?,
         payload: _json(m['payload']),
@@ -485,7 +505,7 @@ class Reminder {
   /// 完成后按规则推算下一次触发时间。
   DateTime? nextOccurrence() {
     if (rule['mode'] != 'interval') return null;
-    final days = (rule['days'] as num?)?.toInt() ?? 0;
+    final days = _int(rule['days']) ?? 0;
     if (days <= 0) return null;
     return nextAt.add(Duration(days: days));
   }
@@ -493,7 +513,7 @@ class Reminder {
   /// 周期天数。0 或缺失 = 一次性提醒。
   ///
   /// 界面要显示「每 90 天」这类说明，不能让每个调用点各写一遍取规则的逻辑。
-  int get everyDays => (rule['days'] as num?)?.toInt() ?? 0;
+  int get everyDays => _int(rule['days']) ?? 0;
 
   bool get isRecurring => everyDays > 0;
 
@@ -572,8 +592,8 @@ class WalkSession {
         petId: m['pet_id'] as String,
         startedAt: _dt(m['started_at'])!,
         endedAt: _dt(m['ended_at']),
-        distanceM: (m['distance_m'] as num?)?.toDouble() ?? 0,
-        durationS: (m['duration_s'] as num?)?.toInt() ?? 0,
+        distanceM: _dbl(m['distance_m']) ?? 0,
+        durationS: _int(m['duration_s']) ?? 0,
         region: m['region'] as String,
         mood: m['mood'] as String?,
         note: m['note'] as String?,
@@ -625,10 +645,10 @@ class WalkPoint {
   factory WalkPoint.fromMap(Map<String, dynamic> m) => WalkPoint(
         id: m['id'] as String,
         sessionId: m['session_id'] as String,
-        lat: (m['lat'] as num).toDouble(),
-        lng: (m['lng'] as num).toDouble(),
-        altitude: (m['altitude'] as num?)?.toDouble(),
-        accuracy: (m['accuracy'] as num?)?.toDouble(),
+        lat: _dbl(m['lat']) ?? 0,
+        lng: _dbl(m['lng']) ?? 0,
+        altitude: _dbl(m['altitude']),
+        accuracy: _dbl(m['accuracy']),
         recordedAt: _dt(m['recorded_at'])!,
       );
 
@@ -769,14 +789,14 @@ class RecordAttachment {
         kind: m['kind'] as String,
         localPath: m['local_path'] as String?,
         remoteUrl: m['remote_url'] as String?,
-        width: (m['width'] as num?)?.toInt(),
-        height: (m['height'] as num?)?.toInt(),
+        width: _int(m['width']),
+        height: _int(m['height']),
         fileName: m['file_name'] as String?,
         mime: m['mime'] as String?,
-        sizeBytes: (m['size_bytes'] as num?)?.toInt(),
+        sizeBytes: _int(m['size_bytes']),
         // 老行这一列是 NULL → false（照片继续同步）。写成 `(m[...] as int) == 1`
         // 会在老库上直接抛，而老库恰恰是升级路径上唯一的真实场景。
-        localOnly: ((m['local_only'] as num?)?.toInt() ?? 0) == 1,
+        localOnly: (_int(m['local_only']) ?? 0) == 1,
         createdAt: _dt(m['created_at'])!,
         updatedAt: _dt(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
@@ -1034,7 +1054,9 @@ class Expense {
   factory Expense.fromMap(Map<String, dynamic> m) => Expense(
         id: m['id'] as String,
         petId: m['pet_id'] as String,
-        amountCents: (m['amount_cents'] as num).toInt(),
+        // 金额列坏数据当 0 分 —— 不是丢钱，是让它能被打开、被改回来。
+        // 裸 `as num` 会让整笔支出解析失败，连带整页报错。
+        amountCents: _int(m['amount_cents']) ?? 0,
         currency: m['currency'] as String,
         category: expenseCategoryFromWire(m['category'] as String?),
         spentAt: _dt(m['spent_at'])!,

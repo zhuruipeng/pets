@@ -448,7 +448,9 @@ void main() {
     expect(await tester.runAsync(pets.listAll), hasLength(1));
     await tester.tap(find.text(L.t('pet.delete')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(TextButton, L.t('pet.delete')).last);
+    // 确认键是 FilledButton（P2 抽 `confirmAction` 时统一成红底实心按钮，
+    // 之前是「文字变红」的 TextButton —— 破坏性操作要有视觉重量）。
+    await tester.tap(find.widgetWithText(FilledButton, L.t('pet.delete')).last);
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });

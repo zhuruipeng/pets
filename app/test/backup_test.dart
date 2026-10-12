@@ -130,7 +130,7 @@ void main() {
     await source.insert('expenses', {
       'id': 'expense',
       'pet_id': pet.id,
-      'amount': 10,
+      'amount_cents': 1000,
       'currency': 'USD',
       'category': 'medical',
       'spent_at': 1,

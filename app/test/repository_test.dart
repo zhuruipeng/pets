@@ -776,7 +776,7 @@ void main() {
       await db.insert('expenses', {
         'id': 'e1',
         'pet_id': 'p1',
-        'amount': 120.0,
+        'amount_cents': 12000,
         'currency': 'CNY',
         'category': 'medical',
         'spent_at': 1000,
