@@ -45,6 +45,29 @@ DateTime? _dt(Object? v) {
 
 int? _ms(DateTime? d) => d?.millisecondsSinceEpoch;
 
+/// 时间兜底。解析不出来 → `1970-01-01`（epoch 0），**绝不抛**。
+///
+/// ⚠️ 这个是 [#62] 里最容易被漏掉的一半：改完 `as num` 之后，
+/// `fromMap` 里还剩 19 处 `_dt(...)!` —— `!` 遇到坏时间同样会
+/// `Null check operator used on a null value`，而且后果**更严重**：
+///
+/// `RecordRepository.listByPet` 是 `rows.map(PetRecord.fromMap).toList()`，
+/// **一行脏数据 → 整个列表抛异常 → FutureProvider 变 error → 整页打不开**。
+/// 用户看到的是「我的宠物页坏了」，而不是「有一条记录时间不对」。
+///
+/// 兜底为什么选 epoch 0，而不是 `createdAt` / `DateTime.now()` 这类
+/// 「看着合理」的值：**那是编造事实**。补录旧账时「这笔钱花在哪天」是
+/// 账务事实，猜成 created_at 会把它静默算进错月份 —— 一个看不见的错。
+/// epoch 0 在界面上显示成 1970 年，**显眼、可被发现、可手动改回来**。
+/// 静默的错比显眼的错危险得多。
+///
+/// （注意这里和 [_dt] 的分工：[_dt] 仍然返回 `DateTime?`，
+/// 需要「没有就是没有」语义的地方继续用它。）
+DateTime _dtOr(Object? v) => _dt(v) ?? _epoch;
+
+/// [DateTime.fromMillisecondsSinceEpoch] 不会抛，可以安全地做成常量。
+final DateTime _epoch = DateTime.fromMillisecondsSinceEpoch(0);
+
 /// 容忍数字字符串的数值读取。坏数据 → null，不抛。
 ///
 /// ⚠️ 裸 `as num?` 会让**整条记录**解析失败：`(m['value_num'] as num?)`
@@ -257,8 +280,8 @@ class Pet {
         archivedAt: _dt(m['archived_at']),
         tier: (m['tier'] as String?) ?? 'free',
         createdBy: m['created_by'] as String,
-        createdAt: _dt(m['created_at'])!,
-        updatedAt: _dt(m['updated_at'])!,
+        createdAt: _dtOr(m['created_at']),
+        updatedAt: _dtOr(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
       );
 
@@ -409,15 +432,15 @@ class PetRecord {
         id: m['id'] as String,
         petId: m['pet_id'] as String,
         type: recordTypeFromWire(m['type'] as String?),
-        recordedAt: _dt(m['recorded_at'])!,
+        recordedAt: _dtOr(m['recorded_at']),
         valueNum: _dbl(m['value_num']),
         valueText: m['value_text'] as String?,
         unit: m['unit'] as String?,
         payload: _json(m['payload']),
         note: m['note'] as String?,
         createdBy: m['created_by'] as String,
-        createdAt: _dt(m['created_at'])!,
-        updatedAt: _dt(m['updated_at'])!,
+        createdAt: _dtOr(m['created_at']),
+        updatedAt: _dtOr(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
       );
 
@@ -480,11 +503,11 @@ class Reminder {
         type: m['type'] as String,
         title: m['title'] as String,
         rule: _json(m['rule']),
-        nextAt: _dt(m['next_at'])!,
+        nextAt: _dtOr(m['next_at']),
         enabled: _bool(m['enabled']),
         source: m['source'] as String?,
-        createdAt: _dt(m['created_at'])!,
-        updatedAt: _dt(m['updated_at'])!,
+        createdAt: _dtOr(m['created_at']),
+        updatedAt: _dtOr(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
       );
 
@@ -590,7 +613,7 @@ class WalkSession {
   factory WalkSession.fromMap(Map<String, dynamic> m) => WalkSession(
         id: m['id'] as String,
         petId: m['pet_id'] as String,
-        startedAt: _dt(m['started_at'])!,
+        startedAt: _dtOr(m['started_at']),
         endedAt: _dt(m['ended_at']),
         distanceM: _dbl(m['distance_m']) ?? 0,
         durationS: _int(m['duration_s']) ?? 0,
@@ -598,8 +621,8 @@ class WalkSession {
         mood: m['mood'] as String?,
         note: m['note'] as String?,
         createdBy: m['created_by'] as String,
-        createdAt: _dt(m['created_at'])!,
-        updatedAt: _dt(m['updated_at'])!,
+        createdAt: _dtOr(m['created_at']),
+        updatedAt: _dtOr(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
       );
 
@@ -649,7 +672,7 @@ class WalkPoint {
         lng: _dbl(m['lng']) ?? 0,
         altitude: _dbl(m['altitude']),
         accuracy: _dbl(m['accuracy']),
-        recordedAt: _dt(m['recorded_at'])!,
+        recordedAt: _dtOr(m['recorded_at']),
       );
 
   Map<String, dynamic> toMap() => {
@@ -696,7 +719,7 @@ class PetTag {
         tagName: m['tag_name'] as String?,
         tagUid: m['tag_uid'] as String?,
         lastSeenAt: _dt(m['last_seen_at']),
-        createdAt: _dt(m['created_at'])!,
+        createdAt: _dtOr(m['created_at']),
         deletedAt: _dt(m['deleted_at']),
       );
 
@@ -797,7 +820,7 @@ class RecordAttachment {
         // 老行这一列是 NULL → false（照片继续同步）。写成 `(m[...] as int) == 1`
         // 会在老库上直接抛，而老库恰恰是升级路径上唯一的真实场景。
         localOnly: (_int(m['local_only']) ?? 0) == 1,
-        createdAt: _dt(m['created_at'])!,
+        createdAt: _dtOr(m['created_at']),
         updatedAt: _dt(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
       );
@@ -878,8 +901,8 @@ class LocalUser {
         avatarUrl: m['avatar_url'] as String?,
         wechat: m['wechat'] as String?,
         contactNote: m['contact_note'] as String?,
-        createdAt: _dt(m['created_at'])!,
-        updatedAt: _dt(m['updated_at'])!,
+        createdAt: _dtOr(m['created_at']),
+        updatedAt: _dtOr(m['updated_at']),
       );
 
   Map<String, dynamic> toMap() => {
@@ -1059,12 +1082,12 @@ class Expense {
         amountCents: _int(m['amount_cents']) ?? 0,
         currency: m['currency'] as String,
         category: expenseCategoryFromWire(m['category'] as String?),
-        spentAt: _dt(m['spent_at'])!,
+        spentAt: _dtOr(m['spent_at']),
         note: m['note'] as String?,
         recordId: m['record_id'] as String?,
         createdBy: m['created_by'] as String,
-        createdAt: _dt(m['created_at'])!,
-        updatedAt: _dt(m['updated_at'])!,
+        createdAt: _dtOr(m['created_at']),
+        updatedAt: _dtOr(m['updated_at']),
         deletedAt: _dt(m['deleted_at']),
       );
 

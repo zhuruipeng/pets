@@ -113,22 +113,84 @@ void main() {
     });
 
     test('整条脏行也不让 fromMap 炸（这是用户「打不开页面」的直接原因）', () {
-      // 必填时间给合法值（没有时间的记录本来就无意义，见下方 fromMap 的 `_dt(...)!`），
-      // 其余字段全给脏数据 —— 结果必须是「能解析出来的部分照常、坏的退化」。
+      // 每一个非 id 字段全给脏数据 —— 结果必须是「能解析出来的部分照常、
+      // 坏的退化」，**绝不抛**。
+      //
+      // 为什么这条测试重要：`RecordRepository.listByPet` 是
+      // `rows.map(PetRecord.fromMap).toList()`，**一行脏数据就会让整个
+      // `FutureProvider` 变 error ⇒ 整页显示「出错了」**。
+      // 用户看到的是「我的宠物页坏了」，而不是「有一条记录时间不对」。
+      late PetRecord r;
       expect(
-        () => PetRecord.fromMap({
+        () => r = PetRecord.fromMap({
           'id': 'r1',
           'pet_id': 'p1',
           'type': 'weight',
           'recorded_at': 0,
           'created_by': 'local-user',
-          'created_at': '1712345678000',
-          'updated_at': '1712345678000',
-          'payload': '{{{',
-          'value_num': 'not-a-number',
+          'created_at': '1712345678000', // 数字字符串：能救回来
+          'updated_at': '', // 救不回来 → epoch 0
+          'payload': '{{{', // 坏 JSON → 空 Map
+          'value_num': 'not-a-number', // 坏数值 → null
         }),
         returnsNormally,
       );
+
+      // ⚠️ 光断言「不抛」不够 —— 它管不住兜底**兜到了哪儿**。
+      // 下面这几条才是契约：能救的救回来，救不回来的退化成**显眼**的
+      // 缺省值（epoch 0 → 界面显示 1970 年，用户看得见、改得回来），
+      // 而不是编一个「看着合理」的时间把错误盖住。
+      //
+      // ⚠️ 比 `millisecondsSinceEpoch` 而不是 `DateTime(1970, 1, 1)`：
+      // 后者是**本地**零点，在 UTC+8 机器上是 epoch 0 的 08:00，
+      // 直接比 DateTime 会挂（实测踩过）。比毫秒值与运行机器时区无关。
+      expect(r.recordedAt.millisecondsSinceEpoch, 0, reason: '坏时间 → epoch 0');
+      expect(r.createdAt.millisecondsSinceEpoch, 1712345678000);
+      expect(r.updatedAt.millisecondsSinceEpoch, 0,
+          reason: '坏时间 → epoch 0，不编造');
+      expect(r.payload, isEmpty);
+      expect(r.valueNum, isNull);
+      expect(r.id, 'r1');
+
+      // 反向：合法行必须原样解析，别把兜底写成了「一律 epoch 0」。
+      final ok = PetRecord.fromMap({
+        'id': 'r2',
+        'pet_id': 'p1',
+        'type': 'weight',
+        'recorded_at': 1712345678000,
+        'created_by': 'local-user',
+        'created_at': 1712345678000,
+        'updated_at': 1712345678000,
+        'value_num': 4.5,
+      });
+      expect(ok.recordedAt.millisecondsSinceEpoch, 1712345678000);
+      expect(ok.updatedAt.millisecondsSinceEpoch, 1712345678000);
+      expect(ok.valueNum, 4.5);
+    });
+
+    test('时间列脏数据退化成 epoch 0，不 fallback 到「看着合理」的值', () {
+      // 这条是上面那条的**设计意图**锁定：如果哪天有人把 `?? _epoch`
+      // 改成 `?? DateTime.now()` 或 `?? created_at`，会在这里被拦下。
+      //
+      // 理由（写给未来的自己）：补录旧账时「这笔钱花在哪天」是账务事实。
+      // fallback 到 created_at 会把补录的旧账**静默算进当月**，
+      // 这是一笔看不见的错账；epoch 0 显示成 1970 年会被一眼发现。
+      final e = Expense.fromMap({
+        'id': 'x',
+        'pet_id': 'p1',
+        'amount_cents': 100,
+        'currency': 'CNY',
+        'category': 'food',
+        'spent_at': 'garbage',
+        'created_by': 'u',
+        'created_at': 1712345678000,
+        'updated_at': 1712345678000,
+      });
+      expect(e.spentAt.millisecondsSinceEpoch, 0,
+          reason: '坏 spent_at 不能借用 created_at —— 那会静默错账');
+      expect(e.spentAt.millisecondsSinceEpoch,
+          isNot(e.createdAt.millisecondsSinceEpoch));
+      expect(e.createdAt.millisecondsSinceEpoch, 1712345678000);
     });
   });
 
