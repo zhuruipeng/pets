@@ -329,24 +329,10 @@ class _InfoTab extends ConsumerWidget {
           ),
           child: Column(
             children: [
-              // 空值行直接不出现（breed/生日/体重/体型/毛色 没填就隐藏）
-              // —— 一屏「--」只会显得表单没填完，档案页应该显得完整。
-              // 年龄/性别永远有值，撑住卡片下限。
+              // 未填写的字段也保留信息行，避免录入前后布局变化。
               for (var i = 0; i < basicRows.length; i++) ...[
                 if (i > 0) const RowDivider(),
                 basicRows[i],
-              ],
-              if ((pet.chipNo ?? '').trim().isNotEmpty) ...[
-                const RowDivider(),
-                InfoRow(L.t('profile.field.chip'), pet.chipNo!.trim()),
-              ],
-              if ((pet.allergy ?? '').trim().isNotEmpty) ...[
-                const RowDivider(),
-                InfoRow(
-                  L.t('profile.field.allergy'),
-                  pet.allergy!.trim(),
-                  valueColor: AppColors.danger,
-                ),
               ],
             ],
           ),
@@ -551,34 +537,47 @@ class _InfoTab extends ConsumerWidget {
     messenger.showSnackBar(SnackBar(content: Text(L.t('common.detailCopied'))));
   }
 
-  /// 基本信息行：没填的字段直接跳过，不摆「--」。
-  ///
-  /// breed 是用户自填的自由文本（录入「疫苗」就是「疫苗」），这里不做
-  /// 智能纠正 —— 数据修正交给 M2.2 的编辑功能，界面只负责不展示空值。
+  /// 仅在展示层判断缺失：文本为空、日期或数值为 null。
+  /// 自由文本及合法的 0、false、unknown 值仍按原有规则展示。
   static List<Widget> _basicRows(
       Pet pet, double? latestWeight, WeightUnit unit) {
     return [
-      if ((pet.breed ?? '').trim().isNotEmpty)
-        InfoRow(L.t('profile.field.breed'), pet.breed!.trim()),
-      if (pet.birthday != null)
-        InfoRow(L.t('profile.field.birthday'), _birthdayValue(pet)),
-      InfoRow(L.t('profile.field.age'), _ageValue(pet)),
-      InfoRow(L.t('profile.field.gender'), _genderValue(pet)),
-      if (latestWeight != null)
-        InfoRow(
-          L.t('profile.field.weight'),
-          Units.formatWeight(latestWeight, unit),
-        ),
-      if (pet.weightBaseline != null)
-        InfoRow(L.t('profile.field.shape'), _shapeValue(pet)),
-      if ((pet.color ?? '').trim().isNotEmpty)
-        InfoRow(L.t('profile.field.color'), pet.color!.trim()),
+      _basicInfoRow('profile.field.breed', pet.breed),
+      _basicInfoRow('profile.field.birthday', _birthdayValue(pet)),
+      _basicInfoRow('profile.field.age', _ageValue(pet)),
+      _basicInfoRow('profile.field.gender', _genderValue(pet)),
+      _basicInfoRow(
+        'profile.field.weight',
+        latestWeight == null ? null : Units.formatWeight(latestWeight, unit),
+      ),
+      _basicInfoRow('profile.field.shape', _shapeValue(pet)),
+      _basicInfoRow('profile.field.color', pet.color),
+      _basicInfoRow('profile.field.chip', pet.chipNo),
+      _basicInfoRow(
+        'profile.field.allergy',
+        pet.allergy,
+        valueColor: AppColors.danger,
+      ),
     ];
   }
 
-  static String _birthdayValue(Pet pet) {
+  static InfoRow _basicInfoRow(
+    String field,
+    String? value, {
+    Color? valueColor,
+  }) {
+    final text = value?.trim();
+    final hasValue = text != null && text.isNotEmpty;
+    return InfoRow(
+      L.t(field),
+      hasValue ? text : L.t('profile.notFilled'),
+      valueColor: hasValue ? valueColor : AppColors.textSecondary,
+    );
+  }
+
+  static String? _birthdayValue(Pet pet) {
     final b = pet.birthday;
-    if (b == null) return '--';
+    if (b == null) return null;
     final base = '${b.year}年${b.month}月${b.day}日';
     if (!pet.birthdayEstimated) return base;
     return L.isZh ? '$base（估算）' : '$base (est.)';
@@ -586,11 +585,11 @@ class _InfoTab extends ConsumerWidget {
 
   // 也走统一的 petAgeLabel：原先用 Pet.ageInMonths，那个属性只看年月不看日，
   // 月末会多算一个月，和同屏头部显示的年龄可能差一岁。
-  static String _ageValue(Pet pet) =>
-      petAgeLabel(pet.birthday, DateTime.now()) ?? '--';
+  static String? _ageValue(Pet pet) => petAgeLabel(pet.birthday, DateTime.now());
 
-  static String _genderValue(Pet pet) {
+  static String? _genderValue(Pet pet) {
     final g = (pet.gender ?? '').trim().toLowerCase();
+    if (g.isEmpty) return null;
     final base = switch (g) {
       'female' || 'f' || '母' || '雌' => L.t('profile.gender.female'),
       'male' || 'm' || '公' || '雄' => L.t('profile.gender.male'),
@@ -601,9 +600,9 @@ class _InfoTab extends ConsumerWidget {
   }
 
   /// 体型从体重基线推断。没有基线就不猜。
-  static String _shapeValue(Pet pet) {
+  static String? _shapeValue(Pet pet) {
     final kg = pet.weightBaseline;
-    if (kg == null) return '--';
+    if (kg == null) return null;
     if (pet.species == Species.cat) return L.t('profile.shape.cat');
     if (kg >= 20) return L.t('profile.shape.large');
     if (kg >= 10) return L.t('profile.shape.medium');

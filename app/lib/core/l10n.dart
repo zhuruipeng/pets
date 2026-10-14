@@ -380,6 +380,7 @@ class L {
     'expense.category.other': '其他',
 
     'profile.section.basic': '基本信息',
+    'profile.notFilled': '未填写',
     'profile.section.family': '家庭成员',
     'profile.section.traits': '个性特点',
     'profile.addFamily': '添加家庭成员',
@@ -1157,6 +1158,7 @@ class L {
     'expense.category.other': 'Other',
 
     'profile.section.basic': 'Basic info',
+    'profile.notFilled': 'Not filled in',
     'profile.section.family': 'Family',
     'profile.section.traits': 'Traits',
     'profile.addFamily': 'Add family member',
