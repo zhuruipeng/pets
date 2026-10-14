@@ -16,7 +16,7 @@ from fpdf import FPDF
 from PIL import Image
 
 SOFT_NAME = "我的宠物App软件"
-SOFT_VER = "V0.1.5"
+SOFT_VER = "V0.1.9"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 SHOTS = os.path.join(REPO, "docs", "store", "screenshots")

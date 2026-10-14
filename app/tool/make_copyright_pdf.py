@@ -17,7 +17,7 @@ from fpdf import FPDF
 
 # ---------------------------------------------------------------- 可调参数
 SOFT_NAME = "我的宠物App软件"
-SOFT_VER = "V0.1.5"
+SOFT_VER = "V0.1.9"
 LINES_PER_PAGE = 50
 FIRST_PAGES = 30   # 前 30 页
 LAST_PAGES = 30    # 后 30 页
