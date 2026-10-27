@@ -10,8 +10,10 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart' show launchUrl, LaunchMode;
 
 import '../core/app_capabilities.dart';
+import '../core/app_identity.dart';
 import '../core/l10n.dart';
 import '../core/region.dart';
 import '../core/theme.dart';
@@ -38,6 +40,20 @@ String _contactSummary(LocalUser user) => [
       if ((user.email ?? '').trim().isNotEmpty) user.email!.trim(),
       if ((user.contactNote ?? '').trim().isNotEmpty) user.contactNote!.trim(),
     ].join(' · ');
+
+/// 打开工信部备案系统，供用户核验 App 备案号。
+///
+/// 法规要求备案号「可跳转核验」，所以这一行必须可点。失败静默：
+/// 这一屏没有别的补救动作可给用户，再弹一个错误只是添乱。
+Future<void> _openIcpQuery() async {
+  final uri = Uri.tryParse(AppIdentity.icpQueryUrl);
+  if (uri == null) return;
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    // 静默，理由见上。
+  }
+}
 
 class MeScreen extends ConsumerWidget {
   const MeScreen({super.key});
@@ -94,11 +110,17 @@ class MeScreen extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpace.gapM),
 
+        // 备案号：法规要求「显著位置标明 + 可跳转核验」。
+        // 号取自 AppIdentity，不写进文案表 —— 改备案只改一处，
+        // 也不会漏掉英文语言包那一份。
         if (region.requiresIcpDisplay) ...[
           _CompactEntryCard(
-              title: L.t('me.build.icp'),
+              title: L.t('me.icp.title'),
               icon: Icons.verified_outlined,
-              detail: L.t('me.icp')),
+              detail: AppIdentity.icpAppNumber,
+              trailing: const Icon(Icons.chevron_right_rounded,
+                  size: 18, color: AppColors.textTertiary),
+              onTap: _openIcpQuery),
         ],
 
         const SizedBox(height: AppSpace.gapM),

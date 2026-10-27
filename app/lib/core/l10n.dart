@@ -460,7 +460,7 @@ class L {
     'me.build.icp': '备案号展示',
     'me.build.locale': '语言',
     'me.build.units': '默认单位',
-    'me.icp': '备案号将在此展示',
+    'me.icp.title': '备案信息',
     'me.about': '关于',
     'me.about.body': '本应用提供的疫苗与驱虫排期为通用建议，不构成诊断或处方。'
         '不同个体的情况差异很大，请以执业兽医的意见为准。',
@@ -1240,7 +1240,7 @@ class L {
     'me.build.icp': 'ICP display',
     'me.build.locale': 'Locale',
     'me.build.units': 'Default units',
-    'me.icp': 'Filing number shown here',
+    'me.icp.title': 'Filing',
     'me.about': 'About',
     'me.about.body': 'Vaccine and deworming schedules here are general guidance, '
         'not a diagnosis or prescription. Individual animals vary widely — '
