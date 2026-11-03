@@ -1,7 +1,7 @@
 # My Pet · Privacy Policy
 
 **Effective date:** 30 September 2026
-**Last updated:** 6 October 2026
+**Last updated:** 4 November 2026
 
 This policy explains what information "My Pet" (the "App") collects, how we use it,
 where it is stored, and how you can manage it. The operator is **Linyi Weiyuan Tools**.
@@ -138,9 +138,7 @@ We do **not** request contacts, SMS, call logs, or continuous background locatio
   hidden from view).
 - **Account:** sign out under "Me → Data sync". After signing out, local data is kept but
   no longer uploaded.
-- **Server-side data:** to close your account and delete server-side data, email
-  `zhuruipeng@weiyuantool.com` with the phone number or email you signed in with. We
-  complete the deletion and reply within **15 working days**. Deletion cannot be undone.
+- **Account deletion:** sign in and open My → Data sync → Delete account, type DELETE and confirm. This permanently erases the regional account, credentials, exclusively owned pets and cloud photos, plus this account’s local data and app-owned files on the requesting device. Resolve active carers on pets you own first. Other carers’ shared facts remain with attribution anonymized; other local accounts remain. Remove copies on other devices, gallery originals and exported backups separately. Minimal deletion signals, a one-way identity marker and a 24-hour token-hash retry receipt remain. Restricted operational backups rotate normally; completed deletion requests must be reapplied on restore. This does not close your Chuxiu website account. For help or older versions email `zhuruipeng@weiyuantool.com`; identity-verified requests receive a reply within **15 working days**. Save a backup first.
 
 ---
 

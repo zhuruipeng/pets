@@ -30,9 +30,10 @@ from .changes import (
 )
 from .db import get_session
 from .expense_payload import expense_payload_for_storage, expense_payload_for_wire
-from .models import Member, Pet, PetRecord, SyncChange, User
+from .models import ErasedIdentity, Member, Pet, PetRecord, SyncChange, User
+from .privacy import anonymize_attribution
 from .media import validated_photo_url
-from .sync_logic import is_newer, now_ms, role_can, visible_to
+from .sync_logic import hash_token, is_newer, now_ms, role_can, visible_to
 
 router = APIRouter(tags=["sync"])
 
@@ -308,6 +309,7 @@ def sync_push(
     lock_sync_writes(session)
     applied: list[dict] = []
     rejected: list[dict] = []
+    erased_authors: dict[str, bool] = {}
     valid_changes: list[PushChangeIn] = []
     for change in payload.changes:
         if (change.table not in SYNC_TABLES or change.op not in ("upsert", "delete")
@@ -437,6 +439,11 @@ def sync_push(
         # payload 原样存：walk_sessions 的轨迹点就在 payload["points"] 里，
         # 不拆到别处（见协议第三节）。拆开会让「整段覆盖」的语义无处落脚。
         snapshot = {**change.payload, "id": change.row_id, "updated_at": change.updated_at}
+        author = snapshot.get("created_by")
+        if isinstance(author, str) and author not in erased_authors:
+            erased_authors[author] = session.get(ErasedIdentity, hash_token(author)) is not None
+        if isinstance(author, str) and erased_authors[author]:
+            snapshot = anonymize_attribution(snapshot)
         if change.table == "attachments":
             snapshot.pop("local_path", None)
         if dose_details is not None:

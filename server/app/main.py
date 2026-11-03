@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import auth, feedback, media, members, sync, unified
+from . import account_deletion, auth, feedback, media, members, sync, unified
 from .config import Settings, get_settings
 from .changes import lock_sync_writes, active_member_pet_ids, member_payload, pet_payload, record_change
 from .db import get_session, init_db
@@ -38,6 +38,9 @@ async def lifespan(_: FastAPI):
     # 唯一键冲突而 boot 失败（详见 deploy/02-app-setup.sh 里 ExecStartPre 的注释）。
     # 生产由 systemd 的 ExecStartPre 先建好表，这里再跑就是 checkfirst 空转。
     init_db()
+    from .db import SessionLocal
+    with SessionLocal() as session:
+        account_deletion.purge_pending_media(session, get_settings())
     yield
 
 
@@ -70,6 +73,7 @@ app = FastAPI(
 # 已经上线的客户端调的就是这些无前缀路径，改了等于强制所有人升级。
 API_V1 = "/api/v1"
 app.include_router(auth.router, prefix=API_V1)
+app.include_router(account_deletion.router, prefix=API_V1)
 # 用户反馈。**不存库**，只转发到开发者邮箱 —— 理由见 feedback.py 头部。
 app.include_router(feedback.router, prefix=API_V1)
 app.include_router(unified.router, prefix=API_V1)

@@ -30,6 +30,7 @@ import 'data/sync/secure_token_store.dart';
 import 'data/sync/sync_api.dart';
 import 'data/sync/sync_engine.dart';
 import 'data/sync/photo_sync.dart';
+import 'data/sync/account_data.dart';
 import 'data/sync/unified_api.dart';
 import 'domain/expense_stats.dart';
 import 'domain/health_ledger.dart';
@@ -141,6 +142,12 @@ final appUpdateServiceProvider =
 /// 数据库是否已就绪。main() 里 await 打开，这里作为门禁。
 final dbReadyProvider = FutureProvider<void>((ref) async {
   await ref.read(databaseProvider).open();
+  try {
+    await purgeDeletedAccountFiles(ref.read(databaseProvider).db,
+        await getApplicationDocumentsDirectory());
+  } catch (_) {
+    // A cleanup queue survives until a later launch can access the files.
+  }
 });
 
 // ------------------------------------------------------------------ 宠物
@@ -1126,6 +1133,41 @@ class AppActions {
     ref.read(syncControllerProvider.notifier).refresh();
   }
 
+  Future<void> deleteAccount() async {
+    await ref.read(syncEngineProvider).deleteAccount();
+    ref.read(activeWalkProvider.notifier).state = null;
+    ref.read(selectedPetIdProvider.notifier).state = null;
+    ref.invalidate(backupInventoryProvider);
+    ref.invalidate(photoSyncEnabledProvider);
+    ref.invalidate(petWalksProvider);
+    ref.invalidate(walkPointsProvider);
+    ref.invalidate(petExpensesProvider);
+    ref.invalidate(expenseSummaryProvider);
+    ref.invalidate(recordPhotosProvider);
+    ref.invalidate(recordDocumentsProvider);
+    ref.invalidate(petPhotosProvider);
+    ref.invalidate(petDocumentsProvider);
+    ref.invalidate(careEventsProvider);
+    ref.invalidate(currentUserProvider);
+    ref.invalidate(petRoleProvider);
+    ref.invalidate(petRecordsProvider);
+    ref.invalidate(petRemindersProvider);
+    ref.invalidate(petMembersProvider);
+    ref.invalidate(careLogsProvider);
+    ref.invalidate(upcomingRemindersProvider);
+    ref.invalidate(weightSeriesProvider);
+    ref.invalidate(petsProvider);
+    ref.invalidate(myInvitesProvider);
+    await ref.read(syncControllerProvider.notifier).refresh();
+    await ref.read(notificationServiceProvider).cancelAll();
+    try {
+      await purgeDeletedAccountFiles(ref.read(databaseProvider).db,
+          await getApplicationDocumentsDirectory());
+    } catch (_) {
+      // Server erasure has completed. File cleanup is durable and retryable.
+    }
+  }
+
   // ---- M6：共养 ----
 
   Future<void> inviteMember({
@@ -1236,12 +1278,16 @@ class SyncController extends Notifier<SyncStatus> {
       return;
     }
     final loggedIn = await _engine.isLoggedIn();
+    final deleting = await _engine.accountDeletionPending();
     final pending = await _engine.pendingCount();
     state = state.copyWith(
-      phase: loggedIn ? SyncPhase.idle : SyncPhase.notLoggedIn,
+      phase: loggedIn
+          ? (deleting ? SyncPhase.error : SyncPhase.idle)
+          : SyncPhase.notLoggedIn,
       lastSyncAt: await _engine.lastSyncAt(),
       pending: pending,
-      clearMessage: true,
+      message: deleting ? L.t('account.deletionPending') : null,
+      clearMessage: !deleting,
     );
   }
 
@@ -1249,6 +1295,11 @@ class SyncController extends Notifier<SyncStatus> {
   Future<void> runSync() async {
     if (!_ready) return;
     if (state.syncing) return; // 防抖：定时器与手动按钮可能撞上
+    if (await _engine.accountDeletionPending()) {
+      state = state.copyWith(
+          phase: SyncPhase.error, message: L.t('account.deletionPending'));
+      return;
+    }
 
     if (!await _engine.isLoggedIn()) {
       state = state.copyWith(phase: SyncPhase.notLoggedIn);

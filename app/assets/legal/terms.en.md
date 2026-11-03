@@ -60,7 +60,7 @@ vet directly rather than relying on this App's reminders.
 
 - You can sign out at any time. After signing out, local data is kept but no longer
   uploaded.
-- To close your account and delete server-side data, email
+- To close your account, use My → Data sync → Delete account and type DELETE. Your account and exclusively owned data are permanently erased; shared facts remain with attribution anonymized. See the Privacy Policy. For help, email
   `zhuruipeng@weiyuantool.com`.
 - We handle your personal information as described in the **Privacy Policy**.
 

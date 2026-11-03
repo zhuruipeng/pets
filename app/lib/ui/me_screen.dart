@@ -22,6 +22,7 @@ import '../data/models.dart';
 import '../data/sync/sync_api.dart';
 import '../providers.dart';
 import 'auth_sheet.dart';
+import 'delete_account_page.dart';
 import 'contact_sheet.dart';
 import 'feedback_page.dart';
 import 'legal_page.dart';
@@ -454,6 +455,16 @@ class _AccountCard extends ConsumerWidget {
               ),
             ],
           ),
+          const RowDivider(),
+          TextButton.icon(
+            onPressed: status.syncing
+                ? null
+                : () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const DeleteAccountPage())),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            icon: const Icon(Icons.person_remove_outlined),
+            label: Text(L.t('account.delete')),
+          ),
         ],
       ],
     );
@@ -488,8 +499,14 @@ class _AccountCard extends ConsumerWidget {
     );
     if (!ok) return;
     // 引擎侧撤令牌 + 本地动作层清理，两件事都要做，顺序无所谓。
-    await ref.read(appActionsProvider).logout();
-    await controller.refresh();
+    try {
+      await ref.read(appActionsProvider).logout();
+      await controller.refresh();
+    } catch (error) {
+      if (context.mounted) {
+        showErrorSnackVia(ScaffoldMessenger.of(context), error);
+      }
+    }
   }
 }
 

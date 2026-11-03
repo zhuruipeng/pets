@@ -35,6 +35,26 @@ class Base(DeclarativeBase):
     pass
 
 
+class DeletedSession(Base):
+    """Short-lived hashed receipts allow retry after a lost deletion response."""
+    __tablename__ = "deleted_sessions"
+    token = Column(Text, primary_key=True)
+    expires_at = Column(BigInteger, nullable=False)
+
+
+class ErasedIdentity(Base):
+    """One-way identity marker prevents offline edits restoring attribution."""
+    __tablename__ = "erased_identities"
+    id_hash = Column(String(64), primary_key=True)
+
+
+class PendingMediaDeletion(Base):
+    """Durable file cleanup; contains no account profile or usable photo grant."""
+    __tablename__ = "pending_media_deletions"
+    attachment_id = Column(String(128), primary_key=True)
+    sha256 = Column(String(64), primary_key=True)
+
+
 class PhotoBlob(Base):
     __tablename__ = "photo_blobs"
 

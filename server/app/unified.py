@@ -278,6 +278,8 @@ def exchange_unified_token(
             raise HTTPException(status_code=503, detail="unified account unavailable") from exc
         raise HTTPException(status_code=502, detail="unified account response invalid") from exc
 
+    from .changes import lock_sync_writes
+    lock_sync_writes(session)
     now = now_ms()
     user = session.execute(select(User).where(User.phone == account.phone)).scalars().first()
 

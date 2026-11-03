@@ -435,6 +435,14 @@ class SyncApi {
     await _post('/auth/logout', const {}, token: token);
   }
 
+  Future<void> deleteAccount(String token) async {
+    final result = await _send('DELETE', '/me', {'confirmation': 'DELETE'},
+        token: token, followRedirects: false);
+    if (result['ok'] != true) {
+      throw const FormatException('Invalid account deletion response');
+    }
+  }
+
   Future<RemoteUser> me(String token) async {
     final j = await _get('/me', token: token);
     // 兼容 {user: {...}} 与直接返回用户对象两种形态。
@@ -614,8 +622,10 @@ class SyncApi {
     String path,
     Map<String, dynamic> body, {
     String? token,
+    bool followRedirects = true,
   }) async {
     final req = http.Request(method, Uri.parse('$baseUrl$path'))
+      ..followRedirects = followRedirects
       ..headers.addAll(_headers(token))
       ..body = jsonEncode(body);
     final streamed = await _client.send(req).timeout(_timeout);

@@ -28,6 +28,7 @@ import '../expense_payload.dart';
 import 'sync_api.dart';
 import 'photo_sync.dart';
 import 'token_store.dart';
+import 'account_data.dart';
 
 /// 哪些表**能**被应用（apply）到本机。
 ///
@@ -188,7 +189,11 @@ class SyncEngine {
     // process stopped between their commits, discard ambiguous credentials
     // before any account's working set can be uploaded with another token.
     if (await _meta('session_pending') != null) {
-      await _tokens.clear();
+      try {
+        await _tokens.clear();
+      } catch (_) {
+        // The journal itself is sufficient to reject ambiguous credentials.
+      }
       await _setMeta(_legacyTokenKey, null);
       // Keep the journal until a fresh login commits. Platform clear() can
       // fail silently, so a restart must continue to reject the old token.
@@ -262,6 +267,9 @@ class SyncEngine {
     Future<void> Function(DatabaseExecutor txn)? prepareAccount,
   }) =>
       _changeSession(() async {
+        if (await accountDeletionPending()) {
+          throw StateError('account.deletionPending');
+        }
         final previousToken = await _readToken();
         await _setMeta('session_pending', session.user.id);
         var tokenWritten = false;
@@ -308,6 +316,9 @@ class SyncEngine {
       });
 
   Future<void> signOut() => _changeSession(() async {
+        if (await accountDeletionPending()) {
+          throw StateError('account.deletionPending');
+        }
         final t = await _readToken();
         if (t != null) {
           try {
@@ -318,6 +329,35 @@ class SyncEngine {
         }
         // Preserve this account's working set for same-account reconnection.
         await _clearToken();
+      });
+
+  Future<bool> accountDeletionPending() async =>
+      await _meta('account_deletion_pending') != null;
+
+  Future<void> deleteAccount() => _changeSession(() async {
+        final t = await _readToken();
+        final accountId = await _meta('account_id');
+        if (t == null || accountId == null) {
+          throw StateError('Not signed in');
+        }
+        // A lost response must not let background sync discard the retry token.
+        await _setMeta('account_deletion_pending', '1');
+        try {
+          await _api.deleteAccount(t);
+        } on SyncApiException catch (e) {
+          if (e.statusCode >= 400 && e.statusCode < 500) {
+            await _setMeta('account_deletion_pending', null);
+          }
+          rethrow;
+        }
+        await _db.transaction((txn) => eraseAccountData(txn, accountId));
+        _cachedToken = null;
+        _tokenLoaded = true;
+        try {
+          await _tokens.clear();
+        } catch (_) {
+          // session_pending already prevents reusing these credentials on restart.
+        }
       });
 
   Future<bool> photoSyncEnabled() async =>
@@ -337,6 +377,9 @@ class SyncEngine {
     try {
       final t = await token();
       if (t == null || t.isEmpty) return SyncReport.skipped;
+      if (await _meta('account_deletion_pending') != null) {
+        return SyncReport.skipped;
+      }
 
       var pushed = 0;
       var rejected = 0;

@@ -68,7 +68,7 @@ PRIVACY_EN = """
 
 <h1>My Pet · Privacy Policy</h1>
 <p class="meta"><strong>Effective date:</strong> 30 September 2026 &nbsp;·&nbsp;
-<strong>Last updated:</strong> 30 September 2026</p>
+<strong>Last updated:</strong> 4 November 2026</p>
 
 <p>This policy explains what information &ldquo;My Pet&rdquo; (the &ldquo;App&rdquo;)
 collects, how we use it, where it is stored, and how you can manage it.
@@ -252,10 +252,7 @@ also delete entries individually inside the App (deletion is soft: the item is m
 deleted locally and hidden from view).</li>
 <li><strong>Account:</strong> sign out under &ldquo;Me &rarr; Data sync&rdquo;. After
 signing out, local data is kept but no longer uploaded.</li>
-<li><strong>Server-side data:</strong> to close your account and delete server-side
-data, email <code>zhuruipeng@weiyuantool.com</code> with the phone number or email
-you signed in with. We complete the deletion and reply within <strong>15 working
-days</strong>. Deletion cannot be undone.</li>
+<li><strong>Account deletion:</strong> use My &rarr; Data sync &rarr; Delete account and type DELETE. The server erases your account, credentials and exclusively owned data. This account’s local data and app-owned files are also cleared. Resolve other active carers on pets you own first. Shared facts on others’ pets remain with attribution anonymized. Other local accounts remain. Remove copies on other devices, gallery originals and exported backups separately. Minimal deletion signals, a one-way identity marker and a 24-hour token-hash retry receipt remain; restricted backups rotate normally and deletions must be reapplied on restore. This does not delete your Chuxiu website account. For older versions or help, email <code>zhuruipeng@weiyuantool.com</code>; ownership-verified requests receive a reply within <strong>15 working days</strong>. Deletion is permanent.</li>
 </ul>
 
 <hr>
@@ -408,7 +405,7 @@ or infringing content.</li>
 <ul>
 <li>You can sign out at any time. After signing out, local data is kept but no longer
 uploaded.</li>
-<li>To close your account and delete server-side data, email
+<li>To close your account, use My &rarr; Data sync &rarr; Delete account. For help, email
 <code>zhuruipeng@weiyuantool.com</code>.</li>
 <li>We handle your personal information as described in the
 <strong>Privacy Policy</strong>.</li>
@@ -536,61 +533,34 @@ different operations:</p>
 <tr>
 <td>Close account</td>
 <td>The account and its synced data are deleted from the server and cannot be
-recovered. Local data on your phone is unaffected.</td>
+recovered. Self-service deletion also clears this account’s data on the requesting device.</td>
 <td>See section 2 below</td>
 </tr>
 </tbody>
 </table>
 
 <h2>2. How to close your account</h2>
-
-<p>For now this is done by email (a self-service deletion flow is not yet in the
-App; it is on our improvement list).</p>
-
-<ul>
-<li>Email <code>zhuruipeng@weiyuantool.com</code></li>
-<li>Subject: <strong>Delete my account</strong></li>
-<li>In the body, state the phone number or email you signed up with, so we can
-locate the account. If you like, tell us why &mdash; we read it, but we will not
-press you for it.</li>
-</ul>
-
-<p>To avoid deleting someone else&rsquo;s account by mistake, we only action requests
-sent from the phone number or email you registered with, or from someone who can
-prove they are the account holder. If we cannot verify this, we will reply and
-explain what we still need.</p>
-
+<p>In versions supporting self-service deletion, sign in and open <strong>My &rarr; Data sync &rarr; Delete account</strong>. Export a backup if needed, read the scope, type <code>DELETE</code> and confirm permanent deletion. An internet connection is required.</p>
+<p>If a pet you own still has other active carers, deletion is blocked without changing data. Resolve its sharing first. Pets owned by others that you help care for are retained.</p>
+<p>This deletes only the regional Pet App account. It does not close your Chuxiu website account or accounts in other products. Signing in again creates a new empty Pet App account.</p>
+<p>If you cannot sign in or use an older version, email <code>zhuruipeng@weiyuantool.com</code>, subject <strong>Delete my account</strong>, with your sign-in phone or email. We verify account ownership. Do not send passwords or login tokens.</p>
 <h2>3. What gets deleted</h2>
-
-<p>Once your identity is verified, we delete everything on our servers associated
-with the account:</p>
-
 <ul>
-<li>The account itself (phone number / email, display name, avatar, WeChat and other
-contact details)</li>
-<li>Login tokens (invalidated immediately, including on every signed-in
-device)</li>
-<li>Pet profiles, entries, and reminders that had synced to the server</li>
-<li>Co-care member relationships with family or friends</li>
-<li>Any invitations this account sent that were never accepted</li>
+<li>The regional server profile, contact details, password hash, all Pet App login tokens and verification codes for its contact targets.</li>
+<li>Exclusively owned pets, records, expenses, reminders, walks, attachments, cloud photos and historical sync snapshots.</li>
+<li>Your shared-care membership and pending invitations for exclusively owned pets. Shared care facts on others’ pets remain with structured attribution anonymized.</li>
+<li>This account’s local records, pending sync writes, cursor, photo-sync setting and app-owned photo, document and avatar copies on the requesting device. Other local accounts and their referenced files remain.</li>
 </ul>
-
-<h2>4. What is <em>not</em> deleted</h2>
-
-<p><strong>The data on your phone.</strong> It lives on your device, so we cannot
-reach it. To remove it, delete entries in the App or uninstall the App.</p>
-
-<p><strong>Photos and your avatar.</strong> Avatars are never uploaded. Record photos are uploaded only after photo sync is enabled. Account deletion includes exclusively owned cloud photo files and their indexes. Shared pets and photos require review of other carers’ retention rights; one member’s deletion request must not erase another member’s data. Local copies must be removed on the device.</p>
-
-<p>If you want those gone as well, delete your pet&rsquo;s profile in the App or
-uninstall the App &mdash; only you can do that.</p>
-
+<h2>4. What remains</h2>
+<ul>
+<li>Other carers’ shared pets and facts. Anonymizing attribution does not rewrite free-text medical facts or notes. Contact us about personal information in those fields.</li>
+<li>Offline copies on other devices, gallery originals and exported backups. Remove these separately. An email request cannot remotely erase a phone.</li>
+<li>Minimal random identifiers and deletion signals, a one-way identity marker preventing offline edits restoring attribution, and a token-hash receipt allowing only deletion retries for 24 hours. These cannot be used to sign in.</li>
+<li>Restricted operational backups until normal rotation. They are not active business data; completed deletion requests must be reapplied if a backup is restored.</li>
+</ul>
 <h2>5. How long it takes</h2>
-
-<p>We complete deletion within <strong>15 working days</strong> of receiving your
-request and reply to confirm. After the account is closed it cannot be restored:
-signing in again with the same phone number gives you a brand-new empty account, and
-the old data does not come back.</p>
+<p>Self-service deletion takes effect when the server transaction completes. All devices lose sign-in access immediately. This device clears its account data after receiving confirmation. Temporarily locked app-owned files enter a durable retry queue; cloud authorization has already been removed. If the response is lost, retry on the same screen to safely confirm the result.</p>
+<p>We verify emailed requests and reply within <strong>15 working days</strong>. Account deletion cannot be undone. Save any necessary backup first.</p>
 
 <h2>6. Deleting only part of it</h2>
 

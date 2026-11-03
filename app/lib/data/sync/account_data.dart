@@ -2,6 +2,8 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common/sqlite_api.dart';
 
 const _accountTables = [
@@ -25,6 +27,139 @@ bool _accountMeta(String key) =>
     key == 'photo_sync_enabled' ||
     key.startsWith('backup_');
 
+Set<String> _fileReferences(Object? value) {
+  final result = <String>{};
+  if (value is Map) {
+    for (final entry in value.entries) {
+      if ((entry.key == 'local_path' || entry.key == 'avatar_url') &&
+          entry.value is String) {
+        result.add(entry.value as String);
+      } else {
+        result.addAll(_fileReferences(entry.value));
+      }
+    }
+  } else if (value is List) {
+    for (final item in value) {
+      result.addAll(_fileReferences(item));
+    }
+  }
+  return result;
+}
+
+/// Erase only the active account, keeping other accounts' snapshots intact.
+Future<void> eraseAccountData(DatabaseExecutor txn, String accountId) async {
+  final paths = <String>{};
+  for (final table in _accountTables) {
+    paths.addAll(_fileReferences(await txn.query(table)));
+  }
+  final oldQueue = await txn.query('sync_meta',
+      where: 'key = ?', whereArgs: ['deleted_account_files']);
+  if (oldQueue.isNotEmpty) {
+    paths.addAll((jsonDecode(oldQueue.single['value'] as String) as List)
+        .cast<String>());
+  }
+  await txn.insert('sync_meta', {'key': 'applying', 'value': '1'},
+      conflictAlgorithm: ConflictAlgorithm.replace);
+  for (final table in _accountTables.reversed) {
+    await txn.delete(table);
+  }
+  for (final row in await txn.query('sync_meta')) {
+    final key = row['key'] as String;
+    if (_accountMeta(key) ||
+        {
+          'account_id',
+          'account_region',
+          'token',
+          'account_deletion_pending',
+          'account_snapshot:$accountId'
+        }.contains(key)) {
+      await txn.delete('sync_meta', where: 'key = ?', whereArgs: [key]);
+    }
+  }
+  // Shared file references in another local account must remain available.
+  for (final row in await txn.query('sync_meta')) {
+    if ((row['key'] as String).startsWith('account_snapshot:')) {
+      paths.removeAll(_fileReferences(jsonDecode(row['value'] as String)));
+    }
+  }
+  final now = DateTime.now().millisecondsSinceEpoch;
+  await txn.insert('users', {
+    'id': 'local-user',
+    'nickname': '',
+    'region': 'local',
+    'created_at': now,
+    'updated_at': now
+  });
+  // A fresh guest session is a separate working set. The next account login
+  // must restore its saved snapshot instead of adopting the empty reset state.
+  await txn.insert('sync_meta', {'key': 'account_id', 'value': 'local-reset'},
+      conflictAlgorithm: ConflictAlgorithm.replace);
+  await txn.insert('sync_meta',
+      {'key': 'deleted_account_files', 'value': jsonEncode(paths.toList())},
+      conflictAlgorithm: ConflictAlgorithm.replace);
+  // Remains until a fresh login commits, even when platform clear() fails.
+  await txn.insert(
+      'sync_meta', {'key': 'session_pending', 'value': 'deleted-account'},
+      conflictAlgorithm: ConflictAlgorithm.replace);
+  await txn.delete('sync_meta', where: 'key = ?', whereArgs: ['applying']);
+}
+
+/// Retry app-owned file cleanup after a crash; never touch gallery/export files.
+Future<void> purgeDeletedAccountFiles(Database db, Directory documents) async {
+  final rows = await db.query('sync_meta',
+      where: 'key = ?', whereArgs: ['deleted_account_files']);
+  if (rows.isEmpty) return;
+  final root = await documents.resolveSymbolicLinks();
+  final protectedPaths = <String>{};
+  for (final table in _accountTables) {
+    protectedPaths.addAll(_fileReferences(await db.query(table)));
+  }
+  for (final row in await db.query('sync_meta')) {
+    if ((row['key'] as String).startsWith('account_snapshot:')) {
+      protectedPaths
+          .addAll(_fileReferences(jsonDecode(row['value'] as String)));
+    }
+  }
+  final protectedFiles = <String>{};
+  for (final path in protectedPaths) {
+    if (!p.isAbsolute(path)) continue;
+    try {
+      protectedFiles.add(await File(path).resolveSymbolicLinks());
+    } on FileSystemException {
+      // No file exists to protect.
+    }
+  }
+  final remaining = <String>[];
+  for (final path
+      in (jsonDecode(rows.single['value'] as String) as List).cast<String>()) {
+    if (!p.isAbsolute(path)) continue;
+    try {
+      final file = File(path);
+      if (!await file.exists()) continue;
+      final resolved = await file.resolveSymbolicLinks();
+      if (!p.isWithin(root, resolved) || protectedFiles.contains(resolved)) {
+        continue;
+      }
+      final parts = p.split(p.relative(resolved, from: root));
+      if (parts.isEmpty ||
+          !{'avatars', 'attachments', 'documents', 'synced-photos', 'restored'}
+              .contains(parts.first)) {
+        continue;
+      }
+      await file.delete();
+    } on FileSystemException {
+      remaining.add(path);
+    }
+  }
+  if (remaining.isEmpty) {
+    await db.delete('sync_meta',
+        where: 'key = ?', whereArgs: ['deleted_account_files']);
+  } else {
+    await db.update('sync_meta', {'value': jsonEncode(remaining)},
+        where: 'key = ?', whereArgs: ['deleted_account_files']);
+  }
+}
+
 /// Called inside the same transaction as the session metadata update.
 /// Snapshots contain local rows/file paths and pending writes, never tokens.
 Future<void> adoptAccountData(
@@ -43,8 +178,12 @@ Future<void> adoptAccountData(
   final previous = accountRows.isEmpty
       ? (users.isEmpty ? null : users.first['id'] as String?)
       : accountRows.first['value'] as String?;
-  final switching =
-      previous != null && previous != guest && previous != accountId;
+  final targetSnapshot = await txn.query('sync_meta',
+      where: 'key = ?', whereArgs: ['account_snapshot:$accountId'], limit: 1);
+  final switching = previous != null &&
+      previous != guest &&
+      previous != accountId &&
+      (previous != 'local-reset' || targetSnapshot.isNotEmpty);
   if (switching) {
     final snapshot = <String, dynamic>{};
     for (final table in _accountTables) {

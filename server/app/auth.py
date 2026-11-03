@@ -249,10 +249,15 @@ def _resolve_token(session: Session, authorization: str | None) -> tuple[AuthTok
 
 
 def current_user(
+    request: Request,
     authorization: str | None = Header(default=None),
     session: Session = Depends(get_session),
 ) -> User:
     """FastAPI 依赖：拿到当前登录用户，失败抛 401。"""
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        # Authenticate writes after the same lock as account erasure. An already
+        # queued request must never recreate a deleted account's data.
+        lock_sync_writes(session)
     _, user = _resolve_token(session, authorization)
     return user
 
@@ -516,6 +521,7 @@ def verify_code(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     """校验验证码；通过则签发令牌，首次登录顺带注册。"""
+    lock_sync_writes(session)
     target = normalize_target(payload.channel, payload.target)
     now = now_ms()
 
@@ -621,6 +627,7 @@ def password_login(
     （401 + 同一句 detail）。不区分这三种，等于不告诉试探者「这个号到底
     注册过没有」「它有没有设密码」——每多泄露一点都方便撞库。
     """
+    lock_sync_writes(session)
     target = normalize_target(payload.channel, payload.target)
     if not target:
         raise HTTPException(status_code=400, detail="invalid target")
