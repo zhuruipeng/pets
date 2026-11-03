@@ -384,6 +384,28 @@ class _AccountCard extends ConsumerWidget {
           ),
           const RowDivider(),
           InfoRow(L.t('sync.title'), _syncSummary(status)),
+          const RowDivider(),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: Text(L.t('sync.photos')),
+            subtitle: Text(L.t('sync.photosHint')),
+            value: ref.watch(photoSyncEnabledProvider).valueOrNull ?? false,
+            onChanged: status.syncing
+                ? null
+                : (enabled) async {
+                    try {
+                      await ref
+                          .read(syncEngineProvider)
+                          .setPhotoSyncEnabled(enabled);
+                      ref.invalidate(photoSyncEnabledProvider);
+                    } catch (error) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(content: Text('$error')));
+                      }
+                    }
+                  },
+          ),
           if (status.message != null) ...[
             const RowDivider(),
             Padding(

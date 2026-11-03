@@ -35,6 +35,18 @@ class Base(DeclarativeBase):
     pass
 
 
+class PhotoBlob(Base):
+    __tablename__ = "photo_blobs"
+
+    attachment_id = Column(String(128), primary_key=True)
+    sha256 = Column(String(64), primary_key=True)
+    pet_id = Column(String(36), ForeignKey("pets.id"), nullable=False, index=True)
+    record_id = Column(String(128), nullable=False)
+    content_type = Column(String(64), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+
+
 class User(Base):
     __tablename__ = "users"
 

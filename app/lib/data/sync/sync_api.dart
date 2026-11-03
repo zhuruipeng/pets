@@ -7,7 +7,9 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/region.dart';
@@ -237,6 +239,76 @@ class SyncApi {
   final String baseUrl;
 
   static const Duration _timeout = Duration(seconds: 15);
+
+  static const maxPhotoBytes = 20 * 1024 * 1024;
+  static final _photoPath =
+      RegExp(r'^/media/photos/[A-Za-z0-9_-]{1,128}/[a-f0-9]{64}$');
+
+  Future<String> uploadPhoto(
+      {required String token,
+      required String attachmentId,
+      required String petId,
+      required String recordId,
+      required Uint8List bytes}) async {
+    if (bytes.isEmpty || bytes.length > maxPhotoBytes) {
+      throw SyncApiException(413, 'Photo exceeds size limit');
+    }
+    final uri =
+        Uri.parse('$baseUrl/media/photos/${Uri.encodeComponent(attachmentId)}')
+            .replace(queryParameters: {'pet_id': petId, 'record_id': recordId});
+    final request = http.Request('PUT', uri)
+      ..followRedirects = false
+      ..headers.addAll({
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/octet-stream'
+      })
+      ..bodyBytes = bytes;
+    final response = await _client
+        .send(request)
+        .then(http.Response.fromStream)
+        .timeout(const Duration(seconds: 60));
+    final body = _decode(response);
+    final hash = sha256.convert(bytes).toString();
+    final path = '/media/photos/$attachmentId/$hash';
+    if (body['remote_url'] != path ||
+        body['sha256'] != hash ||
+        body['size_bytes'] != bytes.length) {
+      throw SyncApiException(502, 'Photo upload checksum mismatch');
+    }
+    return path;
+  }
+
+  Future<Uint8List> downloadPhoto(
+      {required String token, required String remoteUrl}) async {
+    // Never send a bearer token to a URL supplied by another device.
+    if (!_photoPath.hasMatch(remoteUrl)) {
+      throw SyncApiException(422, 'Invalid photo URL');
+    }
+    final request = http.Request('GET', Uri.parse('$baseUrl$remoteUrl'))
+      ..followRedirects = false
+      ..headers['Authorization'] = 'Bearer $token';
+    Future<Uint8List> receive() async {
+      final response = await _client.send(request);
+      if (response.statusCode != 200) {
+        await response.stream.drain<void>();
+        throw SyncApiException(response.statusCode, 'Photo download failed');
+      }
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in response.stream) {
+        if (builder.length + chunk.length > maxPhotoBytes) {
+          throw SyncApiException(413, 'Photo exceeds size limit');
+        }
+        builder.add(chunk);
+      }
+      final bytes = builder.takeBytes();
+      if (sha256.convert(bytes).toString() != remoteUrl.split('/').last) {
+        throw SyncApiException(502, 'Photo download checksum mismatch');
+      }
+      return bytes;
+    }
+
+    return receive().timeout(const Duration(seconds: 60));
+  }
 
   // ---------------------------------------------------------------- 认证
 

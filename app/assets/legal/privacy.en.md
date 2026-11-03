@@ -20,7 +20,7 @@ where it is stored, and how you can manage it. The operator is **Linyi Weiyuan T
 ## 1. The short version
 
 **Your pet's data stays on your phone by default.** It is only sent to the server for
-your region after you deliberately sign in. Photos are never uploaded.
+your region after you deliberately sign in. Record photos stay on-device by default. Only after you enable “Sync record photos” will manual sync upload existing and new record photos to your regional server for authorized shared carers. Avatars and local-only documents are not uploaded. Turning the option off stops future photo transfers but does not delete existing server copies. Deleting a photo stops cloud access when that deletion is synchronized.
 
 ---
 
@@ -79,7 +79,8 @@ The App is **local-first**, and the two regions run on separate infrastructure:
 | Data | Location |
 | --- | --- |
 | Pet profile, entries, reminders, traces | **On-device database** (the App's private directory, unreadable by other apps) |
-| Photos, avatar | **On-device files** (the App's private directory). **Never uploaded.** |
+| Record photos | On-device by default; manual sync transfers them to the regional server only after “Sync record photos” is enabled. Shared-care permissions control access. |
+| Avatar, local-only documents | **On-device files** in the App's private directory; never uploaded. |
 | Account, display name, contact details | Mainland China users → servers located in Mainland China; overseas users → overseas servers |
 
 **The two regions are fully isolated, with no cross-border transfer.** Personal data of
@@ -149,7 +150,7 @@ We do **not** request contacts, SMS, call logs, or continuous background locatio
   server cannot retrieve the plaintext token either)
 - Signing out immediately invalidates that token on the server
 - All traffic is over HTTPS
-- Photos never leave the phone, so there is no cloud exposure to worry about
+- Photo transfer is off by default; when enabled, it uses HTTPS, integrity checks and account/shared-care authorization. Removed carers cannot download cloud photos.
 
 > One point worth being explicit about: the sign-in token is currently stored in the
 > App's private directory. On unjailbroken / unrooted devices other apps cannot read

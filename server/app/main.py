@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import auth, feedback, members, sync, unified
+from . import auth, feedback, media, members, sync, unified
 from .config import Settings, get_settings
 from .changes import lock_sync_writes, active_member_pet_ids, member_payload, pet_payload, record_change
 from .db import get_session, init_db
@@ -74,6 +74,7 @@ app.include_router(auth.router, prefix=API_V1)
 app.include_router(feedback.router, prefix=API_V1)
 app.include_router(unified.router, prefix=API_V1)
 app.include_router(sync.router, prefix=API_V1)
+app.include_router(media.router, prefix=API_V1)
 app.include_router(members.router, prefix=API_V1)
 
 # ------------------------------------------------------- 法律页面（静态托管）

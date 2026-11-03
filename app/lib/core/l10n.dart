@@ -803,6 +803,8 @@ class L {
 
     // ---- M6 同步状态 ----
     'sync.title': '数据同步',
+    'sync.photos': '同步记录照片',
+    'sync.photosHint': '默认关闭。开启后，已有及新增的记录照片会随手动同步上传至本区域服务器，供共养成员查看。头像和仅本机文档不上传；关闭不会删除已上传照片。',
     'sync.now': '立即同步',
     'sync.never': '还没同步过',
     'sync.lastAt': '上次同步 {time}',
@@ -1583,6 +1585,8 @@ class L {
 
     // ---- M6 sync status ----
     'sync.title': 'Sync',
+    'sync.photos': 'Sync record photos',
+    'sync.photosHint': 'Off by default. When enabled, manual sync uploads existing and new record photos to your regional server for shared carers to view. Avatars and local-only documents stay on this device. Turning this off does not delete uploaded photos.',
     'sync.now': 'Sync now',
     'sync.never': 'Never synced',
     'sync.lastAt': 'Last synced {time}',

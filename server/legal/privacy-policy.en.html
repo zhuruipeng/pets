@@ -71,8 +71,7 @@ loses your trust for good.</p>
 <h2>1. The short version</h2>
 
 <p><strong>Your pet&rsquo;s data stays on your phone by default.</strong> It is only
-sent to the server for your region after you deliberately sign in. Photos are never
-uploaded.</p>
+sent to the server for your region after you deliberately sign in. Record photos stay on-device by default. Only after you enable “Sync record photos” does manual sync upload existing and new record photos to your regional server for authorized shared carers. Avatars and local-only documents are not uploaded. Turning the option off stops future transfers but does not delete existing server copies. Deleting a photo stops cloud access when that deletion is synchronized.</p>
 
 <hr>
 
@@ -116,7 +115,6 @@ you</td></tr>
 <li>No device identifiers (IMEI / OAID / advertising ID)</li>
 <li>No behavioural tracking, no user profiling, no advertising SDKs</li>
 <li>No third-party analytics services</li>
-
       <h3>2.4 Crash logs (the only thing uploaded automatically)</h3>
       <p>
         When the App crashes, it records an error report and sends it to our server
@@ -152,8 +150,8 @@ infrastructure:</p>
 <tr><td>Pet profile, entries, reminders, traces</td><td><strong>On-device
 database</strong> (the App&rsquo;s private directory, unreadable by other
 apps)</td></tr>
-<tr><td>Photos, avatar</td><td><strong>On-device files</strong> (the App&rsquo;s
-private directory). <strong>Never uploaded.</strong></td></tr>
+<tr><td>Record photos</td><td>On-device by default. After “Sync record photos” is enabled, manual sync transfers them to the regional server with shared-care authorization.</td></tr>
+<tr><td>Avatar, local-only documents</td><td>On-device files; never uploaded.</td></tr>
 <tr><td>Account, display name, contact details</td><td>Mainland China users &rarr;
 servers located in Mainland China; overseas users &rarr; overseas servers</td></tr>
 </tbody>
@@ -253,8 +251,7 @@ days</strong>. Deletion cannot be undone.</li>
 of it (the server cannot retrieve the plaintext token either)</li>
 <li>Signing out immediately invalidates that token on the server</li>
 <li>All traffic is over HTTPS</li>
-<li>Photos never leave the phone, so there is no cloud exposure to worry
-about</li>
+<li>Photo transfer is off by default. When enabled, it uses HTTPS, integrity checks and shared-care authorization; removed carers cannot download cloud photos</li>
 </ul>
 
 <blockquote>

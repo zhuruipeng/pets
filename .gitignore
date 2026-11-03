@@ -32,6 +32,7 @@ venv/
 .venv/
 env/
 .pytest_cache/
+server/private-media/
 
 # ---- 系统 ----
 .DS_Store

@@ -81,6 +81,18 @@ server {
         default_type application/vnd.android.package-archive;
     }
 
+    # Authenticated regional photos; keep the JSON API body limit unchanged.
+    location ^~ /api/v1/media/photos/ {
+        client_max_body_size 21m;
+        proxy_read_timeout 75s;
+        proxy_send_timeout 75s;
+        proxy_pass http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location / {
         return 301 https://$host$request_uri;
     }
@@ -119,6 +131,18 @@ server {
 
     # API 绑在 127.0.0.1:8200，nginx 是唯一入口。路径不做任何改写：
     # 应用自己拥有 /api/v1、/health、/app/version.json、/legal 这些绝对路径。
+    # Authenticated regional photos; keep the JSON API body limit unchanged.
+    location ^~ /api/v1/media/photos/ {
+        client_max_body_size 21m;
+        proxy_read_timeout 75s;
+        proxy_send_timeout 75s;
+        proxy_pass http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8200;
         proxy_http_version 1.1;

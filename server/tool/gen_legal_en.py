@@ -87,8 +87,7 @@ loses your trust for good.</p>
 <h2>1. The short version</h2>
 
 <p><strong>Your pet&rsquo;s data stays on your phone by default.</strong> It is only
-sent to the server for your region after you deliberately sign in. Photos are never
-uploaded.</p>
+sent to the server for your region after you deliberately sign in. Record photos stay on-device by default. Only after you enable “Sync record photos” does manual sync upload existing and new record photos to your regional server for authorized shared carers. Avatars and local-only documents are not uploaded. Turning the option off stops future transfers but does not delete existing server copies. Deleting a photo stops cloud access when that deletion is synchronized.</p>
 
 <hr>
 
@@ -132,6 +131,24 @@ you</td></tr>
 <li>No device identifiers (IMEI / OAID / advertising ID)</li>
 <li>No behavioural tracking, no user profiling, no advertising SDKs</li>
 <li>No third-party analytics services</li>
+      <h3>2.4 Crash logs (the only thing uploaded automatically)</h3>
+      <p>
+        When the App crashes, it records an error report and sends it to our server
+        <strong>the next time you open the App</strong>, so we can fix the problem.
+        It contains the error type and message, the program stack trace, your App
+        version, your region, and your device OS version.
+      </p>
+      <p>
+        <strong>It does not contain</strong> your account, phone number, pet's name,
+        entries, photos, or anything that could identify you. It includes no device
+        identifier.
+      </p>
+      <p>
+        Its only purpose is to locate and fix crashes. <strong>It is never used to
+        analyse how you use the App.</strong> You can review and delete these records
+        under &quot;My page -&gt; Report a problem&quot;; anything you delete there will
+        no longer be uploaded.
+      </p>
 <li>We do not read your other photos &mdash; we only take the single image you select
 in the system photo picker</li>
 </ul>
@@ -149,8 +166,8 @@ infrastructure:</p>
 <tr><td>Pet profile, entries, reminders, traces</td><td><strong>On-device
 database</strong> (the App&rsquo;s private directory, unreadable by other
 apps)</td></tr>
-<tr><td>Photos, avatar</td><td><strong>On-device files</strong> (the App&rsquo;s
-private directory). <strong>Never uploaded.</strong></td></tr>
+<tr><td>Record photos</td><td>On-device by default. After “Sync record photos” is enabled, manual sync transfers them to the regional server with shared-care authorization.</td></tr>
+<tr><td>Avatar, local-only documents</td><td>On-device files; never uploaded.</td></tr>
 <tr><td>Account, display name, contact details</td><td>Mainland China users &rarr;
 servers located in Mainland China; overseas users &rarr; overseas servers</td></tr>
 </tbody>
@@ -250,8 +267,7 @@ days</strong>. Deletion cannot be undone.</li>
 of it (the server cannot retrieve the plaintext token either)</li>
 <li>Signing out immediately invalidates that token on the server</li>
 <li>All traffic is over HTTPS</li>
-<li>Photos never leave the phone, so there is no cloud exposure to worry
-about</li>
+<li>Photo transfer is off by default. When enabled, it uses HTTPS, integrity checks and shared-care authorization; removed carers cannot download cloud photos</li>
 </ul>
 
 <blockquote>
@@ -564,8 +580,7 @@ device)</li>
 <p><strong>The data on your phone.</strong> It lives on your device, so we cannot
 reach it. To remove it, delete entries in the App or uninstall the App.</p>
 
-<p><strong>Photos and your avatar.</strong> They were never uploaded, so there is
-no copy on the server to delete.</p>
+<p><strong>Photos and your avatar.</strong> Avatars are never uploaded. Record photos are uploaded only after photo sync is enabled. Account deletion includes exclusively owned cloud photo files and their indexes. Shared pets and photos require review of other carers’ retention rights; one member’s deletion request must not erase another member’s data. Local copies must be removed on the device.</p>
 
 <p>If you want those gone as well, delete your pet&rsquo;s profile in the App or
 uninstall the App &mdash; only you can do that.</p>

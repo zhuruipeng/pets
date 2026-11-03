@@ -282,6 +282,9 @@ class BackupService {
                 }
                 if (table == 'attachments') {
                   row['record_id'] = remap('records', row['record_id']);
+                  // A restored copy has a new attachment/record identity. Re-upload
+                  // its portable local file instead of referencing the old grant.
+                  row['remote_url'] = null;
                 }
                 if (table == 'walk_points') {
                   row['session_id'] = remap('walk_sessions', row['session_id']);

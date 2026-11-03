@@ -26,6 +26,7 @@ import '../../domain/sync_ids.dart';
 import '../db/schema.dart';
 import '../expense_payload.dart';
 import 'sync_api.dart';
+import 'photo_sync.dart';
 import 'token_store.dart';
 
 /// 哪些表**能**被应用（apply）到本机。
@@ -83,11 +84,14 @@ class SyncEngine {
     required Database Function() dbProvider,
     required TokenStore tokenStore,
     SyncApi? api,
+    PhotoSync? photoSync,
   })  : _api = api ?? SyncApi(),
+        _photos = photoSync,
         _dbProvider = dbProvider,
         _tokens = tokenStore;
 
   final SyncApi _api;
+  final PhotoSync? _photos;
   final Database Function() _dbProvider;
 
   /// 令牌不去 SQLite，走系统密钥库。理由见 token_store.dart 的文件头。
@@ -316,6 +320,13 @@ class SyncEngine {
         await _clearToken();
       });
 
+  Future<bool> photoSyncEnabled() async =>
+      await _meta('photo_sync_enabled') == '1';
+
+  Future<void> setPhotoSyncEnabled(bool enabled) => _changeSession(() async {
+        await _setMeta('photo_sync_enabled', enabled ? '1' : '0');
+      });
+
   // ---------------------------------------------------------------- 同步
 
   /// 跑一次完整同步。任何异常都被兜住并写进 [SyncReport.error]。
@@ -329,9 +340,12 @@ class SyncEngine {
 
       var pushed = 0;
       var rejected = 0;
+      Object? transferError;
+      final photos = await photoSyncEnabled() ? _photos : null;
       try {
         final device = await deviceId();
-        final push = await _pushAll(t, device);
+        await photos?.enqueueLegacyPhotos(_db);
+        final push = await _pushAll(t, device, photos: photos);
         pushed = push.$1;
         rejected = push.$2;
       } on SyncApiException catch (e) {
@@ -341,10 +355,32 @@ class SyncEngine {
           return SyncReport(
               pushed: pushed, pulled: 0, rejected: rejected, error: e);
         }
-        rethrow;
+        if (photos == null) rethrow;
+        transferError = e;
+      } catch (e) {
+        if (photos == null) rethrow;
+        transferError = e;
       }
 
+      // Photo errors must not prevent authoritative deletions/revocations arriving.
       final pulled = await _pullAll(t);
+      if (transferError == null) {
+        try {
+          await photos?.downloadMissing(_db, _api, t);
+        } on SyncApiException catch (e) {
+          if (e.isUnauthorized) await _clearToken();
+          transferError = e;
+        } catch (e) {
+          transferError = e;
+        }
+      }
+      if (transferError != null) {
+        return SyncReport(
+            pushed: pushed,
+            pulled: pulled,
+            rejected: rejected,
+            error: transferError);
+      }
       await _setMeta(
           'last_sync_at', '${DateTime.now().millisecondsSinceEpoch}');
 
@@ -365,7 +401,8 @@ class SyncEngine {
   ///
   /// **先推后拉**：反过来的话，会先把远端的旧版本拉下来覆盖本地的新改动，
   /// 再把自己的改动推上去 —— 等于自己这次的编辑白做了一次。
-  Future<(int, int)> _pushAll(String token, String device) async {
+  Future<(int, int)> _pushAll(String token, String device,
+      {PhotoSync? photos}) async {
     var applied = 0;
     var rejected = 0;
 
@@ -379,7 +416,12 @@ class SyncEngine {
                 "WHEN 'reminders' THEN 1 WHEN 'records' THEN 2 "
                 "WHEN 'attachments' THEN 3 WHEN 'reminder_logs' THEN 4 ELSE 2 END, updated_at ASC",
             limit: _pushBatch);
-        for (final row in rows) {
+        // Commit parents first: a new pet/record must be authorized before uploading bytes.
+        final photoIndex =
+            rows.indexWhere((r) => r['table_name'] == 'attachments');
+        final batch =
+            photos != null && photoIndex > 0 ? rows.take(photoIndex) : rows;
+        for (final row in batch) {
           final c = await _snapshot(row, executor: txn);
           if (c != null) {
             changes.add(c);
@@ -394,6 +436,24 @@ class SyncEngine {
       });
       if (batchSize == 0) break;
       if (changes.isEmpty) continue;
+
+      if (photos != null) {
+        for (var i = 0; i < changes.length; i++) {
+          final change = changes[i];
+          await photos.prepare(_db, _api, token, change);
+          if (change.table == 'attachments') {
+            final current = await _db.transaction((txn) async {
+              final pending = await txn.query('sync_outbox',
+                  where: 'table_name = ? AND row_id = ?',
+                  whereArgs: [change.table, change.rowId]);
+              return pending.isEmpty
+                  ? null
+                  : _snapshot(pending.single, executor: txn);
+            });
+            if (current != null) changes[i] = current;
+          }
+        }
+      }
 
       final result = await _api.push(
         token: token,
@@ -468,7 +528,17 @@ class SyncEngine {
     if (table == 'attachments') {
       // 附件归属只在 outbox 中，本地表没有 pet_id；服务端需从载荷判权限。
       if (payload['local_only'] == 1) return null;
+      final parent = await executor.rawQuery(
+          'SELECT r.deleted_at AS record_deleted, p.deleted_at AS pet_deleted '
+          'FROM records r JOIN pets p ON p.id = r.pet_id WHERE r.id = ?',
+          [payload['record_id']]);
+      if (parent.isNotEmpty &&
+          (parent.single['record_deleted'] != null ||
+              parent.single['pet_deleted'] != null)) {
+        return null;
+      }
       payload['pet_id'] = outboxRow['pet_id'];
+      payload.remove('local_path');
     }
 
     if (table == 'walk_sessions') {
@@ -570,6 +640,19 @@ class SyncEngine {
         : Map<String, dynamic>.from(c.payload);
     payload.remove('points'); // 轨迹点是子资源，单独处理
     if (c.table == 'attachments') payload.remove('pet_id');
+    if (c.table == 'attachments') {
+      payload.remove('local_path');
+      final existing = await txn.query('attachments',
+          columns: ['remote_url'],
+          where: 'id = ?',
+          whereArgs: [c.rowId],
+          limit: 1);
+      if (existing.isNotEmpty &&
+          payload['remote_url'] != null &&
+          payload['remote_url'] != existing.single['remote_url']) {
+        payload['local_path'] = null;
+      }
+    }
 
     // 本地现有的 updated_at，用来判新旧。
     final local = await txn.query(

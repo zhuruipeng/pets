@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     storage_bucket: str = ""
     storage_region: str = ""
 
+    # Private, region-local photo storage. Never expose this directory via nginx.
+    media_directory: Path = _ENV_FILE.parent / "private-media"
+    photo_max_bytes: int = 20 * 1024 * 1024
+
     # ---- 应用内更新 ----
     # 客户端启动时会 GET /app/version.json，拿这份配置和自己本机的
     # versionName / versionCode 比。**发新版时只改这几个环境变量并重启服务，

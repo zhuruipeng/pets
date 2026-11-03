@@ -14,12 +14,15 @@
 #   3. 把表数量写进日志。"备份成功但内容是空的" 是最坏的一类静默故障：
 #      文件在、校验过、恢复出来一个空库。
 set -euo pipefail
+umask 077
 
 BACKUP_DIR=/root/pet_backups
 PASS_FILE=/root/.pet-db-pass
 DB=pet
 DB_USER=pet
 KEEP_DAYS=14
+# Set PET_MEDIA_DIR too if MEDIA_DIRECTORY in the API config is customized.
+MEDIA_DIR="${PET_MEDIA_DIR:-/opt/pet-api/private-media}"
 
 [ -f "$PASS_FILE" ] || { echo "[X] 缺 $PASS_FILE"; exit 1; }
 DB_PASS="$(cat "$PASS_FILE")"
@@ -50,6 +53,16 @@ if [ "$TABLE_DATA" -eq 0 ]; then
     echo "[X] 归档里没有任何表数据 —— 要么库是空的，要么 dump 有问题" >&2
     exit 1
 fi
+
+# Immutable photo files are backed up after the database snapshot.
+# Extra files are harmless; every committed blob in the dump already exists.
+if [ -d "$MEDIA_DIR" ]; then
+    MEDIA_OUT="$BACKUP_DIR/${DB}-${STAMP}-photos.tar.gz"
+    tar -C "$MEDIA_DIR" -czf "$MEDIA_OUT" .
+    tar -tzf "$MEDIA_OUT" > /dev/null
+    echo "[+] Private photo backup: $MEDIA_OUT"
+fi
+find "$BACKUP_DIR" -maxdepth 1 -name "${DB}-*-photos.tar.gz" -type f -mtime +${KEEP_DAYS} -delete
 
 # ---- 保留策略 ---------------------------------------------------------------
 # 14 天足够覆盖「改坏了过几天才发现」这类事故；再长的历史不如加异地副本。

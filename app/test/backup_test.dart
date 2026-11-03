@@ -121,6 +121,7 @@ void main() {
         'record_id': observation.id,
         'kind': entry.$2,
         'local_path': entry.$1.path,
+        'remote_url': entry.$2 == 'photo' ? '/media/photos/old-id/old-hash' : null,
         'file_name': p.basename(entry.$1.path),
         'local_only': 1,
         'created_at': 1,
@@ -251,6 +252,7 @@ void main() {
     expect(dose.payload['backup_actor_name'], 'Original caregiver');
     final files = await target.query('attachments');
     for (final file in files) {
+      expect(file['remote_url'], isNull, reason: 'Restored copies cannot reuse the old photo grant');
       final path = file['local_path'] as String;
       expect(p.isWithin(p.join(temp.path, 'new-device'), path), isTrue);
       expect(await File(path).exists(), isTrue);

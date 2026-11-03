@@ -31,6 +31,7 @@ from .changes import (
 from .db import get_session
 from .expense_payload import expense_payload_for_storage, expense_payload_for_wire
 from .models import Member, Pet, PetRecord, SyncChange, User
+from .media import validated_photo_url
 from .sync_logic import is_newer, now_ms, role_can, visible_to
 
 router = APIRouter(tags=["sync"])
@@ -365,6 +366,14 @@ def sync_push(
             if parent is None or parent.pet_id != pet_id:
                 rejected.append(_rejected(change, "forbidden"))
                 continue
+            remote_url = change.payload.get("remote_url")
+            if remote_url and not validated_photo_url(session, change.row_id, pet_id,
+                                                       record_id, remote_url):
+                rejected.append(_rejected(change, "invalid"))
+                continue
+            if change.payload.get("local_only") == 1:
+                rejected.append(_rejected(change, "invalid"))
+                continue
         if change.table == "reminder_logs":
             reminder_id = change.payload.get("reminder_id")
             due_at = change.payload.get("due_at")
@@ -428,6 +437,8 @@ def sync_push(
         # payload 原样存：walk_sessions 的轨迹点就在 payload["points"] 里，
         # 不拆到别处（见协议第三节）。拆开会让「整段覆盖」的语义无处落脚。
         snapshot = {**change.payload, "id": change.row_id, "updated_at": change.updated_at}
+        if change.table == "attachments":
+            snapshot.pop("local_path", None)
         if dose_details is not None:
             snapshot["created_by"] = user.id
             snapshot["payload"] = json.dumps(dose_details, ensure_ascii=False)

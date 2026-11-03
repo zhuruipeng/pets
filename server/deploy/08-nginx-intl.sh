@@ -83,6 +83,18 @@ server {
         default_type "text/plain";
     }
 
+    # Authenticated regional photos; keep the JSON API body limit unchanged.
+    location ^~ /api/v1/media/photos/ {
+        client_max_body_size 21m;
+        proxy_read_timeout 75s;
+        proxy_send_timeout 75s;
+        proxy_pass http://127.0.0.1:8201;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location / {
         # 证书还没签出来时，这个反代是空转的（后端可能没起）。
         # 没关系 —— 80 段只服务 challenge，HTTPS 才是真正入口。
@@ -119,6 +131,18 @@ server {
 
     # 路径**不做任何改写**：应用自己拥有 /api/v1、/health、/app/version.json、
     # /legal 这些绝对路径。这里加前缀的话，客户端与文档里的 URL 都会对不上。
+    # Authenticated regional photos; keep the JSON API body limit unchanged.
+    location ^~ /api/v1/media/photos/ {
+        client_max_body_size 21m;
+        proxy_read_timeout 75s;
+        proxy_send_timeout 75s;
+        proxy_pass http://127.0.0.1:8201;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location / {
         proxy_pass http://${UPSTREAM};
         proxy_http_version 1.1;

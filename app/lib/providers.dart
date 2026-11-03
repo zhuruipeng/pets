@@ -29,6 +29,7 @@ import 'data/repositories/walk_repository.dart';
 import 'data/sync/secure_token_store.dart';
 import 'data/sync/sync_api.dart';
 import 'data/sync/sync_engine.dart';
+import 'data/sync/photo_sync.dart';
 import 'data/sync/unified_api.dart';
 import 'domain/expense_stats.dart';
 import 'domain/health_ledger.dart';
@@ -98,10 +99,17 @@ final syncEngineProvider = Provider<SyncEngine>(
   (ref) => SyncEngine(
     dbProvider: () => AppDatabase.instance.db,
     tokenStore: SecureTokenStore(),
+    photoSync: PhotoSync(cacheDirectory: () async =>
+        Directory('${(await getApplicationDocumentsDirectory()).path}/synced-photos')),
   ),
 );
 
 final syncApiProvider = Provider<SyncApi>((ref) => SyncApi());
+
+final photoSyncEnabledProvider = FutureProvider<bool>((ref) async {
+  await ref.watch(dbReadyProvider.future);
+  return ref.read(syncEngineProvider).photoSyncEnabled();
+});
 
 /// 官网统一账号客户端（**仅中国区**）。
 ///
@@ -1026,6 +1034,7 @@ class AppActions {
     ref.read(activeWalkProvider.notifier).state = null;
     ref.read(selectedPetIdProvider.notifier).state = null;
     ref.invalidate(backupInventoryProvider);
+    ref.invalidate(photoSyncEnabledProvider);
     ref.invalidate(petWalksProvider);
     ref.invalidate(walkPointsProvider);
     ref.invalidate(petExpensesProvider);
@@ -1249,6 +1258,23 @@ class SyncController extends Notifier<SyncStatus> {
     state = state.copyWith(phase: SyncPhase.syncing, clearMessage: true);
     final report = await _engine.sync();
 
+    // Apply authoritative remote changes even if a photo transfer failed.
+    if (report.error == null || report.pulled > 0) {
+      // Shared records and the canonical user profile update after manual sync.
+      ref.invalidate(recordPhotosProvider);
+      ref.invalidate(petPhotosProvider);
+      ref.invalidate(currentUserProvider);
+      ref.invalidate(petsProvider);
+      ref.invalidate(petRecordsProvider);
+      ref.invalidate(petRemindersProvider);
+      ref.invalidate(petMembersProvider);
+      ref.invalidate(petRoleProvider);
+      ref.invalidate(careLogsProvider);
+      ref.invalidate(upcomingRemindersProvider);
+      ref.invalidate(weightSeriesProvider);
+      await ref.read(appActionsProvider).refreshNotifications();
+    }
+
     if (report.error != null) {
       // 401 已经被引擎处理成「退出登录」，这里跟着反映。
       final stillLoggedIn = await _engine.isLoggedIn();
@@ -1266,17 +1292,6 @@ class SyncController extends Notifier<SyncStatus> {
       lastSyncAt: await _engine.lastSyncAt(),
       pending: await _engine.pendingCount(),
     );
-    // Shared records and the canonical user profile update after manual sync.
-    ref.invalidate(currentUserProvider);
-    ref.invalidate(petsProvider);
-    ref.invalidate(petRecordsProvider);
-    ref.invalidate(petRemindersProvider);
-    ref.invalidate(petMembersProvider);
-    ref.invalidate(petRoleProvider);
-    ref.invalidate(careLogsProvider);
-    ref.invalidate(upcomingRemindersProvider);
-    ref.invalidate(weightSeriesProvider);
-    await ref.read(appActionsProvider).refreshNotifications();
   }
 
   /// 本地进了一批新数据。不立刻同步，等待用户主动同步或登录时同步。

@@ -20,7 +20,10 @@ const _accountTables = [
 ];
 
 bool _accountMeta(String key) =>
-    key == 'last_seq' || key == 'last_sync_at' || key.startsWith('backup_');
+    key == 'last_seq' ||
+    key == 'last_sync_at' ||
+    key == 'photo_sync_enabled' ||
+    key.startsWith('backup_');
 
 /// Called inside the same transaction as the session metadata update.
 /// Snapshots contain local rows/file paths and pending writes, never tokens.
