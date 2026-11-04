@@ -576,11 +576,21 @@ class _InfoTab extends ConsumerWidget {
   }
 
   static String? _birthdayValue(Pet pet) {
-    final b = pet.birthday;
+    final b = pet.birthday?.toLocal();
     if (b == null) return null;
     final base = '${b.year}年${b.month}月${b.day}日';
-    if (!pet.birthdayEstimated) return base;
-    return L.isZh ? '$base（估算）' : '$base (est.)';
+    final date = !pet.birthdayEstimated
+        ? base
+        : L.isZh ? '$base（估算）' : '$base (est.)';
+    // 按本地日历中的完整生日计算已满周岁，忽略时分秒。
+    final now = DateTime.now();
+    var years = now.year - b.year;
+    if (now.month < b.month ||
+        (now.month == b.month && now.day < b.day)) {
+      years -= 1;
+    }
+    if (years < 0) return date;
+    return L.isZh ? '$date · $years岁' : '$date · ${years}y';
   }
 
   // 也走统一的 petAgeLabel：原先用 Pet.ageInMonths，那个属性只看年月不看日，
