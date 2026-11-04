@@ -1317,6 +1317,7 @@ class SyncController extends Notifier<SyncStatus> {
       ref.invalidate(currentUserProvider);
       ref.invalidate(petsProvider);
       ref.invalidate(petRecordsProvider);
+      ref.invalidate(petExpensesProvider);
       ref.invalidate(petRemindersProvider);
       ref.invalidate(petMembersProvider);
       ref.invalidate(petRoleProvider);
