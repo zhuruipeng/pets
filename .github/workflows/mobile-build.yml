@@ -71,9 +71,13 @@ jobs:
           fi
       - name: Resolve locked dependencies
         working-directory: app
+        env:
+          PUB_HOSTED_URL: https://pub.flutter-io.cn
         run: flutter pub get --enforce-lockfile
       - name: Build platform package
         working-directory: app
+        env:
+          PUB_HOSTED_URL: https://pub.flutter-io.cn
         run: python3 tool/build_mobile.py --platform ${{ matrix.platform }} --region ${{ matrix.region }} --format ${{ matrix.format }}
       - name: Package Android validation APK
         if: matrix.platform == 'android'
