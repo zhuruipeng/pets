@@ -1,29 +1,30 @@
-# Android 国内版服务器更新准备
+# Android 国内版 0.1.13+23 发布状态
 
-## 当前结果
+## 2026-11-06 本机续接结果
 
-- GitHub Actions 已实际构建 `0.1.13+23` 国内 APK，工作流运行 `42059381868`。
-- 产物为验证签名，大小 69,465,507 bytes，包含 arm64-v8a、armeabi-v7a、x86_64 的 `libapp.so`。
-- APK SHA-256：`49fb2ade266f553e8118321c3f5f258933c6851d25fa99cd08375be619409c88`。
-- 新包签名证书 SHA-256：`e58bb1e4ec64d39c8de891db5a787c316a401e494858c4120b70868ca36b1d9b`。
-- 既有正式证书 SHA-256：`08dc7885f743714eb75b1527f9db052aafd4b702b2aed19d959e4d139a4178f1`。
+**原正式签名 APK 已准备并核验；尚未上传、尚未更新线上清单。当前阻塞为本机 SSH 私钥未解锁。**
 
-**签名不同，当前验证包不能发布为旧版 App 的覆盖升级包。线上更新清单尚未修改。**
+- 已拉取 `origin/codex/pet-profile-p01-p11`，续接起点 `db588d4`；独立 worktree 为 `E:\dev\builds\pet-profile-cn-23`。原工作目录保持不变。
+- 复用 GitHub Actions 成功运行 `42059381868` 的国内编译产物，源码 `d4056b9a3472df7b3817ea5a757b12c6bd70a4da`；与续接分支 HEAD 的 `app/` 没有差异。
+- 先校验下载产物 SHA-256 `49fb2ade266f553e8118321c3f5f258933c6851d25fa99cd08375be619409c88` 和原验证签名，再使用本机原 `key.properties` 指定的 `upload-keystore.jks` 重新签名。没有新建密钥，没有将签名凭据复制进新工作区或 Git。
+- 正式包：`E:\dev\builds\pet-profile-cn-23\release-evidence\app-cn-0.1.13-23.apk`，69,472,578 bytes。
+- 正式包 SHA-256：`05467e4f7956f5506f462f61a6a5eb956771d1c8103e6440150df52d179bbd26`。
+- 正式证书 SHA-256：`08dc7885f743714eb75b1527f9db052aafd4b702b2aed19d959e4d139a4178f1`。
+- APK v2/v3 签名验证通过、唯一正式签名者；16KB ZIP 对齐通过。实际回读包名 `com.weiyuantool.pet_app`、versionName `0.1.13`、versionCode `23`，无 debuggable 标记。
+- 三架构 `arm64-v8a`、`armeabi-v7a`、`x86_64` 的 `libapp.so` 均存在；排除签名元数据后，104 个 ZIP 内容文件逐文件 SHA-256 与已编译原产物完全一致。
+- 已通过公网完整下载当前线上 `0.1.12+22` APK，SHA-256 为 `af024c2e30367fabf79f8eefb2e251d21dc8eff8f0698cdf2d4bb5f1cdf1568c`；实际签名验证通过，证书与本次正式包完全一致。
+- 公网国内清单仍为 `0.1.12 / 22`，URL 为 `https://api.pet.weiyuantool.com/download/app-cn-0.1.12-22.apk`，`minBuild=0`。没有改动线上配置、APK、服务或数据库。
+- `ssh -o BatchMode=yes caiwu-service` 可连接正确主机且服务器接受已配置的公钥，但本机私钥为口令加密的 `aes256-ctr`，`ssh-agent` 未运行，不能完成认证。需用户在本机解锁/加载私钥；不得在聊天中传递私钥或口令。
+- 本机验证详情与签名输出保存在该 worktree 的 `release-evidence/`，不提交 APK 或凭据。功能由用户手动验收，本轮未运行自动功能测试。
 
-公网更新清单已读取，当前仍为 `0.1.12+22`，APK 地址为 `https://api.pet.weiyuantool.com/download/app-cn-0.1.12-22.apk`，`minBuild=0`。已实际下载该线上 APK，其 SHA-256 为 `af024c2e30367fabf79f8eefb2e251d21dc8eff8f0698cdf2d4bb5f1cdf1568c`，并从 APK v2 签名块提取证书，确认与上面的正式证书指纹相符。
+## SSH 恢复后的剩余操作
 
-## 发布所缺的实际条件
+1. 只读确认 `/opt/pet-api/.env`、`pet-api.service` 和 `/var/www/pet-apk/` 的真实位置及现有版本；备份国内 `.env`，保留原 APK。仅修改国内版本配置，不改服务端代码或海外清单。
+2. 上传上述**已重新正式签名**的 APK 至暂存文件；核对最终 SHA-256 后原子改名为 `/var/www/pet-apk/app-cn-0.1.13-23.apk`。先通过 HTTPS 完整下载并复核哈希与正式证书。
+3. 将国内 `APP_VERSION` 更新为 `0.1.13`，`APP_BUILD` 更新为 `23`，`APP_APK_URL` 指向 `https://api.pet.weiyuantool.com/download/app-cn-0.1.13-23.apk`，填写档案改进说明；保持 `APP_MIN_BUILD=0`。
+4. 仅重启国内 `pet-api`，回读 `/health`、`/app/version.json` 并核验日志、下载内容及周边服务。记录备份路径与结果。
+5. 用户在旧版 App 内手动检查更新、覆盖安装及本地数据保留，按 P01–P11 验收。未完成前不得声称已通过真机功能验收。
 
-1. 原 Windows 开发机的 `app/android/upload-keystore.jks` 和 `app/android/key.properties`。项目发布记录说明它们没有进入 Git；当前构建环境也没有这两个文件。不得生成另一把密钥替代它们。
-2. 服务器 SSH 连接。部署文档使用 `caiwu-service` / `prod` 别名，当前执行环境没有对应 SSH 配置、密钥或可用连接。
+## 上一执行环境的验证包记录
 
-签名与服务器凭据仅接入受信任执行环境，不提交至仓库。
-
-## 接入上述条件后的执行顺序
-
-1. 用原密钥为国内 release APK 签名（可对已编译的 release 验证 APK 重新签名，不必改变业务代码），确认正式证书指纹一致。
-2. 回读包名 `com.weiyuantool.pet_app`、版本 `0.1.13` / versionCode `23`；重新验证签名、安装包完整性并计算最终 APK 哈希。重新签名后的文件哈希会变化，不能使用上面的验证包哈希。
-3. 上传至服务器暂存文件；核对哈希后原子改名为 `/var/www/pet-apk/app-cn-0.1.13-23.apk`，先验证 HTTPS 下载内容与本地文件完全一致。
-4. 备份 `/opt/pet-api/.env`，仅更新国内服务的 `APP_VERSION=0.1.13`、`APP_BUILD=23`、`APP_APK_URL=https://api.pet.weiyuantool.com/download/app-cn-0.1.13-23.apk` 和本轮档案改进说明；保持 `APP_MIN_BUILD=0`。不修改海外清单。
-5. 重启国内 `pet-api` 服务，回读 `/health` 与 `/app/version.json`，确认清单指向经核验的正式签名 APK。记录备份位置、最终哈希和版本。旧文件保持可用。
-6. 用户在旧版 App 内手动“检查更新”，验收覆盖安装及本地数据保留。
+GitHub 发布的原验证 APK 使用证书 `e58bb1e4ec64d39c8de891db5a787c316a401e494858c4120b70868ca36b1d9b`，与正式证书不同。该原文件仍不能直接上线；本机正式重签后的文件与其哈希不同。此前未找到正式密钥、也没有 SSH 配置的阻塞属于上一执行环境；本机已解决正式签名，SSH 解锁仍待完成。
