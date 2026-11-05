@@ -76,7 +76,11 @@ Future<void> showAvatarSheet(
   if (action == null || !context.mounted) return;
 
   if (action == 'remove') {
-    await ref.read(appActionsProvider).removeAvatar(pet);
+    try {
+      await ref.read(appActionsProvider).removeAvatar(pet);
+    } catch (_) {
+      if (context.mounted) _failed(context);
+    }
     return;
   }
 

@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -25,6 +26,8 @@ Future<void> showEditPetSheet(BuildContext context, {required Pet pet}) {
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    isDismissible: false,
+    enableDrag: false,
     builder: (_) => _EditPetSheet(pet: pet),
   );
 }
@@ -56,6 +59,61 @@ class _EditPetSheetState extends ConsumerState<_EditPetSheet> {
 
   String? _nameError;
   bool _saving = false;
+  bool _allowClose = false;
+  bool _confirmingClose = false;
+  late final List<Object?> _initialDraft;
+  final _textFocus = List.generate(7, (_) => FocusNode());
+  final _nameFieldKey = GlobalKey();
+  final _birthdayFieldKey = GlobalKey();
+  bool _pickingBirthday = false;
+
+  String? get _birthdayError => _birthday != null &&
+          DateUtils.dateOnly(_birthday!)
+              .isAfter(DateUtils.dateOnly(DateTime.now()))
+      ? L.t('editPet.birthdayFuture')
+      : null;
+
+  void _showInvalidField(GlobalKey key, {FocusNode? focus}) {
+    if (focus == null) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    } else {
+      focus.requestFocus();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final fieldContext = key.currentContext;
+      if (fieldContext == null) return;
+      Scrollable.ensureVisible(
+        fieldContext,
+        alignment: 0.1,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 200),
+      );
+    });
+  }
+
+  List<TextEditingController> get _controllers =>
+      [_name, _breed, _chipNo, _color, _weight, _allergy, _note];
+
+  List<Object?> get _draftValues => [
+        for (final c in _controllers)
+          c == _weight
+              ? double.tryParse(c.text.trim()) ?? c.text.trim()
+              : c.text.trim(),
+        _species,
+        _gender,
+        _birthday?.year,
+        _birthday?.month,
+        _birthday?.day,
+        _estimated,
+        _neutered,
+        (_traits.toList()..sort()).join(','),
+      ];
+
+  bool get _hasChanges => !listEquals(_initialDraft, _draftValues);
+
+  void _draftChanged() => setState(() {});
 
   @override
   void initState() {
@@ -73,15 +131,23 @@ class _EditPetSheetState extends ConsumerState<_EditPetSheet> {
 
     _species = p.species;
     _gender = _normalizeGender(p.gender);
-    _birthday = p.birthday;
+    _birthday = p.birthday?.toLocal();
     _estimated = p.birthdayEstimated;
     _neutered = p.neutered;
     _traits = knownPersonalities(p.personality).toSet();
+    _initialDraft = _draftValues;
+    for (final c in _controllers) {
+      c.addListener(_draftChanged);
+    }
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _breed, _chipNo, _color, _weight, _allergy, _note]) {
+    for (final node in _textFocus) {
+      node.dispose();
+    }
+    for (final c in _controllers) {
+      c.removeListener(_draftChanged);
       c.dispose();
     }
     super.dispose();
@@ -104,224 +170,316 @@ class _EditPetSheetState extends ConsumerState<_EditPetSheet> {
   Widget build(BuildContext context) {
     // 固定高度可拖拽形态：骨架交给 [SheetScaffold]，把 DraggableScrollableSheet
     // 的 controller 透传下去 —— 不接的话拖拽手柄和列表滚动会各走各的。
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.9,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (_, controller) => SheetScaffold(
-        title: L.t('editPet.title'),
-        scrollable: false,
-        bodyController: controller,
-        action: TextButton(
-          onPressed: _saving ? null : _save,
-          child: Text(
-            L.t('editPet.save'),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+    return PopScope<void>(
+      canPop: !_saving && (!_hasChanges || _allowClose),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _requestClose();
+      },
+      child: DraggableScrollableSheet(
+        expand: false,
+        shouldCloseOnMinExtent: false,
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (_, controller) => SheetScaffold(
+          title: L.t('editPet.title'),
+          scrollable: false,
+          bodyController: controller,
+          action: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed:
+                    _saving || _allowClose || !_hasChanges ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(L.t('editPet.save')),
+              ),
+              IconButton(
+                tooltip: L.t('editPet.close'),
+                onPressed: _saving ? null : _requestClose,
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionLabel(L.t('editPet.section.basic')),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  TextField(
-                    controller: _name,
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(
-                      labelText: L.t('editPet.name'),
-                      errorText: _nameError,
-                    ),
-                    onChanged: (_) {
-                      if (_nameError != null) {
-                        setState(() => _nameError = null);
-                      }
-                    },
+          child: AbsorbPointer(
+            absorbing: _saving,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionLabel(L.t('editPet.section.basic')),
+                const SizedBox(height: AppSpace.gapM),
+                TextField(
+                  key: _nameFieldKey,
+                  controller: _name,
+                  readOnly: _saving,
+                  focusNode: _textFocus[0],
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _textFocus[1].requestFocus(),
+                  decoration: InputDecoration(
+                    labelText: L.t('editPet.nameRequired'),
+                    errorText: _nameError,
                   ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  _FieldLabel(L.t('editPet.species')),
-                  const SizedBox(height: AppSpace.gapS),
-                  _ChoiceRow<Species>(
-                    value: _species,
-                    options: const [
-                      (Species.dog, 'addPet.species.dog', Icons.pets),
-                      (Species.cat, 'addPet.species.cat', Icons.pets),
-                      (Species.other, 'addPet.species.other', Icons.cruelty_free),
-                    ],
-                    labelOf: (v) => L.t(v.$2),
-                    iconOf: (v) => v.$3,
-                    onChanged: (v) => setState(() => _species = v),
+                  onChanged: (_) {
+                    if (_nameError != null) {
+                      setState(() => _nameError = null);
+                    }
+                  },
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                _FieldLabel(L.t('editPet.species')),
+                const SizedBox(height: AppSpace.gapS),
+                _ChoiceRow<Species>(
+                  value: _species,
+                  options: const [
+                    (Species.dog, 'addPet.species.dog', Icons.pets),
+                    (Species.cat, 'addPet.species.cat', Icons.pets),
+                    (Species.other, 'addPet.species.other', Icons.cruelty_free),
+                  ],
+                  labelOf: (v) => L.t(v.$2),
+                  iconOf: (v) => v.$3,
+                  onChanged: (v) => setState(() => _species = v),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                TextField(
+                  controller: _breed,
+                  readOnly: _saving,
+                  focusNode: _textFocus[1],
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _textFocus[2].requestFocus(),
+                  decoration: InputDecoration(
+                    labelText: L.t('editPet.breed'),
+                    hintText: L.t('editPet.breedHint'),
                   ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  TextField(
-                    controller: _breed,
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(
-                      labelText: L.t('editPet.breed'),
-                      hintText: L.t('editPet.breedHint'),
-                    ),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                _FieldLabel(L.t('editPet.gender')),
+                const SizedBox(height: AppSpace.gapS),
+                _ChoiceRow<String>(
+                  value: _gender,
+                  options: const [
+                    ('male', 'profile.gender.male', Icons.male_rounded),
+                    ('female', 'profile.gender.female', Icons.female_rounded),
+                    ('unknown', 'profile.gender.unknown', Icons.help_outline),
+                  ],
+                  labelOf: (v) => L.t(v.$2),
+                  iconOf: (v) => v.$3,
+                  onChanged: (v) => setState(() => _gender = v),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                _BirthdayField(
+                  key: _birthdayFieldKey,
+                  birthday: _birthday,
+                  errorText: _birthdayError,
+                  estimated: _estimated,
+                  onPick: _pickBirthday,
+                  onClear: () => setState(() {
+                    _birthday = null;
+                    _estimated = false;
+                  }),
+                  onEstimatedChanged: (v) => setState(() => _estimated = v),
+                ),
+                const SizedBox(height: AppSpace.gapXl),
+                _SectionLabel(L.t('editPet.section.traits')),
+                const SizedBox(height: 4),
+                Text(
+                  L.t('editPet.traitsHint'),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textTertiary,
                   ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  _FieldLabel(L.t('editPet.gender')),
-                  const SizedBox(height: AppSpace.gapS),
-                  _ChoiceRow<String>(
-                    value: _gender,
-                    options: const [
-                      ('male', 'profile.gender.male', Icons.male_rounded),
-                      ('female', 'profile.gender.female', Icons.female_rounded),
-                      ('unknown', 'profile.gender.unknown', Icons.help_outline),
-                    ],
-                    labelOf: (v) => L.t(v.$2),
-                    iconOf: (v) => v.$3,
-                    onChanged: (v) => setState(() => _gender = v),
-                  ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  _BirthdayField(
-                    birthday: _birthday,
-                    estimated: _estimated,
-                    onPick: _pickBirthday,
-                    onClear: () => setState(() {
-                      _birthday = null;
-                      _estimated = false;
-                    }),
-                    onEstimatedChanged: (v) =>
-                        setState(() => _estimated = v),
-                  ),
-
-                  const SizedBox(height: AppSpace.gapXl),
-                  _SectionLabel(L.t('editPet.section.traits')),
-                  const SizedBox(height: 4),
-                  Text(
-                    L.t('editPet.traitsHint'),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textTertiary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpace.gapM),
-                  Wrap(
-                    spacing: AppSpace.gapS,
-                    runSpacing: AppSpace.gapS,
-                    children: [
-                      for (final code in kPersonalityCodes)
-                        FilterChip(
-                          label: Text(personalityLabel(code)),
-                          selected: _traits.contains(code),
-                          onSelected: (on) => setState(() {
-                            if (on) {
-                              _traits.add(code);
-                            } else {
-                              _traits.remove(code);
-                            }
-                          }),
-                          showCheckmark: false,
-                          selectedColor: AppColors.primaryLight,
-                          labelStyle: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: _traits.contains(code)
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                            color: _traits.contains(code)
-                                ? AppColors.primary
-                                : AppColors.textSecondary,
-                          ),
-                          side: BorderSide(
-                            color: _traits.contains(code)
-                                ? AppColors.primary
-                                : AppColors.border,
-                          ),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                Wrap(
+                  spacing: AppSpace.gapS,
+                  runSpacing: AppSpace.gapS,
+                  children: [
+                    for (final code in kPersonalityCodes)
+                      FilterChip(
+                        label: Text(personalityLabel(code)),
+                        selected: _traits.contains(code),
+                        onSelected: (on) => setState(() {
+                          if (on) {
+                            _traits.add(code);
+                          } else {
+                            _traits.remove(code);
+                          }
+                        }),
+                        showCheckmark: false,
+                        selectedColor: AppColors.primaryLight,
+                        labelStyle: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: _traits.contains(code)
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: _traits.contains(code)
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
                         ),
-                    ],
+                        side: BorderSide(
+                          color: _traits.contains(code)
+                              ? AppColors.primary
+                              : AppColors.border,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppSpace.gapXl),
+                _SectionLabel(L.t('editPet.section.health')),
+                const SizedBox(height: AppSpace.gapM),
+                TextField(
+                  controller: _weight,
+                  readOnly: _saving,
+                  focusNode: _textFocus[2],
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _textFocus[3].requestFocus(),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: L.t('editPet.weightBaseline'),
+                    hintText: L.t('editPet.weightBaselineHint'),
+                    suffixText: L.t('editPet.kg'),
                   ),
-
-                  const SizedBox(height: AppSpace.gapXl),
-                  _SectionLabel(L.t('editPet.section.health')),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  TextField(
-                    controller: _weight,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: L.t('editPet.weightBaseline'),
-                      hintText: L.t('editPet.weightBaselineHint'),
-                      suffixText: L.t('editPet.kg'),
-                    ),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                TextField(
+                  controller: _color,
+                  readOnly: _saving,
+                  focusNode: _textFocus[3],
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _textFocus[4].requestFocus(),
+                  decoration: InputDecoration(
+                    labelText: L.t('editPet.color'),
+                    hintText: L.t('editPet.colorHint'),
                   ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  TextField(
-                    controller: _color,
-                    decoration: InputDecoration(
-                      labelText: L.t('editPet.color'),
-                      hintText: L.t('editPet.colorHint'),
-                    ),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                TextField(
+                  controller: _allergy,
+                  readOnly: _saving,
+                  focusNode: _textFocus[4],
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _textFocus[5].requestFocus(),
+                  decoration: InputDecoration(
+                    labelText: L.t('editPet.allergy'),
+                    hintText: L.t('editPet.allergyHint'),
                   ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  TextField(
-                    controller: _allergy,
-                    decoration: InputDecoration(
-                      labelText: L.t('editPet.allergy'),
-                      hintText: L.t('editPet.allergyHint'),
-                    ),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                TextField(
+                  controller: _chipNo,
+                  readOnly: _saving,
+                  focusNode: _textFocus[5],
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _textFocus[6].requestFocus(),
+                  decoration: InputDecoration(
+                    labelText: L.t('editPet.chipNo'),
+                    hintText: L.t('editPet.chipNoHint'),
                   ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  TextField(
-                    controller: _chipNo,
-                    decoration: InputDecoration(
-                      labelText: L.t('editPet.chipNo'),
-                      hintText: L.t('editPet.chipNoHint'),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  _SwitchRow(
-                    label: L.t('editPet.neutered'),
-                    value: _neutered,
-                    onChanged: (v) => setState(() => _neutered = v),
-                  ),
-                  const SizedBox(height: AppSpace.gapM),
-
-                  TextField(
-                    controller: _note,
-                    maxLines: 3,
-                    decoration: InputDecoration(labelText: L.t('editPet.note')),
-                  ),
-          ],
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                _SwitchRow(
+                  label: L.t('editPet.neutered'),
+                  value: _neutered,
+                  onChanged: (v) => setState(() => _neutered = v),
+                ),
+                const SizedBox(height: AppSpace.gapM),
+                TextField(
+                  controller: _note,
+                  readOnly: _saving,
+                  focusNode: _textFocus[6],
+                  textInputAction: TextInputAction.newline,
+                  maxLines: 3,
+                  decoration: InputDecoration(labelText: L.t('editPet.note')),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
+  Future<void> _requestClose() async {
+    if (_saving || _confirmingClose) return;
+    if (_hasChanges) {
+      _confirmingClose = true;
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(L.t('editPet.unsavedTitle')),
+          content: Text(L.t('editPet.unsavedHint')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(L.t('editPet.keepEditing')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(L.t('editPet.discard')),
+            ),
+          ],
+        ),
+      );
+      _confirmingClose = false;
+      if (!mounted || discard != true) return;
+    }
+    if (!mounted) return;
+    setState(() => _allowClose = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
   Future<void> _pickBirthday() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _birthday ?? now,
-      firstDate: DateTime(now.year - 40),
-      lastDate: now,
-      helpText: L.t('editPet.birthdayPick'),
-    );
-    if (picked != null) setState(() => _birthday = picked);
+    if (_saving || _pickingBirthday) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    _pickingBirthday = true;
+    final today = DateUtils.dateOnly(DateTime.now());
+    final firstDate = DateTime(today.year - 40);
+    final current = DateUtils.dateOnly(_birthday ?? today);
+    final initial = current.isAfter(today)
+        ? today
+        : current.isBefore(firstDate)
+            ? firstDate
+            : current;
+    try {
+      final picked = await showDatePicker(
+        context: context,
+        initialDate: initial,
+        firstDate: firstDate,
+        lastDate: today,
+        helpText: L.t('editPet.birthdayPick'),
+      );
+      // Clamping the picker viewport must never change the draft on cancel.
+      if (mounted && picked != null) setState(() => _birthday = picked);
+    } finally {
+      _pickingBirthday = false;
+    }
   }
 
   Future<void> _save() async {
+    if (_saving || _allowClose || !_hasChanges) return;
     final name = _name.text.trim();
     if (name.isEmpty) {
       setState(() => _nameError = L.t('editPet.nameEmpty'));
+      _showInvalidField(_nameFieldKey, focus: _textFocus[0]);
+      return;
+    }
+    if (_birthdayError != null) {
+      setState(() {});
+      _showInvalidField(_birthdayFieldKey);
       return;
     }
 
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _saving = true);
     final pet = widget.pet;
 
@@ -363,12 +521,21 @@ class _EditPetSheetState extends ConsumerState<_EditPetSheet> {
     try {
       await ref.read(appActionsProvider).updatePet(updated);
       if (!mounted) return;
-      navigator.pop();
-      messenger.showSnackBar(SnackBar(content: Text(L.t('editPet.saved'))));
-    } catch (e) {
+      setState(() {
+        _saving = false;
+        _allowClose = true;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        navigator.pop();
+        messenger.showSnackBar(SnackBar(content: Text(L.t('editPet.saved'))));
+      });
+    } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
-      showErrorSnack(context, e);
+      messenger.showSnackBar(
+        SnackBar(content: Text(L.t('editPet.saveFailed'))),
+      );
     }
   }
 }
@@ -421,21 +588,33 @@ class _ChoiceRow<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < options.length; i++) ...[
-          if (i > 0) const SizedBox(width: AppSpace.gapS),
-          Expanded(
-            child: _ChoiceTile(
-              label: labelOf(options[i]),
-              icon: iconOf(options[i]),
-              selected: options[i].$1 == value,
-              onTap: () => onChanged(options[i].$1),
+    return LayoutBuilder(builder: (context, constraints) {
+      final stacked = constraints.maxWidth < 240 ||
+          MediaQuery.textScalerOf(context).scale(12) > 18;
+      final width = stacked
+          ? constraints.maxWidth
+          : (constraints.maxWidth - AppSpace.gapS * (options.length - 1)) /
+              options.length;
+      return Wrap(
+        spacing: AppSpace.gapS,
+        runSpacing: AppSpace.gapS,
+        children: [
+          for (var i = 0; i < options.length; i++)
+            SizedBox(
+              width: width,
+              child: _ChoiceTile(
+                label: labelOf(options[i]),
+                icon: iconOf(options[i]),
+                selected: options[i].$1 == value,
+                onTap: () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  onChanged(options[i].$1);
+                },
+              ),
             ),
-          ),
         ],
-      ],
-    );
+      );
+    });
   }
 }
 
@@ -454,35 +633,44 @@ class _ChoiceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primaryLight : AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? AppColors.primary : AppColors.border,
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(
+            vertical: AppSpace.gapM,
+            horizontal: AppSpace.gapS,
           ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              size: 18,
-              color: selected ? AppColors.primary : AppColors.textTertiary,
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primaryLight : AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? AppColors.primary : AppColors.border,
             ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                color: selected ? AppColors.primary : AppColors.textSecondary,
+          ),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? AppColors.primary : AppColors.textTertiary,
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: selected ? AppColors.primary : AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -491,7 +679,9 @@ class _ChoiceTile extends StatelessWidget {
 
 class _BirthdayField extends StatelessWidget {
   const _BirthdayField({
+    super.key,
     required this.birthday,
+    this.errorText,
     required this.estimated,
     required this.onPick,
     required this.onClear,
@@ -499,6 +689,7 @@ class _BirthdayField extends StatelessWidget {
   });
 
   final DateTime? birthday;
+  final String? errorText;
   final bool estimated;
   final VoidCallback onPick;
   final VoidCallback onClear;
@@ -512,11 +703,13 @@ class _BirthdayField extends StatelessWidget {
         : L.t('editPet.birthdayPick');
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         InkWell(
           onTap: onPick,
           borderRadius: BorderRadius.circular(12),
           child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpace.gapM,
               vertical: 14,
@@ -531,27 +724,29 @@ class _BirthdayField extends StatelessWidget {
                     size: 18, color: AppColors.textTertiary),
                 const SizedBox(width: AppSpace.gapM),
                 Expanded(
-                  child: Text(
-                    L.t('editPet.birthday'),
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: has ? FontWeight.w600 : FontWeight.w400,
-                    color: has ? AppColors.textPrimary : AppColors.textTertiary,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(L.t('editPet.birthday'), style: AppText.caption),
+                      const SizedBox(height: AppSpace.gapXs),
+                      Text(label,
+                          style: AppText.body.copyWith(
+                            fontWeight: has ? FontWeight.w600 : FontWeight.w400,
+                            color: has
+                                ? AppColors.textPrimary
+                                : AppColors.textTertiary,
+                          )),
+                    ],
                   ),
                 ),
                 if (has) ...[
                   const SizedBox(width: AppSpace.gapS),
-                  GestureDetector(
-                    onTap: onClear,
-                    child: const Icon(Icons.close_rounded,
+                  IconButton(
+                    onPressed: onClear,
+                    tooltip: L.t('editPet.birthdayClear'),
+                    constraints:
+                        const BoxConstraints(minWidth: 48, minHeight: 48),
+                    icon: const Icon(Icons.close_rounded,
                         size: 16, color: AppColors.textTertiary),
                   ),
                 ],
@@ -559,6 +754,12 @@ class _BirthdayField extends StatelessWidget {
             ),
           ),
         ),
+        if (errorText != null)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpace.gapS),
+            child: Text(errorText!,
+                style: AppText.caption.copyWith(color: AppColors.danger)),
+          ),
         // 估算标记只在填了生日之后才有意义 —— 没生日谈不上「大概几号」。
         if (has)
           Padding(
@@ -572,7 +773,6 @@ class _BirthdayField extends StatelessWidget {
       ],
     );
   }
-
 }
 
 class _SwitchRow extends StatelessWidget {
@@ -588,16 +788,11 @@ class _SwitchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary),
-          ),
-        ),
-        Switch(value: value, onChanged: onChanged),
-      ],
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(label, style: AppText.body),
+      value: value,
+      onChanged: onChanged,
     );
   }
 }

@@ -195,43 +195,75 @@ class InfoRow extends StatelessWidget {
     super.key,
     this.valueColor,
     this.trailing,
+    this.adaptive = false,
   });
 
   final String label;
   final String value;
   final Color? valueColor;
   final Widget? trailing;
+  final bool adaptive;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpace.gapS),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: Text(label,
-                style: AppText.body.copyWith(color: AppColors.textSecondary)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 3,
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: AppText.body.copyWith(
-                fontWeight: FontWeight.w500,
-                color: valueColor ?? AppColors.textPrimary,
+      child: LayoutBuilder(builder: (context, constraints) {
+        final labelStyle =
+            AppText.body.copyWith(color: AppColors.textSecondary);
+        final valueStyle = AppText.body.copyWith(
+          fontWeight: FontWeight.w500,
+          color: valueColor ?? AppColors.textPrimary,
+        );
+        if (adaptive) {
+          final valueWidth = TextPainter(
+            text: TextSpan(text: value, style: valueStyle),
+            textDirection: Directionality.of(context),
+            textScaler: MediaQuery.textScalerOf(context),
+          )..layout();
+          final stack = constraints.maxWidth < 300 ||
+              MediaQuery.textScalerOf(context).scale(14) > 19 ||
+              valueWidth.width > (constraints.maxWidth - AppSpace.gapM) * 0.6;
+          valueWidth.dispose();
+          if (stack) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: labelStyle),
+                const SizedBox(height: AppSpace.gapXs),
+                Text(value, style: valueStyle),
+                if (trailing != null) trailing!,
+              ],
+            );
+          }
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 2,
+              child: Text(label,
+                  style: AppText.body.copyWith(color: AppColors.textSecondary)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 3,
+              child: Text(
+                value,
+                textAlign: TextAlign.right,
+                style: AppText.body.copyWith(
+                  fontWeight: FontWeight.w500,
+                  color: valueColor ?? AppColors.textPrimary,
+                ),
               ),
             ),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 6),
-            trailing!,
+            if (trailing != null) ...[
+              const SizedBox(width: 6),
+              trailing!,
+            ],
           ],
-        ],
-      ),
+        );
+      }),
     );
   }
 }
@@ -415,7 +447,7 @@ class PetAvatar extends StatelessWidget {
       child: Text(emoji, style: TextStyle(fontSize: size * 0.48)),
     );
 
-    final inner = _localAvatar(size) ?? fallback;
+    final inner = _localAvatar(size, fallback) ?? fallback;
 
     if (borderWidth <= 0) return inner;
 
@@ -436,7 +468,7 @@ class PetAvatar extends StatelessWidget {
   ///
   /// 用 `errorBuilder` 兜住「文件存在但解不开」（半个文件、格式坏了），
   /// 否则头像会变成一个红叉，比没头像更难看。
-  Widget? _localAvatar(double size) {
+  Widget? _localAvatar(double size, Widget fallback) {
     final path = (pet.avatarUrl ?? '').trim();
     if (path.isEmpty || path.startsWith('http')) return null;
     final file = File(path);
@@ -448,11 +480,7 @@ class PetAvatar extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
-          width: size,
-          height: size,
-          color: AppColors.primaryLight,
-        ),
+        errorBuilder: (_, __, ___) => fallback,
       ),
     );
   }

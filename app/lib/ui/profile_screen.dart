@@ -61,6 +61,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
+  bool _addingPet = false;
 
   static const _tabKeys = [
     'profile.tab.info',
@@ -82,9 +83,38 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     super.dispose();
   }
 
+  Future<void> _addPet() async {
+    if (_addingPet) return;
+    setState(() => _addingPet = true);
+    try {
+      await showAddPetSheet(context, ref);
+    } finally {
+      if (mounted) setState(() => _addingPet = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final pets = ref.watch(petsProvider).valueOrNull ?? const <Pet>[];
+    final petsState = ref.watch(petsProvider);
+    final hasProfiles = petsState.valueOrNull?.isNotEmpty ?? false;
+    // updatePet already invalidates this provider. Keep its previous profiles
+    // visible until that one reload completes, retaining the tab and scroll.
+    if (petsState.isLoading && !hasProfiles) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (petsState.hasError && !hasProfiles) {
+      return EmptyState(
+        icon: Icons.error_outline_rounded,
+        title: L.t('profile.loadFailed'),
+        hint: L.t('profile.loadFailedHint'),
+        action: FilledButton.icon(
+          onPressed: () => ref.invalidate(petsProvider),
+          icon: const Icon(Icons.refresh_rounded),
+          label: Text(L.t('action.retry')),
+        ),
+      );
+    }
+    final pets = petsState.valueOrNull ?? const <Pet>[];
     final pet = ref.watch(currentPetProvider);
 
     if (pet == null) {
@@ -93,9 +123,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
         title: pets.isEmpty ? L.t('profile.empty.title') : L.t('records.noPet'),
         hint: L.t('profile.empty.hint'),
         action: FilledButton.icon(
-          onPressed: () => showAddPetSheet(context, ref),
+          onPressed: _addingPet ? null : _addPet,
           icon: const Icon(Icons.add),
-          label: Text(L.t('action.add')),
+          label: Text(L.t('profile.addPet')),
         ),
       );
     }
@@ -175,13 +205,42 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
 // ------------------------------------------------------------------ 渐变头图
 
 /// 渐变头图。参考稿顶部是淡紫→淡蓝的渐变，中间一个带白边的圆照片。
-class _HeroHeader extends ConsumerWidget {
+class _HeroHeader extends ConsumerStatefulWidget {
   const _HeroHeader({required this.pet});
 
   final Pet pet;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_HeroHeader> createState() => _HeroHeaderState();
+}
+
+class _HeroHeaderState extends ConsumerState<_HeroHeader> {
+  bool _editingAvatar = false;
+  bool _editingProfile = false;
+  Pet get pet => widget.pet;
+
+  Future<void> _editAvatar() async {
+    if (_editingAvatar) return;
+    setState(() => _editingAvatar = true);
+    try {
+      await showAvatarSheet(context, ref, pet);
+    } finally {
+      if (mounted) setState(() => _editingAvatar = false);
+    }
+  }
+
+  Future<void> _editProfile() async {
+    if (_editingProfile) return;
+    setState(() => _editingProfile = true);
+    try {
+      await showEditPetSheet(context, pet: pet);
+    } finally {
+      if (mounted) setState(() => _editingProfile = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final reminders = ref.watch(petRemindersProvider(pet.id)).valueOrNull ??
         const <Reminder>[];
     final now = DateTime.now();
@@ -194,74 +253,93 @@ class _HeroHeader extends ConsumerWidget {
           borderRadius:
               BorderRadius.vertical(bottom: Radius.circular(AppRadius.card))),
       padding: const EdgeInsets.all(AppSpace.page),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Stack(clipBehavior: Clip.none, children: [
-          PetAvatar(pet: pet, size: 64, borderWidth: 3),
-          Positioned(
-              right: -8,
-              bottom: -8,
-              child: Material(
-                color: Colors.transparent,
-                shape: const CircleBorder(),
-                clipBehavior: Clip.antiAlias,
-                child: IconButton(
-                  onPressed: () => showAvatarSheet(context, ref, pet),
-                  tooltip: L.t('profile.edit'),
-                  constraints: const BoxConstraints(
-                      minWidth: AppSpace.tapTarget,
-                      minHeight: AppSpace.tapTarget),
-                  padding: const EdgeInsets.all(7),
-                  icon: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          shape: BoxShape.circle,
-                          border:
-                              Border.all(color: AppColors.surface, width: 2.5)),
-                      child: const Icon(Icons.photo_camera_rounded,
-                          size: 14, color: AppColors.surface)),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final compact = constraints.maxWidth < 320 ||
+            MediaQuery.textScalerOf(context).scale(14) > 19;
+        final editButton = TextButton(
+          onPressed: _editingProfile ? null : _editProfile,
+          style: TextButton.styleFrom(
+            minimumSize: const Size(48, 48),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpace.gapS),
+          ),
+          child: Text(L.t('profile.edit')),
+        );
+        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Material(
+            color: Colors.transparent,
+            borderRadius: AppRadius.tileBorder,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _editingAvatar ? null : _editAvatar,
+              child: SizedBox(
+                width: 84,
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpace.gapXs),
+                  child: Column(children: [
+                    Stack(children: [
+                      PetAvatar(pet: pet, size: 64, borderWidth: 3),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(AppSpace.gapXs),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                            border:
+                                Border.all(color: AppColors.surface, width: 2),
+                          ),
+                          child: const Icon(Icons.photo_camera_rounded,
+                              size: 14, color: AppColors.surface),
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: AppSpace.gapS),
+                    Text(
+                      L.t((pet.avatarUrl ?? '').trim().isEmpty
+                          ? 'avatar.add'
+                          : 'avatar.change'),
+                      textAlign: TextAlign.center,
+                      style: AppText.caption
+                          .copyWith(color: AppColors.primaryText),
+                    ),
+                  ]),
                 ),
-              )),
-        ]),
-        const SizedBox(width: 12),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Flexible(
-                child: Text(pet.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.hero)),
-            const SizedBox(width: 6),
-            GenderMark(gender: pet.gender),
-          ]),
-          const SizedBox(height: 4),
-          Text(_breedAgeLine(pet),
-              style: const TextStyle(
-                  fontSize: 12.5, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          SoftTag(
-              hasOverdue
-                  ? L.t('profile.healthAlert')
-                  : L.t('profile.healthGood'),
-              color: hasOverdue ? AppColors.warning : AppColors.success,
-              bg: hasOverdue ? AppColors.warningBg : AppColors.successBg,
-              icon: hasOverdue
-                  ? Icons.error_outline_rounded
-                  : Icons.verified_rounded),
-        ])),
-        const SizedBox(width: 4),
-        TextButton(
-            onPressed: () => showEditPetSheet(context, pet: pet),
-            style: TextButton.styleFrom(
-                minimumSize: const Size(0, AppSpace.tapTarget),
-                padding: const EdgeInsets.symmetric(horizontal: 8)),
-            child: Text(L.t('profile.edit'),
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600))),
-      ]),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Flexible(child: Text(pet.name, style: AppText.hero)),
+                  const SizedBox(width: 6),
+                  GenderMark(gender: pet.gender),
+                ]),
+                const SizedBox(height: 4),
+                Text(_breedAgeLine(pet),
+                    style: const TextStyle(
+                        fontSize: 12.5, color: AppColors.textSecondary)),
+                const SizedBox(height: 6),
+                SoftTag(
+                    hasOverdue
+                        ? L.t('profile.healthAlert')
+                        : L.t('profile.healthGood'),
+                    color: hasOverdue ? AppColors.warning : AppColors.success,
+                    bg: hasOverdue ? AppColors.warningBg : AppColors.successBg,
+                    icon: hasOverdue
+                        ? Icons.error_outline_rounded
+                        : Icons.verified_rounded),
+                if (compact) editButton,
+              ])),
+          if (!compact) ...[
+            const SizedBox(width: AppSpace.gapXs),
+            editButton,
+          ],
+        ]);
+      }),
     );
   }
 
@@ -571,6 +649,7 @@ class _InfoTab extends ConsumerWidget {
     return InfoRow(
       L.t(field),
       hasValue ? text : L.t('profile.notFilled'),
+      adaptive: true,
       valueColor: hasValue ? valueColor : AppColors.textSecondary,
     );
   }
@@ -578,15 +657,18 @@ class _InfoTab extends ConsumerWidget {
   static String? _birthdayValue(Pet pet) {
     final b = pet.birthday?.toLocal();
     if (b == null) return null;
-    final base = '${b.year}年${b.month}月${b.day}日';
+    final base = L.isZh
+        ? '${b.year}年${b.month}月${b.day}日'
+        : '${b.year}-${pad2(b.month)}-${pad2(b.day)}';
     final date = !pet.birthdayEstimated
         ? base
-        : L.isZh ? '$base（估算）' : '$base (est.)';
+        : L.isZh
+            ? '$base（估算）'
+            : '$base (est.)';
     // 按本地日历中的完整生日计算已满周岁，忽略时分秒。
     final now = DateTime.now();
     var years = now.year - b.year;
-    if (now.month < b.month ||
-        (now.month == b.month && now.day < b.day)) {
+    if (now.month < b.month || (now.month == b.month && now.day < b.day)) {
       years -= 1;
     }
     if (years < 0) return date;
@@ -595,7 +677,8 @@ class _InfoTab extends ConsumerWidget {
 
   // 也走统一的 petAgeLabel：原先用 Pet.ageInMonths，那个属性只看年月不看日，
   // 月末会多算一个月，和同屏头部显示的年龄可能差一岁。
-  static String? _ageValue(Pet pet) => petAgeLabel(pet.birthday, DateTime.now());
+  static String? _ageValue(Pet pet) =>
+      petAgeLabel(pet.birthday, DateTime.now());
 
   static String? _genderValue(Pet pet) {
     final g = (pet.gender ?? '').trim().toLowerCase();
@@ -1538,8 +1621,8 @@ class _ReminderRow extends ConsumerWidget {
     await ref.read(appActionsProvider).deleteReminder(reminder);
   }
 
-  static String _short(DateTime d) => '${d.year}-${pad2(d.month)}-${pad2(d.day)}';
-
+  static String _short(DateTime d) =>
+      '${d.year}-${pad2(d.month)}-${pad2(d.day)}';
 }
 
 // ------------------------------------------------------------------ 遛狗记录
@@ -2038,8 +2121,7 @@ class _ExpenseTab extends ConsumerWidget {
       ),
       error: (e, _) => Padding(
         padding: const EdgeInsets.all(AppSpace.page),
-        child: _PlainHint(
-            icon: Icons.error_outline_rounded, text: L.error(e)),
+        child: _PlainHint(icon: Icons.error_outline_rounded, text: L.error(e)),
       ),
       data: (s) => ListView(
         padding: const EdgeInsets.fromLTRB(
