@@ -280,7 +280,7 @@ void main() {
     await tester.ensureVisible(button);
     await tester.tap(button);
     await tester.pump();
-    actions.done.completeError(const SyncApiException(405, 'Method Not Allowed'));
+    actions.done.completeError(SyncApiException(405, 'Method Not Allowed'));
     await tester.pumpAndSettle();
     expect(find.text(L.t('account.deleteUnavailable')), findsOneWidget);
     expect(find.text(L.t('account.deleteFailed')), findsNothing);
