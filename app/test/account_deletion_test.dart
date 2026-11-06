@@ -267,6 +267,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('method-not-allowed shows "unavailable", not "check network"',
+      (tester) async {
+    late _Actions actions;
+    await tester.pumpWidget(ProviderScope(overrides: [
+      appActionsProvider.overrideWith((ref) => actions = _Actions(ref)),
+    ], child: const MaterialApp(home: DeleteAccountPage())));
+    final button =
+        find.widgetWithText(FilledButton, L.t('account.deleteForever'));
+    await tester.enterText(find.byType(TextField), 'DELETE');
+    await tester.pump();
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pump();
+    actions.done.completeError(const SyncApiException(405, 'Method Not Allowed'));
+    await tester.pumpAndSettle();
+    expect(find.text(L.t('account.deleteUnavailable')), findsOneWidget);
+    expect(find.text(L.t('account.deleteFailed')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('success returns to settings on a small screen with large text',
       (tester) async {
     tester.view.physicalSize = const Size(320, 568);

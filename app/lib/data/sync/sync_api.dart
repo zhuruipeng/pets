@@ -26,6 +26,11 @@ class SyncApiException implements Exception {
   /// 服务端限流（如验证码 60 秒内重复请求）。
   bool get isTooManyRequests => statusCode == 429;
 
+  /// 服务端尚未开放该接口（405 Method Not Allowed / 404 Not Found）。
+  /// 与「网络问题」区分开：这种是服务端确实没部署对应路由，
+  /// 提示用户重试网络是无意义的，应明确告知「功能暂未开放」。
+  bool get isMethodNotAllowed => statusCode == 405 || statusCode == 404;
+
   @override
   String toString() => 'SyncApiException($statusCode): $message';
 }

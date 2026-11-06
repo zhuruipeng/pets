@@ -76,11 +76,15 @@ class _DeleteAccountPageState extends ConsumerState<DeleteAccountPage> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = L.t(error is SyncApiException &&
-                error.statusCode == 409 &&
-                error.message == 'account_has_shared_pets'
-            ? 'account.sharedBlock'
-            : 'account.deleteFailed');
+        if (error is SyncApiException &&
+            error.statusCode == 409 &&
+            error.message == 'account_has_shared_pets') {
+          _error = L.t('account.sharedBlock');
+        } else if (error is SyncApiException && error.isMethodNotAllowed) {
+          _error = L.t('account.deleteUnavailable');
+        } else {
+          _error = L.t('account.deleteFailed');
+        }
       });
     }
   }
