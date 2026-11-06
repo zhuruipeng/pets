@@ -269,6 +269,7 @@ App 备案四件套（包名、证书 MD5/SHA-256、域名）见 `docs/store/上
 ### 已完成
 
 - [x] 2026-11-06 Android 国内版 `0.1.13+23` 正式签名上线：档案编辑收口（保存失败保留草稿、未保存退出提醒、键盘与错误定位、头像/生日年龄/长文本显示）。复用 CI 产物 `d4056b9` 重新用原 `upload-keystore.jks` 签名，APK 69,472,578 字节、SHA-256 `05467e4f…bbd26`，公网完整下载与证书一致，旧包 `0.1.12+22` 仍可下载；服务端仅改国内四个版本字段并只重启 `pet-api`，海外与 ERP 未动，14 表结构指纹前后一致、重启错误 0。详见 [发布状态](docs/pet-cn-release-status.md)。手机已覆盖安装到 `0.1.13+23` 并确认本地数据保留。
+- [x] 2026-11-06 账户注销服务端两区部署 + 客户端 405/404 提示修复：注销接口 `DELETE /api/v1/me` 此前只存在于代码仓库、未部署，线上返回 405（`Allow: GET`），客户端误报「检查网络后重试」。已把 `account_deletion.py`、`privacy.py`、5 个更新文件及 2 个法律页部署到中国区 `pet-api` 与海外区 `pet-api-intl`，两区重启后接口由 405 → 401、`deleted_sessions`/`erased_identities`/`pending_media_deletions` 三表幂等建好、错误日志 0、`/health` 200，ERP 未动；备份在 `/root/pet-release-backups/deploy-deletion-20261106T185728Z`（中国区）与 `deploy-deletion-intl-20261106T191828Z`（海外区）。客户端 `bc6ee1b` 新增 `account.deleteUnavailable` 文案与 `SyncApiException.isMethodNotAllowed`（405/404），把「服务端未开放」与「网络问题」分开提示，含回归测试；`main` 已推 GitHub。该客户端修复需下次出包才能到手机。
 - [x] 2026-10-14 档案基础信息缺失展示：保留九行信息，缺失值统一为本地化“未填写”及次要文字色；合法 0、false、unknown 保持原逻辑。仅两个 Dart 改动文件静态检查通过，原依赖锁定版本下构建海外 iOS 0.1.10+20 IPA 并发布，公网完整下载哈希一致；手动功能验收待用户完成，见 [发布记录](docs/2026-10-14-档案未填写展示发布.md)。
 - [x] 2026-10-12 两项费用兼容性 P0：schema 7/8 金额同步适配、stale 权威快照回写及上传中编辑保护；schema 7 ZIP 金额转换并保留附件与关联记录。合并同期日期容错后完整 Flutter 404 项通过，服务端 340 项（含独立 PostgreSQL 并发 3 项）通过，静态检查无问题。费用兼容性真机门禁、两区服务端部署及 Sideloadly 用海外 iOS IPA 发布完成，见 [验收记录](docs/2026-10-12-费用兼容性验收.md)。
 - [x] 数据模型设计 · 区域抽象层 · 单位换算 · 免疫规则分区域集
