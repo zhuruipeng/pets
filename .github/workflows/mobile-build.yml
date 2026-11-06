@@ -2,7 +2,7 @@ name: Build pet app packages
 
 on:
   push:
-    branches: [codex/pet-profile-p01-p11]
+    branches: [main, codex/pet-profile-p01-p11]
     paths:
       - app/**
       - .github/workflows/mobile-build.yml
@@ -84,14 +84,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp "app/build/app/outputs/flutter-apk/app-${{ matrix.region }}-release.apk" "dist/MyPet-${{ matrix.region }}-0.1.13+23-android-validation.apk"
+          cp "app/build/app/outputs/flutter-apk/app-${{ matrix.region }}-release.apk" "dist/MyPet-${{ matrix.region }}-0.1.14+24-android-validation.apk"
       - name: Package unsigned iOS IPA
         if: matrix.platform == 'ios'
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/ipa-${{ matrix.region }}/Payload" dist
           ditto app/build/ios/iphoneos/Runner.app "$RUNNER_TEMP/ipa-${{ matrix.region }}/Payload/Runner.app"
-          (cd "$RUNNER_TEMP/ipa-${{ matrix.region }}" && ditto --norsrc -c -k --keepParent Payload "$GITHUB_WORKSPACE/dist/MyPet-${{ matrix.region }}-0.1.13+23-ios-unsigned.ipa")
+          (cd "$RUNNER_TEMP/ipa-${{ matrix.region }}" && ditto --norsrc -c -k --keepParent Payload "$GITHUB_WORKSPACE/dist/MyPet-${{ matrix.region }}-0.1.14+24-ios-unsigned.ipa")
       - name: Record package checksum
         shell: bash
         run: |
@@ -102,7 +102,7 @@ jobs:
               if path.suffix in ('.apk', '.ipa'):
                   digest = hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()
                   path.with_suffix(path.suffix + '.sha256').write_text(f'{digest}  {path.name}\n')
-          Path('dist/SOURCE.txt').write_text(f"Commit: {os.environ['GITHUB_SHA']}\nVersion: 0.1.13+23\nFlutter: 3.47.9\nAndroid: validation signing; iOS: unsigned.\n")
+          Path('dist/SOURCE.txt').write_text(f"Commit: {os.environ['GITHUB_SHA']}\nVersion: 0.1.14+24\nFlutter: 3.47.9\nAndroid: validation signing; iOS: unsigned.\n")
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -133,7 +133,7 @@ jobs:
           gh run download "$GITHUB_RUN_ID" --dir packages
           mapfile -t assets < <(find packages -type f \( -name '*.apk' -o -name '*.ipa' -o -name '*.sha256' \) | sort)
           test "${#assets[@]}" -eq 8
-          gh release create "pet-profile-0.1.13-build-$GITHUB_RUN_NUMBER" "${assets[@]}" \
+          gh release create "pet-profile-0.1.14-build-$GITHUB_RUN_NUMBER" "${assets[@]}" \
             --target "$GITHUB_SHA" --prerelease \
-            --title "我的宠物 0.1.13+23 · 档案改进验证包" \
+            --title "我的宠物 0.1.14+24 · 注销提示修复验证包" \
             --notes-file docs/pet-profile-build.md
