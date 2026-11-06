@@ -34,6 +34,12 @@ env/
 .pytest_cache/
 server/private-media/
 
+# ---- 发布证据（APK / 签名 / 线上核对结果，勿入库）----
+release-evidence/
+*.apk
+*.apk.idsig
+*.ipa
+
 # ---- 系统 ----
 .DS_Store
 Thumbs.db
